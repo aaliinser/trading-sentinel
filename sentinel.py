@@ -1,6 +1,5 @@
 import os, json, time, requests
 
-# ========== MODARK FOREX SENTINEL v3.0 ==========
 TG_TOKEN = os.environ.get("TG_TOKEN", "")
 TG_CHAT  = os.environ.get("TG_CHAT", "")
 
@@ -91,16 +90,27 @@ def scan_pair(symbol):
 
     for s in sups:
         if abs(price-s)/price <= TOUCH_TOL and remember(f"sup_{name}_{s:.5f}_{last_t}"):
-            send(f"📊 {name}: 🟢 لمس منطقة دعم {s:.5f} | ⏱ {TRADE_NOTE}")
+            send(f"📊 {name}: 🟢 لمس دعم {s:.5f} | ⏱ {TRADE_NOTE}")
     for r in ress:
         if abs(price-r)/price <= TOUCH_TOL and remember(f"res_{name}_{r:.5f}_{last_t}"):
-            send(f"📊 {name}: 🔴 لمس منطقة مقاومة {r:.5f} | ⏱ {TRADE_NOTE}")
+            send(f"📊 {name}: 🔴 لمس مقاومة {r:.5f} | ⏱ {TRADE_NOTE}")
     if rsi is not None and rsi >= 80 and remember(f"rsih_{name}_{last_t}"):
-        send(f"📊 {name}: ⚡ RSI تشبع شرائي ({rsi:.1f}) | ⏱ {TRADE_NOTE}")
+        send(f"📊 {name}: ⚡ RSI تشبع شرائي {rsi:.1f} | ⏱ {TRADE_NOTE}")
     if rsi is not None and rsi <= 20 and remember(f"rsil_{name}_{last_t}"):
-        send(f"📊 {name}: ⚡ RSI تشبع بيعي ({rsi:.1f}) | ⏱ {TRADE_NOTE}")
+        send(f"📊 {name}: ⚡ RSI تشبع بيعي {rsi:.1f} | ⏱ {TRADE_NOTE}")
     if sma is not None:
         if closes[-2] < sma <= price and remember(f"smau_{name}_{last_t}"):
-            send(f"📊 {name}: 📈 تقاطع فوق SMA{SMA_PERIOD} — زخم صاعد | ⏱ {TRADE_NOTE}")
+            send(f"📊 {name}: 📈 تقاطع صاعد فوق SMA{SMA_PERIOD} | ⏱ {TRADE_NOTE}")
         elif closes[-2] > sma >= price and remember(f"smad_{name}_{last_t}"):
-            send(f"📊 {name}: 📉 تقاطع تحت SMA{SMA_PERIOD} — زخم
+            send(f"📊 {name}: 📉 تقاطع هابط تحت SMA{SMA_PERIOD} | ⏱ {TRADE_NOTE}")
+
+if __name__ == "__main__":
+    ok, fail = 0, 0
+    for pair in FOREX_PAIRS:
+        try:
+            scan_pair(pair); ok += 1
+        except Exception as e:
+            fail += 1; print("⚠️", pair, type(e).__name__, e)
+        time.sleep(0.8)
+    json.dump(mem, open(MEM_FILE, "w"))
+    print(f"✅ اكتمل الفحص: {ok} زوج تمام / {fail} تجاوزها")
