@@ -415,6 +415,9 @@ def scan(sym):
 
 if __name__ == "__main__":
     start = time.time()
+        if mem.get("boot") != day_key():
+        mem["boot"] = day_key()
+        send("🌅 غيث v2.0 صاحي — يوم تداول جديد")
     seen = 0
     while time.time() < start + 300:
         try:
