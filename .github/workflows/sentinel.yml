@@ -1,0 +1,29 @@
+name: Sentinel
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Restore memory
+        uses: actions/cache/restore@v4
+        with:
+          path: memory.json
+          key: mem-${{ github.run_id }}
+          restore-keys: mem-
+      - name: Run strategy
+        run: pip install requests && python sentinel.py
+        env:
+          TG_TOKEN: ${{ secrets.TG_TOKEN }}
+          TG_CHAT: ${{ secrets.TG_CHAT }}
+      - name: Save memory
+        uses: actions/cache/save@v4
+        with:
+          path: memory.json
+          key: mem-${{ github.run_id }}
