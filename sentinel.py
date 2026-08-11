@@ -102,38 +102,4 @@ def ema_last(vals, p):
     return e
 
 def rsi_last2(closes, p=14):
-    if len(closes) < p + 2:
-        return None, None
-    gs = []
-    ls = []
-    for i in range(1, len(closes)):
-        d = closes[i] - closes[i-1]
-        gs.append(max(d, 0))
-        ls.append(max(-d, 0))
-    ag = sum(gs[:p]) / p
-    al = sum(ls[:p]) / p
-    vals = []
-    for i in range(p, len(gs)):
-        ag = (ag * (p-1) + gs[i]) / p
-        al = (al * (p-1) + ls[i]) / p
-        if al == 0:
-            vals.append(100.0)
-        else:
-            vals.append(100 - 100/(1 + ag/al))
-    if len(vals) < 2:
-        return None, None
-    return vals[-2], vals[-1]
-
-def atr_series(candles, p=14):
-    if len(candles) < p + 2:
-        return []
-    trs = []
-    for i in range(1, len(candles)):
-        pc = candles[i-1]["c"]
-        h = candles[i]["h"]
-        l = candles[i]["l"]
-        trs.append(max(
-            h - l,
-            abs(h - pc),
-            abs(l - pc)))
-   
+    if
