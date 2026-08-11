@@ -16,10 +16,13 @@ MEMF = "memory.json"
 HOST = "https://query1.finance.yahoo.com"
 PATH = "/v8/finance/chart/"
 PAIRS = [
-    "EURUSD=X", "USDJPY=X", "GBPUSD=X",
-    "USDCNH=X", "AUDUSD=X", "NZDUSD=X",
-    "USDCAD=X", "USDCHF=X", "USDMXN=X",
-    "USDSEK=X",
+    "USDJPY=X", "AUDJPY=X", "EURJPY=X",
+    "EURUSD=X", "GBPUSD=X", "EURGBP=X",
+    "CADJPY=X", "EURCAD=X", "GBPCAD=X",
+    "AUDCHF=X", "AUDUSD=X", "USDCHF=X",
+    "CHFJPY=X", "AUDCAD=X", "USDCAD=X",
+    "EURAUD=X", "EURCHF=X", "GBPJPY=X",
+    "GBPCHF=X", "GBPAUD=X",
 ]
 mem = {}
 if os.path.exists(MEMF):
