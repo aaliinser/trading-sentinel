@@ -131,4 +131,152 @@ def find_pivot_levels(candles, lb):
             res.append(candles[i]["h"])
         if candles[i]["l"] == lo:
             sup.append(candles[i]["l"])
-    return sup,
+    return sup, res
+
+def cluster_levels(levels, tol):
+    if not levels:
+        return []
+    levels = sorted(levels)
+    clusters = [[levels[0]]]
+    for lv in levels[1:]:
+        last = clusters[-1][-1]
+        if abs(lv - last) / lv <= tol:
+            clusters[-1].append(lv)
+        else:
+            clusters.append([lv])
+    return [sum(c)/len(c) for c in clusters]
+
+def scan_pair(symbol):
+    name = symbol.replace("=X", "")
+    candles = fetch_candles(symbol)
+    if len(candles) < 120:
+        return 0
+    closed = candles[:-1]
+    last_t = closed[-1]["t"]
+    key = "last_" + name
+    if mem.get(key) == last_t:
+        return 0
+    mem[key] = last_t
+
+    closes = [x["c"] for x in closed]
+    k = closed[-1]
+    o = k["o"]
+    h = k["h"]
+    l = k["l"]
+    c = k["c"]
+    sma35 = sma_at(closes, 35)
+    sma50 = sma_at(closes, 50)
+    sma100 = sma_at(closes, 100)
+    rsi = calc_rsi(closes, RSI_PERIOD)
+    rsi_prev = calc_rsi(closes[:-1], RSI_PERIOD)
+    if None in (sma35, sma50, sma100, rsi, rsi_prev):
+        return 0
+
+    sup, res = find_pivot_levels(
+        closed[-200:], PIVOT_LOOKBACK
+    )
+    sups = cluster_levels(sup, LEVEL_TOL)
+    ress = cluster_levels(res, LEVEL_TOL)
+
+    rng = (h - l) or 1e-9
+    body = c - o
+
+    cs = 0
+    cr = []
+    if sma50 > sma100:
+        cs += 1
+        cr.append("ترند أعلى صاعد")
+    if l <= sma35 <= c:
+        cs += 1
+        cr.append("ارتداد من SMA35")
+    for s in sups[-4:]:
+        if l <= s*(1+NEAR_TOL) and c > s:
+            cs += 1
+            cr.append("ارتداد من دعم")
+            break
+    if body > 0 and body >= 0.5*rng:
+        cs += 1
+        cr.append("شمعة صاعدة قوية")
+    if rsi_prev < 30 <= rsi:
+        cs += 1
+        cr.append("خروج من تشبع بيعي")
+    elif 45 <= rsi <= 65:
+        cs += 1
+        cr.append("RSI صحية للصعود")
+
+    ps = 0
+    pr = []
+    if sma50 < sma100:
+        ps += 1
+        pr.append("ترند أعلى هابط")
+    if h >= sma35 >= c:
+        ps += 1
+        pr.append("رفض من SMA35")
+    for r in ress[-4:]:
+        if h >= r*(1-NEAR_TOL) and c < r:
+            ps += 1
+            pr.append("رفض من مقاومة")
+            break
+    if body < 0 and -body >= 0.5*rng:
+        ps += 1
+        pr.append("شمعة هابطة قوية")
+    if rsi_prev > 70 >= rsi:
+        ps += 1
+        pr.append("خروج من تشبع شرائي")
+    elif 35 <= rsi <= 55:
+        ps += 1
+        pr.append("RSI صحية للهبوط")
+
+    if cs == ps:
+        return 0
+    if cs > ps:
+        side = "صعود 🟢 (CALL)"
+        score = cs
+        reasons = cr
+    else:
+        side = "هبوط 🔴 (PUT)"
+        score = ps
+        reasons = pr
+    if score < MIN_SCORE:
+        return 0
+    cd_key = "cd_" + name
+    now = time.time()
+    if now - mem.get(cd_key, 0) < COOLDOWN_SEC:
+        return 0
+    mem[cd_key] = int(now)
+
+    stars = "⭐" * score
+    why = " + ".join(reasons)
+    msg = (
+        "📊 توصية تداول جديدة\n"
+        "\n"
+        "• الزوج: " + name + "\n"
+        "• الفريم: " + TF_LABEL + "\n"
+        "• مدة الصفقة: " + DURATION + "\n"
+        "• الوقت: " + now_hhmm() + "\n"
+        "• الاتجاه: " + side + "\n"
+        "• القوة: " + stars
+        + " (" + str(score) + "/5)\n"
+        "• الأسباب: " + why + "\n"
+        "\n"
+        "💡 توصية آلية تعليمية"
+        " — القرار النهائي لك"
+    )
+    send(msg)
+    return 1
+
+if __name__ == "__main__":
+    ok = 0
+    fail = 0
+    sent = 0
+    for pair in FOREX_PAIRS:
+        try:
+            sent += scan_pair(pair)
+            ok += 1
+        except Exception as e:
+            fail += 1
+            print("⚠️", pair, type(e).__name__, e)
+        time.sleep(0.8)
+    json.dump(mem, open(MEM_FILE, "w"))
+    print("✅ فحص:", ok, "تمام /",
+          fail, "تجاوز / 🎯 إشارات:", sent)
