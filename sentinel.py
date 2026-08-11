@@ -3,12 +3,12 @@ import os, json, time, requests
 TG_TOKEN = os.environ.get("TG_TOKEN", "")
 TG_CHAT  = os.environ.get("TG_CHAT", "")
 
-TIMEFRAME  = "30m"
-RANGE      = "5d"
+TIMEFRAME, RANGE = "30m", "7d"
 TRADE_NOTE = "فريم 30د / صفقة 15د"
-
-SMA_PERIOD, RSI_PERIOD, PIVOT_LOOKBACK = 35, 14, 5
-LEVEL_TOL, TOUCH_TOL = 0.0015, 0.0008
+RSI_PERIOD, PIVOT_LOOKBACK = 14, 6
+LEVEL_TOL, NEAR_TOL = 0.0015, 0.0012
+MIN_SCORE = 3
+COOLDOWN_SEC = 4 * 3600
 MEM_FILE = "memory.json"
 
 FOREX_PAIRS = [
@@ -47,10 +47,13 @@ def fetch_candles(symbol):
     out = []
     for i in range(len(ts)):
         if None in (q["open"][i], q["high"][i], q["low"][i], q["close"][i]): continue
-        out.append({"t": ts[i]*1000, "h": q["high"][i], "l": q["low"][i], "c": q["close"][i]})
+        out.append({"t": ts[i]*1000, "o": q["open"][i], "h": q["high"][i],
+                    "l": q["low"][i], "c": q["close"][i]})
     return out
 
-def calc_sma(closes, p): return sum(closes[-p:]) / p if len(closes) >= p else None
+def sma_at(closes, p, ago=0):
+    e = len(closes) - ago
+    return sum(closes[e-p:e]) / p if e >= p else None
 
 def calc_rsi(closes, p):
     if len(closes) < p + 1: return None
@@ -80,37 +83,53 @@ def cluster_levels(levels, tol):
 def scan_pair(symbol):
     name = symbol.replace("=X", "")
     candles = fetch_candles(symbol)
-    if len(candles) < SMA_PERIOD + 5: return
+    if len(candles) < 120: return 0
     closed = candles[:-1]
-    closes = [k["c"] for k in closed]
-    price, last_t = closes[-1], closed[-1]["t"]
-    sma, rsi = calc_sma(closes, SMA_PERIOD), calc_rsi(closes, RSI_PERIOD)
-    sup, res = find_pivot_levels(closed, PIVOT_LOOKBACK)
-    sups, ress = cluster_levels(sup, LEVEL_TOL), cluster_levels(res, LEVEL_TOL)
+    last_t = closed[-1]["t"]
+    if mem.get(f"last_{name}") == last_t: return 0
+    mem[f"last_{name}"] = last_t
 
-    for s in sups:
-        if abs(price-s)/price <= TOUCH_TOL and remember(f"sup_{name}_{s:.5f}_{last_t}"):
-            send(f"📊 {name}: 🟢 لمس دعم {s:.5f} | ⏱ {TRADE_NOTE}")
-    for r in ress:
-        if abs(price-r)/price <= TOUCH_TOL and remember(f"res_{name}_{r:.5f}_{last_t}"):
-            send(f"📊 {name}: 🔴 لمس مقاومة {r:.5f} | ⏱ {TRADE_NOTE}")
-    if rsi is not None and rsi >= 80 and remember(f"rsih_{name}_{last_t}"):
-        send(f"📊 {name}: ⚡ RSI تشبع شرائي {rsi:.1f} | ⏱ {TRADE_NOTE}")
-    if rsi is not None and rsi <= 20 and remember(f"rsil_{name}_{last_t}"):
-        send(f"📊 {name}: ⚡ RSI تشبع بيعي {rsi:.1f} | ⏱ {TRADE_NOTE}")
-    if sma is not None:
-        if closes[-2] < sma <= price and remember(f"smau_{name}_{last_t}"):
-            send(f"📊 {name}: 📈 تقاطع صاعد فوق SMA{SMA_PERIOD} | ⏱ {TRADE_NOTE}")
-        elif closes[-2] > sma >= price and remember(f"smad_{name}_{last_t}"):
-            send(f"📊 {name}: 📉 تقاطع هابط تحت SMA{SMA_PERIOD} | ⏱ {TRADE_NOTE}")
+    closes = [x["c"] for x in closed]
+    o, h, l, c = closed[-1]["o"], closed[-1]["h"], closed[-1]["l"], closed[-1]["c"]
+    sma35, sma50, sma100 = sma_at(closes,35), sma_at(closes,50), sma_at(closes,100)
+    rsi, rsi_prev = calc_rsi(closes, RSI_PERIOD), calc_rsi(closes[:-1], RSI_PERIOD)
+    if None in (sma35, sma50, sma100, rsi, rsi_prev): return 0
+
+    sups = cluster_levels(find_pivot_levels(closed[-200:], PIVOT_LOOKBACK)[0], LEVEL_TOL)
+    ress = cluster_levels(find_pivot_levels(closed[-200:], PIVOT_LOOKBACK)[1], LEVEL_TOL)
+
+    rng = (h - l) or 1e-9
+    body = c - o
+
+    cs, cr = 0, []
+    if sma50 > sma100: cs += 1; cr.append("ترند أعلى صاعد")
+    if l <= sma35 <= c: cs += 1; cr.append("ارتداد من SMA35")
+    if any(l <= s*(1+NEAR_TOL) and c > s for s in sups[-4:]): cs += 1; cr.append("ارتداد من دعم")
+    if body > 0 and body >= 0.5*rng: cs += 1; cr.append("شمعة صاعدة قوية")
+    if (rsi_prev < 30 <= rsi) or (45 <= rsi <= 65): cs += 1; cr.append("RSI صحية للصعود")
+
+    ps, pr = 0, []
+    if sma50 < sma100: ps += 1; pr.append("ترند أعلى هابط")
+    if h >= sma35 >= c: ps += 1; pr.append("رفض من SMA35")
+    if any(h >= r*(1-NEAR_TOL) and c < r for r in ress[-4:]): ps += 1; pr.append("رفض من مقاومة")
+    if body < 0 and -body >= 0.5*rng: ps += 1; cr_note = "شمعة هابطة قوية"; pr.append(cr_note)
+    if (rsi_prev > 70 >= rsi) or (35 <= rsi <= 55): ps += 1; pr.append("RSI صحية للهبوط")
+
+    if cs == ps: return 0
+    side, score, reasons = ("📈 CALL", cs, cr) if cs > ps else ("📉 PUT", ps, pr)
+    if score < MIN_SCORE: return 0
+    if time.time() - mem.get(f"cd_{name}", 0) < COOLDOWN_SEC: return 0
+    mem[f"cd_{name}"] = int(time.time())
+    send(f"🎯 قناص | {name} | {side} | ⭐ {score}/5 | {' + '.join(reasons)} | ⏱ {TRADE_NOTE}")
+    return 1
 
 if __name__ == "__main__":
-    ok, fail = 0, 0
+    ok, fail, sent = 0, 0, 0
     for pair in FOREX_PAIRS:
         try:
-            scan_pair(pair); ok += 1
+            sent += scan_pair(pair); ok += 1
         except Exception as e:
             fail += 1; print("⚠️", pair, type(e).__name__, e)
         time.sleep(0.8)
     json.dump(mem, open(MEM_FILE, "w"))
-    print(f"✅ اكتمل الفحص: {ok} زوج تمام / {fail} تجاوزها")
+    print(f"✅ فحص: {ok} تمام / {fail} تجاوز / 🎯 إشارات قناص: {sent}")
