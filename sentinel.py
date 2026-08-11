@@ -1,12 +1,25 @@
 import os, json, time, requests
 
+# ========== MODARK FOREX SENTINEL v3.0 ==========
 TG_TOKEN = os.environ.get("TG_TOKEN", "")
 TG_CHAT  = os.environ.get("TG_CHAT", "")
-SYMBOL   = os.environ.get("SYMBOL", "BTCUSDT")
-INTERVAL = os.environ.get("INTERVAL", "1m")
+
+TIMEFRAME  = "30m"
+RANGE      = "5d"
+TRADE_NOTE = "فريم 30د / صفقة 15د"
+
 SMA_PERIOD, RSI_PERIOD, PIVOT_LOOKBACK = 35, 14, 5
 LEVEL_TOL, TOUCH_TOL = 0.0015, 0.0008
 MEM_FILE = "memory.json"
+
+FOREX_PAIRS = [
+    "EURUSD=X","GBPUSD=X","USDJPY=X","USDCHF=X","AUDUSD=X","USDCAD=X","NZDUSD=X",
+    "EURGBP=X","EURJPY=X","EURCHF=X","EURAUD=X","EURCAD=X","EURNZD=X",
+    "GBPJPY=X","GBPCHF=X","GBPAUD=X","GBPCAD=X","GBPNZD=X",
+    "AUDJPY=X","AUDCAD=X","AUDCHF=X","AUDNZD=X",
+    "CADJPY=X","CADCHF=X","NZDJPY=X","NZDCAD=X","NZDCHF=X","CHFJPY=X",
+    "USDTRY=X","USDMXN=X","USDZAR=X","USDSGD=X","USDSEK=X","USDNOK=X","USDCNH=X",
+]
 
 mem = {}
 if os.path.exists(MEM_FILE):
@@ -25,11 +38,18 @@ def send(msg):
                           json={"chat_id": TG_CHAT, "text": "🚨 " + msg}, timeout=10)
         except Exception as e: print("TG ERR:", e)
 
-def fetch_candles():
-    r = requests.get("https://api.binance.com/api/v3/klines",
-                     params={"symbol": SYMBOL, "interval": INTERVAL, "limit": 300}, timeout=10)
+def fetch_candles(symbol):
+    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
+    r = requests.get(url, params={"interval": TIMEFRAME, "range": RANGE},
+                     headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
     r.raise_for_status()
-    return [{"t": c[0], "h": float(c[2]), "l": float(c[3]), "c": float(c[4])} for c in r.json()]
+    d = r.json()["chart"]["result"][0]
+    ts, q = d["timestamp"], d["indicators"]["quote"][0]
+    out = []
+    for i in range(len(ts)):
+        if None in (q["open"][i], q["high"][i], q["low"][i], q["close"][i]): continue
+        out.append({"t": ts[i]*1000, "h": q["high"][i], "l": q["low"][i], "c": q["close"][i]})
+    return out
 
 def calc_sma(closes, p): return sum(closes[-p:]) / p if len(closes) >= p else None
 
@@ -58,33 +78,29 @@ def cluster_levels(levels, tol):
         else: clusters.append([lv])
     return [sum(c)/len(c) for c in clusters]
 
-def scan():
-    candles = fetch_candles()
-    closed  = candles[:-1]
-    closes  = [k["c"] for k in closed]
+def scan_pair(symbol):
+    name = symbol.replace("=X", "")
+    candles = fetch_candles(symbol)
+    if len(candles) < SMA_PERIOD + 5: return
+    closed = candles[:-1]
+    closes = [k["c"] for k in closed]
     price, last_t = closes[-1], closed[-1]["t"]
     sma, rsi = calc_sma(closes, SMA_PERIOD), calc_rsi(closes, RSI_PERIOD)
-
-    sups = cluster_levels(find_pivot_levels(closed, PIVOT_LOOKBACK)[0], LEVEL_TOL)
-    ress = cluster_levels(find_pivot_levels(closed, PIVOT_LOOKBACK)[1], LEVEL_TOL)
+    sup, res = find_pivot_levels(closed, PIVOT_LOOKBACK)
+    sups, ress = cluster_levels(sup, LEVEL_TOL), cluster_levels(res, LEVEL_TOL)
 
     for s in sups:
-        if abs(price-s)/price <= TOUCH_TOL and remember(f"sup_{s:.5f}_{last_t}"):
-            send(f"{SYMBOL}: السعر يلمس منطقة دعم {s:.5f}")
+        if abs(price-s)/price <= TOUCH_TOL and remember(f"sup_{name}_{s:.5f}_{last_t}"):
+            send(f"📊 {name}: 🟢 لمس منطقة دعم {s:.5f} | ⏱ {TRADE_NOTE}")
     for r in ress:
-        if abs(price-r)/price <= TOUCH_TOL and remember(f"res_{r:.5f}_{last_t}"):
-            send(f"{SYMBOL}: السعر يلمس منطقة مقاومة {r:.5f}")
-    if rsi is not None and rsi >= 80 and remember(f"rsih_{last_t}"):
-        send(f"{SYMBOL}: RSI بتشبع شرائي ({rsi:.1f})")
-    if rsi is not None and rsi <= 20 and remember(f"rsil_{last_t}"):
-        send(f"{SYMBOL}: RSI بتشبع بيعي ({rsi:.1f})")
+        if abs(price-r)/price <= TOUCH_TOL and remember(f"res_{name}_{r:.5f}_{last_t}"):
+            send(f"📊 {name}: 🔴 لمس منطقة مقاومة {r:.5f} | ⏱ {TRADE_NOTE}")
+    if rsi is not None and rsi >= 80 and remember(f"rsih_{name}_{last_t}"):
+        send(f"📊 {name}: ⚡ RSI تشبع شرائي ({rsi:.1f}) | ⏱ {TRADE_NOTE}")
+    if rsi is not None and rsi <= 20 and remember(f"rsil_{name}_{last_t}"):
+        send(f"📊 {name}: ⚡ RSI تشبع بيعي ({rsi:.1f}) | ⏱ {TRADE_NOTE}")
     if sma is not None:
-        if closes[-2] < sma <= price and remember(f"smau_{last_t}"):
-            send(f"{SYMBOL}: تقاطع فوق خط SMA{SMA_PERIOD}")
-        elif closes[-2] > sma >= price and remember(f"smad_{last_t}"):
-            send(f"{SYMBOL}: تقاطع تحت خط SMA{SMA_PERIOD}")
-
-if __name__ == "__main__":
-    scan()
-    json.dump(mem, open(MEM_FILE, "w"))
-    print("✅ اكتمل الفحص")
+        if closes[-2] < sma <= price and remember(f"smau_{name}_{last_t}"):
+            send(f"📊 {name}: 📈 تقاطع فوق SMA{SMA_PERIOD} — زخم صاعد | ⏱ {TRADE_NOTE}")
+        elif closes[-2] > sma >= price and remember(f"smad_{name}_{last_t}"):
+            send(f"📊 {name}: 📉 تقاطع تحت SMA{SMA_PERIOD} — زخم
