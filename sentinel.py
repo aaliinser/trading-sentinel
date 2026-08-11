@@ -40,7 +40,8 @@ def send(msg):
         except Exception as e: print("TG ERR:", e)
 
 def fetch_candles(symbol):
-    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
+        url = ("https://query1.finance.yahoo.com"
+           f"/v8/finance/chart/{symbol}")
     r = requests.get(url, params={"interval": TIMEFRAME, "range": RANGE},
                      headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
     r.raise_for_status()
