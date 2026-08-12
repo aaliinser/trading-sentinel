@@ -448,4 +448,4 @@ if __name__ == "__main__":
                 time.sleep(0.5)
             json.dump(mem, open(MEMF, "w"))
             print("✅ دورة:", ok, "ok /", fl, "err / 🎯", st)
-        time.sleep(60)
+        json.dump(mem, open(MEMF, "w"))         time.sleep(60)
