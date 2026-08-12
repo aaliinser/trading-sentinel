@@ -338,7 +338,7 @@ def scan(sym):
         return 0
     if abs(c-e15) > 1.5*atr:
         return 0
-    if not kz(ct):
+    if False:
         return 0
     l3 = cd[-3:]
     red3 = all(x["c"] < x["o"] for x in l3)
