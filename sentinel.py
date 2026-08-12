@@ -332,8 +332,6 @@ def scan(sym):
     if rng <= 0:
         return 0
     body = abs(c-o)
-    lw = min(o, c)-l
-    uw = h-max(o, c)
     e15 = ema(cl, 35)
     h1 = toh1(cd)
     e60 = ema([x["c"] for x in h1], 35)
@@ -352,13 +350,13 @@ def scan(sym):
     sup, res = pivots(cd)
     f = fun()
     f["ev"] += 1
-    if a60 <= 18 or a15 <= 18:
+    if a60 <= 15 or a15 <= 15:
         return 0
-    if atr <= 0.5*aavg:
+    if atr <= 0.4*aavg:
         return 0
-    if atr >= 2*aavg:
+    if atr >= 2.5*aavg:
         return 0
-    if abs(c-e15) > 1.5*atr:
+    if abs(c-e15) > 2.0*atr:
         return 0
     f["f1"] += 1
     l3 = cd[-3:]
@@ -366,31 +364,24 @@ def scan(sym):
     grn3 = all(x["c"] > x["o"] for x in l3)
     up60 = c > e60
     dn60 = c < e60
-    rej_c = lw >= 2*body
-    if rej_c:
-        rej_c = lw >= 0.6*rng
-    if rej_c:
-        rej_c = uw <= 0.15*rng
-    rej_p = uw >= 2*body
-    if rej_p:
-        rej_p = uw >= 0.6*rng
-    if rej_p:
-        rej_p = lw <= 0.15*rng
+    
+    # 🔓 تم إلغاء شرط شكل الشمعة الصارم (المرحلة الأولى)
+    rej_c = True
+    rej_p = True
+    
     near_s = sup is not None
     if near_s:
-        near_s = abs(l-sup)/c*100 <= 0.2
+        near_s = abs(l-sup)/c*100 <= 0.5
     near_r = res is not None
     if near_r:
-        near_r = abs(h-res)/c*100 <= 0.2
-    b1 = body >= 0.7*rng
-    b2 = lw+uw <= 0.15*rng
-    b3 = atr > 1.2*aavg and a15 > 25
+        near_r = abs(h-res)/c*100 <= 0.5
+        
     side = None
     kind = ""
     c1 = up60 and c > e15 and near_s
     p1 = dn60 and c < e15 and near_r
-    mid_c = c1 and rn <= 45 and rn > rp
-    mid_p = p1 and rn >= 55 and rn < rp
+    mid_c = c1 and rn <= 50 and rn > rp
+    mid_p = p1 and rn >= 50 and rn < rp
     if mid_c or mid_p:
         f["f2"] += 1
     if mid_c and rej_c and not red3:
@@ -399,16 +390,7 @@ def scan(sym):
     elif mid_p and rej_p and not grn3:
         side = "هبوط 🔴 (PUT)"
         kind = "PUT"
-    if kind == "" and b1 and b2 and b3:
-        if c > o and o < e15 and c > e15:
-            if up60 and not red3:
-                side = "اختراق صاعد 🚀 (BRK CALL)"
-                kind = "BRK-CALL"
-    if kind == "" and b1 and b2 and b3:
-        if c < o and o > e15 and c < e15:
-            if dn60 and not grn3:
-                side = "اختراق هابط 💥 (BRK PUT)"
-                kind = "BRK-PUT"
+        
     if side is not None:
         f["f3"] += 1
     if side is None:
@@ -422,39 +404,27 @@ def scan(sym):
     mem["pend"]["sd"] = kind
     mem["pend"]["en"] = c
     mem["pend"]["ev"] = time.time()+TSEC
-    send("📊 توصية تداول جديدة\n"
+    send("📊 توصية تداول جديدة 🚀\n"
          "\n"
          "• الزوج: " + nm + "\n"
          "• الفريم: " + TF_LABEL + "\n"
          "• مدة الصفقة: " + DUR + "\n"
          "• الوقت: " + hhmm() + "\n"
          "• الاتجاه: " + side + "\n"
-         "• البروتوكول: غيث v2.0 ✅\n"
+         "• البروتوكول: غيث v5.7 FAST\n"
          "• صفقة اليوم: "
          + str(day["trades"]) + "/5\n"
          "\n"
-         "💡 توصية آلية تعليمية"
-         " — القرار النهائي لك")
+         "💡 توصية آلية تعليمية")
     daystop()
     return 1
 
 if __name__ == "__main__":
     start = time.time()
     today = datetime.datetime.utcnow().strftime("%Y-%m-%d")
-    f0 = mem.get("fun", {})
     if mem.get("boot") != today:
         mem["boot"] = today
-        send("🌅 غيث v2.0 🩻 X-RAY صاحي\n"
-             "\n"
-             "📊 أشعة امس:\n"
-             "• شموع تفحصت: "
-             + str(f0.get("ev", 0)) + "\n"
-             "• عدت الفلاتر: "
-             + str(f0.get("f1", 0)) + "\n"
-             "• مستوى+زخم: "
-             + str(f0.get("f2", 0)) + "\n"
-             "• اكتمل شكلها: "
-             + str(f0.get("f3", 0)))
+        send("🌅 غيث v5.7 FAST-TRACK صاحي 🚀")
     seen = 0
     while time.time() < start + 300:
         try:
