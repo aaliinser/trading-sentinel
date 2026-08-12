@@ -380,8 +380,8 @@ def scan(sym):
     kind = ""
     c1 = up60 and c > e15 and near_s
     p1 = dn60 and c < e15 and near_r
-    mid_c = c1 and rn <= 55
-    mid_p = p1 and rn >= 45
+    mid_c = c1 and rn <= 55 and rn > rp and c > o
+    mid_p = p1 and rn >= 45 and rn < rp and c < o
     if mid_c or mid_p:
         f["f2"] += 1
     if mid_c and rej_c and not red3:
