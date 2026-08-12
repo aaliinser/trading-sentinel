@@ -366,6 +366,8 @@ def scan(sym):
     dn60 = c < e60
     rej_c = True
     rej_p = True
+    lo20 = min(x["l"] for x in cd[-20:])
+    hi20 = max(x["h"] for x in cd[-20:])
     near_s = sup is not None
     if near_s:
         near_s = abs(l-sup)/c*100 <= 0.5
@@ -377,7 +379,11 @@ def scan(sym):
     c1 = up60 and c > e15 and near_s
     p1 = dn60 and c < e15 and near_r
     mid_c = c1 and rn <= 55 and rn > rp and c > o
+    if mid_c:
+        mid_c = (hi20-c) > 0.3*atr
     mid_p = p1 and rn >= 45 and rn < rp and c < o
+    if mid_p:
+        mid_p = (c-lo20) > 0.3*atr
     if mid_c or mid_p:
         f["f2"] += 1
     if mid_c and rej_c and not red3:
@@ -406,7 +412,7 @@ def scan(sym):
          "• مدة الصفقة: " + DUR + "\n"
          "• الوقت: " + hhmm() + "\n"
          "• الاتجاه: " + side + "\n"
-         "• البروتوكول: غيث v5.8 CONFIRM\n"
+         "• البروتوكول: غيث v6.0 ANTI-CHASE\n"
          "• صفقة اليوم: "
          + str(day["trades"]) + "/5\n"
          "\n"
@@ -419,7 +425,7 @@ if __name__ == "__main__":
     today = datetime.datetime.utcnow().strftime("%Y-%m-%d")
     if mem.get("boot") != today:
         mem["boot"] = today
-        send("🌅 غيث v5.9b NO-OVERLAP صاحي 🏰")
+        send("🌅 غيث v6.0 ANTI-CHASE صاحي 🛡️")
     seen = 0
     while time.time() < start + 240:
         try:
