@@ -364,18 +364,14 @@ def scan(sym):
     grn3 = all(x["c"] > x["o"] for x in l3)
     up60 = c > e60
     dn60 = c < e60
-    
-    # 🔓 تم إلغاء شرط شكل الشمعة الصارم (المرحلة الأولى)
     rej_c = True
     rej_p = True
-    
     near_s = sup is not None
     if near_s:
         near_s = abs(l-sup)/c*100 <= 0.5
     near_r = res is not None
     if near_r:
         near_r = abs(h-res)/c*100 <= 0.5
-        
     side = None
     kind = ""
     c1 = up60 and c > e15 and near_s
@@ -390,7 +386,6 @@ def scan(sym):
     elif mid_p and rej_p and not grn3:
         side = "هبوط 🔴 (PUT)"
         kind = "PUT"
-        
     if side is not None:
         f["f3"] += 1
     if side is None:
@@ -424,9 +419,9 @@ if __name__ == "__main__":
     today = datetime.datetime.utcnow().strftime("%Y-%m-%d")
     if mem.get("boot") != today:
         mem["boot"] = today
-        send("🌅 غيث v5.7 FAST-TRACK صاحي 🚀")
+        send("🌅 غيث v5.9b NO-OVERLAP صاحي 🏰")
     seen = 0
-    while time.time() < start + 300:
+    while time.time() < start + 240:
         try:
             pending()
             rc = fetch("EURUSD=X", "15m", "1d")
@@ -448,4 +443,5 @@ if __name__ == "__main__":
                 time.sleep(0.5)
             json.dump(mem, open(MEMF, "w"))
             print("✅ دورة:", ok, "ok /", fl, "err / 🎯", st)
-        json.dump(mem, open(MEMF, "w"))         time.sleep(60)
+        json.dump(mem, open(MEMF, "w"))
+        time.sleep(60)
