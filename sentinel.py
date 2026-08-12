@@ -232,6 +232,16 @@ def getday():
         mem["day"] = cur
     return cur
 
+def fun():
+    d = datetime.datetime.utcnow().strftime("%Y-%m-%d")
+    cur = mem.get("fun", {})
+    if cur.get("date") != d:
+        cur = {"date": d, "ev": 0, "f1": 0}
+        cur["f2"] = 0
+        cur["f3"] = 0
+        mem["fun"] = cur
+    return cur
+
 def daystop():
     day = getday()
     if day.get("stop"):
@@ -340,7 +350,8 @@ def scan(sym):
     if rn is None:
         return 0
     sup, res = pivots(cd)
-    ct = lt+900000
+    f = fun()
+    f["ev"] += 1
     if a60 <= 18 or a15 <= 18:
         return 0
     if atr <= 0.5*aavg:
@@ -349,6 +360,7 @@ def scan(sym):
         return 0
     if abs(c-e15) > 1.5*atr:
         return 0
+    f["f1"] += 1
     l3 = cd[-3:]
     red3 = all(x["c"] < x["o"] for x in l3)
     grn3 = all(x["c"] > x["o"] for x in l3)
@@ -376,13 +388,15 @@ def scan(sym):
     side = None
     kind = ""
     c1 = up60 and c > e15 and near_s
-    c2 = rn <= 45 and rn > rp and rej_c
-    if c1 and c2 and not red3:
+    p1 = dn60 and c < e15 and near_r
+    mid_c = c1 and rn <= 45 and rn > rp
+    mid_p = p1 and rn >= 55 and rn < rp
+    if mid_c or mid_p:
+        f["f2"] += 1
+    if mid_c and rej_c and not red3:
         side = "صعود 🟢 (CALL)"
         kind = "CALL"
-    p1 = dn60 and c < e15 and near_r
-    p2 = rn >= 55 and rn < rp and rej_p
-    if kind == "" and p1 and p2 and not grn3:
+    elif mid_p and rej_p and not grn3:
         side = "هبوط 🔴 (PUT)"
         kind = "PUT"
     if kind == "" and b1 and b2 and b3:
@@ -395,6 +409,8 @@ def scan(sym):
             if dn60 and not grn3:
                 side = "اختراق هابط 💥 (BRK PUT)"
                 kind = "BRK-PUT"
+    if side is not None:
+        f["f3"] += 1
     if side is None:
         return 0
     if not cantrade():
@@ -425,9 +441,20 @@ def scan(sym):
 if __name__ == "__main__":
     start = time.time()
     today = datetime.datetime.utcnow().strftime("%Y-%m-%d")
+    f0 = mem.get("fun", {})
     if mem.get("boot") != today:
         mem["boot"] = today
-        send("🌅 غيث v2.0 🩺 PIVOT FIX صاحي — يوم جديد")
+        send("🌅 غيث v2.0 🩻 X-RAY صاحي\n"
+             "\n"
+             "📊 أشعة امس:\n"
+             "• شموع تفحصت: "
+             + str(f0.get("ev", 0)) + "\n"
+             "• عدت الفلاتر: "
+             + str(f0.get("f1", 0)) + "\n"
+             "• مستوى+زخم: "
+             + str(f0.get("f2", 0)) + "\n"
+             "• اكتمل شكلها: "
+             + str(f0.get("f3", 0)))
     seen = 0
     while time.time() < start + 300:
         try:
