@@ -330,7 +330,7 @@ def scan(sym):
         return 0
     sup, res = pivots(cd)
     ct = lt+900000
-    if a60 <= 20 or a15 <= 20:
+    if a60 <= 18 or a15 <= 18:
         return 0
     if atr <= 0.5*aavg:
         return 0
@@ -367,12 +367,12 @@ def scan(sym):
     side = None
     kind = ""
     c1 = up60 and c > e15 and near_s
-    c2 = rn <= 40 and rn > rp and rej_c
+    c2 = rn <= 45 and rn > rp and rej_c
     if c1 and c2 and not red3:
         side = "صعود 🟢 (CALL)"
         kind = "CALL"
     p1 = dn60 and c < e15 and near_r
-    p2 = rn >= 60 and rn < rp and rej_p
+    p2 = rn >= 55 and rn < rp and rej_p
     if kind == "" and p1 and p2 and not grn3:
         side = "هبوط 🔴 (PUT)"
         kind = "PUT"
