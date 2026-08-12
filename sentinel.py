@@ -173,19 +173,35 @@ def adx(cd, p=14):
     return x
 
 def pivots(cd, lb=5):
-    sup = None
-    res = None
+    sups = []
+    ress = []
     top = len(cd)-1-lb
-    for i in range(top, lb-1, -1):
+    for i in range(lb, top+1):
         w = cd[i-lb:i+lb+1]
         hi = max(x["h"] for x in w)
         lo = min(x["l"] for x in w)
-        if res is None and cd[i]["h"] == hi:
-            res = hi
-        if sup is None and cd[i]["l"] == lo:
-            sup = lo
-        if sup and res:
-            break
+        if cd[i]["h"] == hi:
+            ress.append(hi)
+        if cd[i]["l"] == lo:
+            sups.append(lo)
+    if not sups or not ress:
+        return None, None
+    last = cd[-1]
+    price = last["c"]
+    sup = None
+    min_ds = 999.0
+    for s in sups:
+        ds = abs(s-price)/price*100
+        if ds < min_ds and ds < 2.0:
+            min_ds = ds
+            sup = s
+    res = None
+    min_dr = 999.0
+    for r in ress:
+        dr = abs(r-price)/price*100
+        if dr < min_dr and dr < 2.0:
+            min_dr = dr
+            res = r
     return sup, res
 
 def toh1(c15):
@@ -204,11 +220,6 @@ def toh1(c15):
         dd["c"] = g[-1]["c"]
         out.append(dd)
     return out
-
-def kz(t):
-    dt = datetime.datetime.utcfromtimestamp(t/1000)
-    h = dt.hour
-    return 7 <= h < 10 or 12 <= h < 15
 
 def getday():
     d = datetime.datetime.utcnow().strftime("%Y-%m-%d")
@@ -338,8 +349,6 @@ def scan(sym):
         return 0
     if abs(c-e15) > 1.5*atr:
         return 0
-    if False:
-        return 0
     l3 = cd[-3:]
     red3 = all(x["c"] < x["o"] for x in l3)
     grn3 = all(x["c"] > x["o"] for x in l3)
@@ -418,7 +427,7 @@ if __name__ == "__main__":
     today = datetime.datetime.utcnow().strftime("%Y-%m-%d")
     if mem.get("boot") != today:
         mem["boot"] = today
-        send("🌅 غيث v2.0 صاحي — يوم تداول جديد")
+        send("🌅 غيث v2.0 🩺 PIVOT FIX صاحي — يوم جديد")
     seen = 0
     while time.time() < start + 300:
         try:
