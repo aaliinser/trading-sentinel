@@ -3,8 +3,8 @@ concurrency:
   group: sentinel
   cancel-in-progress: false
 on:
-  schedule:
-    - cron: "*/5 * * * *"
+  
+    
   workflow_dispatch:
 jobs:
   scan:
