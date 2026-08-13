@@ -69,7 +69,6 @@ def fetch(sym, itv, rng):
         dd["h"] = h
         dd["l"] = l
         dd["c"] = c
-        out.append(dd)
     return out
 
 def ema(v, p):
@@ -402,10 +401,10 @@ def scan(sym):
     if side is None:
         wl = None
         wt = ""
-        if up60 and abs(l-rb)/c*100 <= 0.3 and rn <= 60:
+        if up60 and abs(l-rb)/c*100 <= 0.06 and rn <= 60:
             wl = rb
             wt = "صعود 🟢"
-        if wl is None and dn60 and abs(h-rt)/c*100 <= 0.3 and rn >= 40:
+        if wl is None and dn60 and abs(h-rt)/c*100 <= 0.06 and rn >= 40:
             wl = rt
             wt = "هبوط 🔴"
         if wl is not None:
