@@ -412,9 +412,9 @@ def scan(sym):
          "• مدة الصفقة: " + DUR + "\n"
          "• الوقت: " + hhmm() + "\n"
          "• الاتجاه: " + side + "\n"
-         "• البروتوكول: غيث v6.0 ANTI-CHASE\n"
+         "• البروتوكول: غيث v6.1 UNCHAINED\n"
          "• صفقة اليوم: "
-         + str(day["trades"]) + "/5\n"
+         + str(day["trades"]) + "\n"
          "\n"
          "💡 توصية آلية تعليمية")
     daystop()
@@ -425,7 +425,7 @@ if __name__ == "__main__":
     today = datetime.datetime.utcnow().strftime("%Y-%m-%d")
     if mem.get("boot") != today:
         mem["boot"] = today
-        send("🌅 غيث v6.0 ANTI-CHASE صاحي 🛡️")
+        send("🌅 غيث v6.1 UNCHAINED صاحي ⛓️‍💥")
     seen = 0
     while time.time() < start + 240:
         try:
