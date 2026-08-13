@@ -69,6 +69,7 @@ def fetch(sym, itv, rng):
         dd["h"] = h
         dd["l"] = l
         dd["c"] = c
+        out.append(dd)
     return out
 
 def ema(v, p):
@@ -311,6 +312,59 @@ def pending():
     mem["pend"] = None
     daystop()
 
+def sniper():
+    for pr in PAIRS:
+        nm = pr[0:3] + "/" + pr[3:6]
+        sw = mem.get("S_" + nm)
+        if sw is None:
+            continue
+        if time.time() - sw["t"] > 10800:
+            mem["S_" + nm] = None
+            continue
+        try:
+            c5 = fetch(pr, "5m", "1d")
+        except Exception:
+            continue
+        k = c5[-2]
+        if sw.get("lt") == k["t"]:
+            continue
+        sw["lt"] = k["t"]
+        o = k["o"]
+        h = k["h"]
+        l = k["l"]
+        c = k["c"]
+        lvl = sw["lvl"]
+        txt = "%.3f" % lvl if c > 50 else "%.5f" % lvl
+        if sw["dir"] == "PUT":
+            if h >= lvl - 0.0005*c and c < o and c < lvl:
+                mem["S_" + nm] = None
+                send("🎯 ادخل الحين!\n"
+                     "\n"
+                     "• الزوج: " + nm + "\n"
+                     "• المستوى: " + txt + "\n"
+                     "• الاتجاه: هبوط 🔴\n"
+                     "• شمعة رفض M5 تأكدت ✔️\n"
+                     "• السعر لسه عند المستوى — ادخل فورا\n"
+                     "• مدة الصفقة: 15 دقيقة\n"
+                     "• البروتوكول: غيث v6.6 SNIPER FAST")
+            elif c > lvl + 0.0015*c:
+                mem["S_" + nm] = None
+        else:
+            if l <= lvl + 0.0005*c and c > o and c > lvl:
+                mem["S_" + nm] = None
+                send("🎯 ادخل الحين!\n"
+                     "\n"
+                     "• الزوج: " + nm + "\n"
+                     "• المستوى: " + txt + "\n"
+                     "• الاتجاه: صعود 🟢\n"
+                     "• شمعة رفض M5 تأكدت ✔️\n"
+                     "• السعر لسه عند المستوى — ادخل فورا\n"
+                     "• مدة الصفقة: 15 دقيقة\n"
+                     "• البروتوكول: غيث v6.6 SNIPER FAST")
+            elif c < lvl - 0.0015*c:
+                mem["S_" + nm] = None
+        time.sleep(0.3)
+
 def scan(sym):
     nm = sym[0:3] + "/" + sym[3:6]
     c15 = fetch(sym, "15m", "7d")
@@ -418,6 +472,8 @@ def scan(sym):
                     okw = False
             if okw:
                 mem[wk] = [wtxt, now]
+                mem["S_" + nm] = {"lvl": wl, "t": now}
+                mem["S_" + nm]["dir"] = "CALL" if "صعود" in wt else "PUT"
                 send("👀 تنبيه تجهيز\n"
                      "\n"
                      "• الزوج: " + nm + "\n"
@@ -443,7 +499,7 @@ def scan(sym):
          "• مدة الصفقة: " + DUR + "\n"
          "• الوقت: " + hhmm() + "\n"
          "• الاتجاه: " + side + "\n"
-         "• البروتوكول: غيث v6.3 WATCH\n"
+         "• البروتوكول: غيث v6.6 SNIPER FAST\n"
          "• صفقة اليوم: "
          + str(day["trades"]) + "\n"
          "\n"
@@ -456,11 +512,12 @@ if __name__ == "__main__":
     today = datetime.datetime.utcnow().strftime("%Y-%m-%d")
     if mem.get("boot") != today:
         mem["boot"] = today
-        send("🌅 غيث v6.3 WATCH صاحي 👀")
+        send("🌅 غيث v6.6 SNIPER FAST صاحي ⚡")
     seen = 0
     while time.time() < start + 240:
         try:
             pending()
+            sniper()
             rc = fetch("EURUSD=X", "15m", "1d")
             ct = rc[-2]["t"]
         except Exception:
