@@ -368,12 +368,17 @@ def scan(sym):
     rej_p = True
     lo20 = min(x["l"] for x in cd[-20:])
     hi20 = max(x["h"] for x in cd[-20:])
+    step = 0.5 if c > 50 else 0.005
+    rb = (c//step)*step
+    rt = rb + step
     near_s = sup is not None
     if near_s:
         near_s = abs(l-sup)/c*100 <= 0.5
+    near_s = near_s or abs(l-rb)/c*100 <= 0.15
     near_r = res is not None
     if near_r:
         near_r = abs(h-res)/c*100 <= 0.5
+    near_r = near_r or abs(h-rt)/c*100 <= 0.15
     side = None
     kind = ""
     c1 = up60 and c > e15 and near_s
@@ -395,6 +400,33 @@ def scan(sym):
     if side is not None:
         f["f3"] += 1
     if side is None:
+        wl = None
+        wt = ""
+        if up60 and abs(l-rb)/c*100 <= 0.3 and rn <= 60:
+            wl = rb
+            wt = "صعود 🟢"
+        if wl is None and dn60 and abs(h-rt)/c*100 <= 0.3 and rn >= 40:
+            wl = rt
+            wt = "هبوط 🔴"
+        if wl is not None:
+            wtxt = "%.3f" % wl if c > 50 else "%.5f" % wl
+            wk = "W_" + nm
+            now = time.time()
+            lw = mem.get(wk)
+            okw = True
+            if lw is not None:
+                if lw[0] == wtxt and now - lw[1] < 3600:
+                    okw = False
+            if okw:
+                mem[wk] = [wtxt, now]
+                send("👀 تنبيه تجهيز\n"
+                     "\n"
+                     "• الزوج: " + nm + "\n"
+                     "• المستوى المستدير: " + wtxt + "\n"
+                     "• الاتجاه المتوقع: " + wt + "\n"
+                     "• الخطة: إذا لمس المستوى وتكوّنت"
+                     " شمعة تأكيد بنفس الاتجاه → كن جاهزاً!")
+    if side is None:
         return 0
     if not cantrade():
         return 0
@@ -412,7 +444,7 @@ def scan(sym):
          "• مدة الصفقة: " + DUR + "\n"
          "• الوقت: " + hhmm() + "\n"
          "• الاتجاه: " + side + "\n"
-         "• البروتوكول: غيث v6.1 UNCHAINED\n"
+         "• البروتوكول: غيث v6.3 WATCH\n"
          "• صفقة اليوم: "
          + str(day["trades"]) + "\n"
          "\n"
@@ -425,7 +457,7 @@ if __name__ == "__main__":
     today = datetime.datetime.utcnow().strftime("%Y-%m-%d")
     if mem.get("boot") != today:
         mem["boot"] = today
-        send("🌅 غيث v6.1 UNCHAINED صاحي ⛓️‍💥")
+        send("🌅 غيث v6.3 WATCH صاحي 👀")
     seen = 0
     while time.time() < start + 240:
         try:
