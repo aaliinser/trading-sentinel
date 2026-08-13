@@ -313,7 +313,7 @@ def pending():
     daystop()
 
 def scan(sym):
-    nm = sym.replace("=X", "")
+    nm = sym[0:3] + "/" + sym[3:6]
     c15 = fetch(sym, "15m", "7d")
     if len(c15) < 150:
         return 0
