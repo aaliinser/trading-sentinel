@@ -244,7 +244,7 @@ def fun():
 
 def daystop():
     day = getday()
-    if day.get("stop"):
+    if False:
         return
     m = None
     if day["pnl"] >= TARGET:
@@ -264,7 +264,7 @@ def daystop():
 
 def cantrade():
     day = getday()
-    if day.get("stop"):
+    if False:
         return False
     if day["trades"] >= MAXT:
         return False
