@@ -346,7 +346,7 @@ def sniper():
                      "• شمعة رفض M5 تأكدت ✔️\n"
                      "• السعر لسه عند المستوى — ادخل فورا\n"
                      "• مدة الصفقة: 15 دقيقة\n"
-                     "• البروتوكول: غيث v6.6 SNIPER FAST")
+                     "• البروتوكول: غيث v6.7 PUNCTUAL")
             elif c > lvl + 0.0015*c:
                 mem["S_" + nm] = None
         else:
@@ -360,14 +360,14 @@ def sniper():
                      "• شمعة رفض M5 تأكدت ✔️\n"
                      "• السعر لسه عند المستوى — ادخل فورا\n"
                      "• مدة الصفقة: 15 دقيقة\n"
-                     "• البروتوكول: غيث v6.6 SNIPER FAST")
+                     "• البروتوكول: غيث v6.7 PUNCTUAL")
             elif c < lvl - 0.0015*c:
                 mem["S_" + nm] = None
         time.sleep(0.3)
 
 def scan(sym):
     nm = sym[0:3] + "/" + sym[3:6]
-    c15 = fetch(sym, "15m", "7d")
+    c15 = fetch(sym, "15m", "3d")
     if len(c15) < 150:
         return 0
     cd = c15[:-1]
@@ -499,7 +499,7 @@ def scan(sym):
          "• مدة الصفقة: " + DUR + "\n"
          "• الوقت: " + hhmm() + "\n"
          "• الاتجاه: " + side + "\n"
-         "• البروتوكول: غيث v6.6 SNIPER FAST\n"
+         "• البروتوكول: غيث v6.7 PUNCTUAL\n"
          "• صفقة اليوم: "
          + str(day["trades"]) + "\n"
          "\n"
@@ -512,9 +512,9 @@ if __name__ == "__main__":
     today = datetime.datetime.utcnow().strftime("%Y-%m-%d")
     if mem.get("boot") != today:
         mem["boot"] = today
-        send("🌅 غيث v6.6 SNIPER FAST صاحي ⚡")
+        send("🌅 غيث v6.7 PUNCTUAL صاحي ⏱️")
     seen = 0
-    while time.time() < start + 240:
+    while time.time() < start + 200:
         try:
             pending()
             sniper()
@@ -534,7 +534,7 @@ if __name__ == "__main__":
                 except Exception as e:
                     fl += 1
                     print("⚠️", pr, type(e).__name__, e)
-                time.sleep(0.5)
+                time.sleep(0.2)
             json.dump(mem, open(MEMF, "w"))
             print("✅ دورة:", ok, "ok /", fl, "err / 🎯", st)
         json.dump(mem, open(MEMF, "w"))
