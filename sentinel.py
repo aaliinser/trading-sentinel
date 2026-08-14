@@ -72,6 +72,13 @@ def fetch(sym, itv, rng):
         out.append(dd)
     return out
 
+def live_price(sym):
+    try:
+        c1 = fetch(sym, "1m", "1d")
+        return c1[-1]["c"]
+    except Exception:
+        return None
+
 def ema(v, p):
     if len(v) < p:
         return None
@@ -257,7 +264,7 @@ def daystop():
         day["stop"] = 1
         send("⏸️ آلة إدارة اليوم\n"
              "\n"
-             "• " + m + "\n"
+         "• " + m + "\n"
              "• توقف بقية اليوم\n"
              "• صافي اليوم: "
              + str(day["pnl"]) + "$")
@@ -325,43 +332,55 @@ def sniper():
             c5 = fetch(pr, "5m", "1d")
         except Exception:
             continue
-        k = c5[-2]
+        k = c5[-1]
         if sw.get("lt") == k["t"]:
             continue
-        sw["lt"] = k["t"]
         o = k["o"]
         h = k["h"]
         l = k["l"]
         c = k["c"]
         lvl = sw["lvl"]
         txt = "%.3f" % lvl if c > 50 else "%.5f" % lvl
+        span = max(h - l, 1e-9)
+        body_dn = o - c
+        body_up = c - o
+        lp = live_price(pr)
+        lp_txt = ("%.3f" % lp if lp > 50 else "%.5f" % lp) if lp else "غير متوفر"
         if sw["dir"] == "PUT":
-            if h >= lvl - 0.0005*c and c < o and c < lvl:
+            touched = h >= lvl - 0.00025 * c
+            rejected = body_dn >= 0.4 * span and c < lvl
+            if touched and rejected:
+                sw["lt"] = k["t"]
                 mem["S_" + nm] = None
-                send("🎯 ادخل الحين!\n"
+                send("⚡ ادخل الحين (سريع)!\n"
                      "\n"
                      "• الزوج: " + nm + "\n"
                      "• المستوى: " + txt + "\n"
+                     "• السعر الحي الآن: " + lp_txt + "\n"
                      "• الاتجاه: هبوط 🔴\n"
-                     "• شمعة رفض M5 تأكدت ✔️\n"
-                     "• السعر لسه عند المستوى — ادخل فورا\n"
+                     "• لمس + رفض على شمعة M5 جارية ✔️\n"
+                     "• إذا السعر الحي قريب من المستوى → ادخل فورا\n"
                      "• مدة الصفقة: 15 دقيقة\n"
-                     "• البروتوكول: غيث v6.7 PUNCTUAL")
-            elif c > lvl + 0.0015*c:
+                     "• البروتوكول: غيث v6.14 LIVE")
+            elif c > lvl + 0.0015 * c:
                 mem["S_" + nm] = None
         else:
-            if l <= lvl + 0.0005*c and c > o and c > lvl:
+            touched = l <= lvl + 0.00025 * c
+            rejected = body_up >= 0.4 * span and c > lvl
+            if touched and rejected:
+                sw["lt"] = k["t"]
                 mem["S_" + nm] = None
-                send("🎯 ادخل الحين!\n"
+                send("⚡ ادخل الحين (سريع)!\n"
                      "\n"
                      "• الزوج: " + nm + "\n"
                      "• المستوى: " + txt + "\n"
+                     "• السعر الحي الآن: " + lp_txt + "\n"
                      "• الاتجاه: صعود 🟢\n"
-                     "• شمعة رفض M5 تأكدت ✔️\n"
-                     "• السعر لسه عند المستوى — ادخل فورا\n"
+                     "• لمس + رفض على شمعة M5 جارية ✔️\n"
+                     "• إذا السعر الحي قريب من المستوى → ادخل فورا\n"
                      "• مدة الصفقة: 15 دقيقة\n"
-                     "• البروتوكول: غيث v6.7 PUNCTUAL")
-            elif c < lvl - 0.0015*c:
+                     "• البروتوكول: غيث v6.14 LIVE")
+            elif c < lvl - 0.0015 * c:
                 mem["S_" + nm] = None
         time.sleep(0.3)
 
@@ -455,10 +474,10 @@ def scan(sym):
     if side is None:
         wl = None
         wt = ""
-        if up60 and abs(l-rb)/c*100 <= 0.06 and rn <= 60:
+        if up60 and abs(l-rb)/c*100 <= 0.025 and rn <= 60:
             wl = rb
             wt = "صعود 🟢"
-        if wl is None and dn60 and abs(h-rt)/c*100 <= 0.06 and rn >= 40:
+        if wl is None and dn60 and abs(h-rt)/c*100 <= 0.025 and rn >= 40:
             wl = rt
             wt = "هبوط 🔴"
         if wl is not None:
@@ -499,7 +518,7 @@ def scan(sym):
          "• مدة الصفقة: " + DUR + "\n"
          "• الوقت: " + hhmm() + "\n"
          "• الاتجاه: " + side + "\n"
-         "• البروتوكول: غيث v6.7 PUNCTUAL\n"
+         "• البروتوكول: غيث v6.14 LIVE\n"
          "• صفقة اليوم: "
          + str(day["trades"]) + "\n"
          "\n"
@@ -512,7 +531,7 @@ if __name__ == "__main__":
     today = datetime.datetime.utcnow().strftime("%Y-%m-%d")
     if mem.get("boot") != today:
         mem["boot"] = today
-        send("🌅 غيث v6.7 PUNCTUAL صاحي ⏱️")
+        send("🌅 غيث v6.14 LIVE صاحي 📡")
     seen = 0
     while time.time() < start + 200:
         try:
