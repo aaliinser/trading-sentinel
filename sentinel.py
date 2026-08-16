@@ -12,6 +12,7 @@ TARGET = 999999
 MAXT = 999999
 MAXL = 999999
 TSEC = 900
+MAX_DEV = 0.0006
 MEMF = "memory.json"
 HOST = "https://query1.finance.yahoo.com"
 PATH = "/v8/finance/chart/"
@@ -34,14 +35,19 @@ if os.path.exists(MEMF):
 def send(msg):
     print("🚨", msg)
     if not TG or not CH:
-        return
+        return None
     try:
         a = "https://api.telegram.org/bot"
         j = {"chat_id": CH, "text": "🚨 " + msg}
         url = a + TG + "/sendMessage"
-        requests.post(url, json=j, timeout=10)
+        r = requests.post(url, json=j, timeout=10)
+        try:
+            return r.json().get("result", {}).get("message_id")
+        except Exception:
+            return None
     except Exception as e:
         print("TG ERR:", e)
+        return None
 
 def hhmm():
     t = datetime.datetime.utcnow()
@@ -52,7 +58,9 @@ def market_open():
     t = datetime.datetime.utcnow()
     if t.weekday() >= 5:
         return False
-    return True
+    if t.weekday() == 4 and t.day <= 7 and 12 <= t.hour < 15:
+        return False
+    return 8 <= t.hour < 17
 
 def fetch(sym, itv, rng):
     url = HOST + PATH + sym
@@ -93,6 +101,50 @@ def ema(v, p):
     for x in v[p:]:
         e = x*k + e*(1-k)
     return e
+
+def _emas(v, p):
+    k = 2.0/(p+1)
+    e = sum(v[:p])/p
+    out = [e]
+    for x in v[p:]:
+        e = x*k + e*(1-k)
+        out.append(e)
+    return out
+
+def macd2(cl):
+    if len(cl) < 60:
+        return None, None
+    a = _emas(cl, 12)
+    b = _emas(cl, 26)
+    off = 26-12
+    n = len(b)
+    macd = [a[i+off]-b[i] for i in range(n)]
+    if len(macd) < 12:
+        return None, None
+    sig = _emas(macd, 9)
+    h1 = macd[len(macd)-2]-sig[len(sig)-2]
+    h2 = macd[-1]-sig[-1]
+    return h1, h2
+
+def pat_call(k, p):
+    r = k["h"]-k["l"]
+    if r <= 0:
+        return False
+    lw = min(k["o"], k["c"])-k["l"]
+    pin = lw >= 0.6*r
+    eng = (k["c"] > k["o"]) and (p["c"] < p["o"])
+    eng = eng and (k["c"] >= p["o"]) and (k["o"] <= p["c"])
+    return pin or eng
+
+def pat_put(k, p):
+    r = k["h"]-k["l"]
+    if r <= 0:
+        return False
+    uw = k["h"]-max(k["o"], k["c"])
+    pin = uw >= 0.6*r
+    eng = (k["c"] < k["o"]) and (p["c"] > p["o"])
+    eng = eng and (k["c"] <= p["o"]) and (k["o"] >= p["c"])
+    return pin or eng
 
 def rsi2(cl, p=14):
     if len(cl) < p+2:
@@ -242,7 +294,23 @@ def getday():
         cur["loss"] = 0
         cur["pnl"] = 0.0
         cur["stop"] = 0
+        cur["win"] = 0
+        cur["lose"] = 0
+        cur["sigs"] = 0
+        cur["mwin"] = 0
+        cur["mlose"] = 0
         mem["day"] = cur
+    return cur
+
+def getmonth():
+    ym = datetime.datetime.utcnow().strftime("%Y-%m")
+    cur = mem.get("month") or {}
+    if cur.get("ym") != ym:
+        cur = {"ym": ym, "win": 0, "lose": 0}
+        cur["mwin"] = 0
+        cur["mlose"] = 0
+        cur["pnl"] = 0.0
+        mem["month"] = cur
     return cur
 
 def fun():
@@ -265,12 +333,12 @@ def daystop():
     elif day["loss"] >= MAXL:
         m = "🛑 3 خسائر متتالية"
     elif day["trades"] >= MAXT:
-        m = "🧮 سقف 5 صفقات"
+        m = "🧮 سقف الصفقات"
     if m:
         day["stop"] = 1
         send("⏸️ آلة إدارة اليوم\n"
              "\n"
-         "• " + m + "\n"
+             "• " + m + "\n"
              "• توقف بقية اليوم\n"
              "• صافي اليوم: "
              + str(day["pnl"]) + "$")
@@ -289,6 +357,150 @@ def cantrade():
         return False
     return True
 
+def prune_trades():
+    op = mem.get("open_trades", {})
+    now = time.time()
+    kill = []
+    for mid in op:
+        rc = op[mid]
+        if rc.get("done") or now - rc.get("t", now) > 86400:
+            kill.append(mid)
+    for mid in kill:
+        del op[mid]
+
+def listen_replies():
+    if not TG:
+        return
+    try:
+        prune_trades()
+        off = mem.get("upd_off", 0)
+        url = "https://api.telegram.org/bot" + TG + "/getUpdates"
+        pp = {"offset": off, "timeout": 0}
+        r = requests.get(url, params=pp, timeout=10)
+        data = r.json().get("result", [])
+        day = getday()
+        mo = getmonth()
+        for u in data:
+            nid = u.get("update_id", 0)
+            if nid >= off:
+                off = nid + 1
+            msg = u.get("message") or u.get("edited_message")
+            if not msg:
+                continue
+            txt_raw = msg.get("text") or ""
+            txt = txt_raw.lower()
+            win = None
+            if any(w in txt for w in ["ربحت", "رابحة", "won", "win"]):
+                win = True
+            elif any(w in txt for w in ["خسرت", "خاسرة", "lost", "lose"]):
+                win = False
+            if win is None:
+                continue
+            op = mem.setdefault("open_trades", {})
+            rec = None
+            rep = msg.get("reply_to_message")
+            if rep is not None:
+                rc2 = op.get(str(rep.get("message_id")))
+                if rc2 is not None and not rc2.get("done"):
+                    rec = rc2
+            if rec is None:
+                for mid2 in op:
+                    rc2 = op[mid2]
+                    if rc2.get("done"):
+                        continue
+                    if rc2.get("nm", "") in txt_raw:
+                        rec = rc2
+                        break
+            if rec is None:
+                send("⚠️ ما قدرت أربط ردك بصفقة مفتوحة\n"
+                     "\n"
+                     "• استخدم خاصية الرد (Reply) على رسالة الإشارة\n"
+                     "• أو اكتب اسم الزوج مع النتيجة، مثال: EUR/USD ربحت")
+                continue
+            rec["done"] = True
+            if win:
+                day["mwin"] = day.get("mwin", 0)+1
+                mo["mwin"] = mo.get("mwin", 0)+1
+                g = round(STAKE*PAY, 2)
+                day["pnl"] = round(day.get("pnl", 0.0)+g, 2)
+                mo["pnl"] = round(mo.get("pnl", 0.0)+g, 2)
+                t = "✅ رابحة +" + str(g) + "$"
+            else:
+                day["mlose"] = day.get("mlose", 0)+1
+                mo["mlose"] = mo.get("mlose", 0)+1
+                day["pnl"] = round(day.get("pnl", 0.0)-STAKE, 2)
+                mo["pnl"] = round(mo.get("pnl", 0.0)-STAKE, 2)
+                t = "❌ خاسرة -" + str(STAKE) + "$"
+            send("💰 تم تسجيل صفقتك\n"
+                 "\n"
+                 "• الزوج: " + rec.get("nm", "?") + "\n"
+                 "• النتيجة: " + t + "\n"
+                 "• صافي اليوم: " + str(day["pnl"]) + "$\n"
+                 "• صافي الشهر: " + str(mo["pnl"]) + "$")
+        mem["upd_off"] = off
+    except Exception as e:
+        print("LISTEN ERR:", e)
+
+def reports():
+    now = datetime.datetime.utcnow()
+    ym = now.strftime("%Y-%m")
+    now2 = now + datetime.timedelta(hours=TZ)
+    today = now2.strftime("%Y-%m-%d")
+    hr = now2.hour
+    mc = mem.get("month")
+    if mc is not None and mc.get("ym") and mc["ym"] != ym:
+        tw = mc.get("win", 0) + mc.get("mwin", 0)
+        tl = mc.get("lose", 0) + mc.get("mlose", 0)
+        tt = tw + tl
+        rate = round(100*tw/tt) if tt > 0 else 0
+        send("🗓️ جرد الشهر الكامل\n"
+             "\n"
+             "• الشهر: " + mc["ym"] + "\n"
+             "• الآلي: " + str(mc.get("win", 0)) + "✅ / " + str(mc.get("lose", 0)) + "❌\n"
+             "• اليدوي: " + str(mc.get("mwin", 0)) + "✅ / " + str(mc.get("mlose", 0)) + "❌\n"
+             "• إجمالي الصفقات: " + str(tt) + "\n"
+             "• معدل الفوز: " + str(rate) + "%\n"
+             "• صافي الشهر: " + str(mc.get("pnl", 0.0)) + "$")
+        mem["month"] = None
+    mo = getmonth()
+    m_line = "• صافي الشهر: " + str(mo.get("pnl", 0.0)) + "$"
+    rd = mem.get("repdate")
+    if rd is None:
+        mem["repdate"] = today
+    elif rd != today:
+        d = mem.get("day", {})
+        aw = d.get("win", 0)
+        al = d.get("lose", 0)
+        mw = d.get("mwin", 0)
+        ml = d.get("mlose", 0)
+        ar = round(100*aw/(aw+al)) if aw+al > 0 else 0
+        mr = round(100*mw/(mw+ml)) if mw+ml > 0 else 0
+        send("📊 جرد اليوم الكامل (24 ساعة)\n"
+             "\n"
+             "• التاريخ: " + rd + "\n"
+             "• الآلي: " + str(aw) + "✅ / " + str(al) + "❌ (" + str(ar) + "%)\n"
+             "• اليدوي: " + str(mw) + "✅ / " + str(ml) + "❌ (" + str(mr) + "%)\n"
+             "• صافي اليوم: " + str(d.get("pnl", 0.0)) + "$\n"
+             + m_line)
+        mem["repdate"] = today
+    if hr in (4, 8, 12, 16, 20):
+        slot = today + "-" + str(hr)
+        if mem.get("rep4") != slot:
+            mem["rep4"] = slot
+            d = mem.get("day", {})
+            aw = d.get("win", 0)
+            al = d.get("lose", 0)
+            mw = d.get("mwin", 0)
+            ml = d.get("mlose", 0)
+            ar = round(100*aw/(aw+al)) if aw+al > 0 else 0
+            mr = round(100*mw/(mw+ml)) if mw+ml > 0 else 0
+            send("⏱️ جرد كل 4 ساعات\n"
+                 "\n"
+                 "• الآلي: " + str(aw) + "✅ / " + str(al) + "❌ (" + str(ar) + "%)\n"
+                 "• اليدوي: " + str(mw) + "✅ / " + str(ml) + "❌ (" + str(mr) + "%)\n"
+                 "• صافي اليوم: " + str(d.get("pnl", 0.0)) + "$\n"
+                 + m_line)
+
 def pending():
     p = mem.get("pend")
     if not p:
@@ -306,14 +518,21 @@ def pending():
     else:
         win = pr < p["en"]
     day = getday()
+    mo = getmonth()
     if win:
         g = round(STAKE*PAY, 2)
         day["pnl"] = round(day["pnl"]+g, 2)
+        mo["pnl"] = round(mo.get("pnl", 0.0)+g, 2)
         day["loss"] = 0
+        day["win"] = day.get("win", 0)+1
+        mo["win"] = mo.get("win", 0)+1
         t = "✅ رابحة +" + str(g) + "$"
     else:
         day["pnl"] = round(day["pnl"]-STAKE, 2)
+        mo["pnl"] = round(mo.get("pnl", 0.0)-STAKE, 2)
         day["loss"] += 1
+        day["lose"] = day.get("lose", 0)+1
+        mo["lose"] = mo.get("lose", 0)+1
         t = "❌ خاسرة -" + str(STAKE) + "$"
     send("💰 نتيجة الصفقة\n"
          "\n"
@@ -352,42 +571,98 @@ def sniper():
         span = max(h - l, 1e-9)
         body_dn = o - c
         body_up = c - o
+        prev5 = c5[-2]
+        pd = mem.get("pend")
+        if pd is not None and pd.get("nm") == nm:
+            sw["lt"] = k["t"]
+            continue
+        try:
+            c15x = fetch(pr, "15m", "1d")
+            clx = [x["c"] for x in c15x[:-1]]
+            rpx, rnx = rsi2(clx)
+        except Exception:
+            rnx = None
         lp = live_price(pr)
-        lp_txt = ("%.3f" % lp if lp > 50 else "%.5f" % lp) if lp else "غير متوفر"
+        lpv = lp if lp is not None else c
+        lp_txt = ("%.3f" % lp if lp > 50 else "%.5f" % lp) if lp else "تقريبي (شمعة)"
         if sw["dir"] == "PUT":
             touched = h >= lvl - 0.00025 * c
-            rejected = body_dn >= 0.4 * span and c < lvl
-            if touched and rejected:
-                sw["lt"] = k["t"]
-                mem["S_" + nm] = None
-                send("⚡ ادخل الحين (سريع)!\n"
-                     "\n"
-                     "• الزوج: " + nm + "\n"
-                     "• المستوى: " + txt + "\n"
-                     "• السعر الحي الآن: " + lp_txt + "\n"
-                     "• الاتجاه: هبوط 🔴\n"
-                     "• لمس + رفض على شمعة M5 جارية ✔️\n"
-                     "• إذا السعر الحي قريب من المستوى → ادخل فورا\n"
-                     "• مدة الصفقة: 15 دقيقة\n"
-                     "• البروتوكول: غيث v6.14 LIVE")
+            rej = body_dn >= 0.4 * span or pat_put(k, prev5)
+            rejected = rej and c < lvl
+            rsi_ok = rnx is None or rnx >= 42
+            dev = (lvl - lpv) / c
+            if touched and rejected and rsi_ok:
+                if dev > MAX_DEV:
+                    mem["S_" + nm] = None
+                    send("🛡️ حماية الانحراف\n"
+                         "\n"
+                         "• الزوج: " + nm + "\n"
+                         "• المستوى: " + txt + "\n"
+                         "• السعر الحي: " + lp_txt + "\n"
+                         "• الانحراف تحت المستوى: " + str(round(dev*10000, 1)) + " نقطة\n"
+                         "• الحالة: السعر نزل بعيد → الإشارة أُلغيت\n"
+                         "• النتيجة: وفّرنا عليك مطاردة هبوط 🛡️")
+                    sw["lt"] = k["t"]
+                else:
+                    sw["lt"] = k["t"]
+                    mem["S_" + nm] = None
+                    dd = getday()
+                    dd["sigs"] = dd.get("sigs", 0)+1
+                    mid = send("🥈 ادخل الحين (فضية)!\n"
+                         "\n"
+                         "• الزوج: " + nm + "\n"
+                         "• المستوى: " + txt + "\n"
+                         "• السعر الحي الآن: " + lp_txt + "\n"
+                         "• الاتجاه: هبوط 🔴\n"
+                         "• لمس + رفض (نمط أو جسم قوي) ✔️\n"
+                         "• السعر لسه عند المستوى → ادخل فورا\n"
+                         "• مدة الصفقة: 15 دقيقة\n"
+                         "• البروتوكول: غيث v6.18 STRONG\n"
+                         "\n"
+                         "📝 بعد الصفقة رد بـ: ربحت / خسرت")
+                    if mid:
+                        op = mem.setdefault("open_trades", {})
+                        op[str(mid)] = {"nm": nm, "done": False, "t": time.time()}
             elif c > lvl + 0.0015 * c:
                 mem["S_" + nm] = None
         else:
             touched = l <= lvl + 0.00025 * c
-            rejected = body_up >= 0.4 * span and c > lvl
-            if touched and rejected:
-                sw["lt"] = k["t"]
-                mem["S_" + nm] = None
-                send("⚡ ادخل الحين (سريع)!\n"
-                     "\n"
-                     "• الزوج: " + nm + "\n"
-                     "• المستوى: " + txt + "\n"
-                     "• السعر الحي الآن: " + lp_txt + "\n"
-                     "• الاتجاه: صعود 🟢\n"
-                     "• لمس + رفض على شمعة M5 جارية ✔️\n"
-                     "• إذا السعر الحي قريب من المستوى → ادخل فورا\n"
-                     "• مدة الصفقة: 15 دقيقة\n"
-                     "• البروتوكول: غيث v6.14 LIVE")
+            rej = body_up >= 0.4 * span or pat_call(k, prev5)
+            rejected = rej and c > lvl
+            rsi_ok = rnx is None or rnx <= 58
+            dev = (lpv - lvl) / c
+            if touched and rejected and rsi_ok:
+                if dev > MAX_DEV:
+                    mem["S_" + nm] = None
+                    send("🛡️ حماية الانحراف\n"
+                         "\n"
+                         "• الزوج: " + nm + "\n"
+                         "• المستوى: " + txt + "\n"
+                         "• السعر الحي: " + lp_txt + "\n"
+                         "• الانحراف فوق المستوى: " + str(round(dev*10000, 1)) + " نقطة\n"
+                         "• الحالة: السعر طلع بعيد → الإشارة أُلغيت\n"
+                         "• النتيجة: وفّرنا عليك مطاردة صعود 🛡️")
+                    sw["lt"] = k["t"]
+                else:
+                    sw["lt"] = k["t"]
+                    mem["S_" + nm] = None
+                    dd = getday()
+                    dd["sigs"] = dd.get("sigs", 0)+1
+                    mid = send("🥈 ادخل الحين (فضية)!\n"
+                         "\n"
+                         "• الزوج: " + nm + "\n"
+                         "• المستوى: " + txt + "\n"
+                         "• السعر الحي الآن: " + lp_txt + "\n"
+                         "• الاتجاه: صعود 🟢\n"
+                         "• لمس + رفض (نمط أو جسم قوي) ✔️\n"
+                         "• السعر لسه عند المستوى → ادخل فورا\n"
+                         "• مدة الصفقة: 15 دقيقة\n"
+                         "• البروتوكول: غيث v6.18 STRONG\n"
+                         "\n"
+                         "📝 بعد الصفقة رد بـ: ربحت / خسرت")
+                    if mid:
+                        op = mem.setdefault("open_trades", {})
+                        op[str(mid)] = {"nm": nm, "done": False, "t": time.time()}
             elif c < lvl - 0.0015 * c:
                 mem["S_" + nm] = None
         time.sleep(0.3)
@@ -406,6 +681,7 @@ def scan(sym):
     mem["L_"+nm] = lt
     cl = [x["c"] for x in cd]
     k = cd[-1]
+    pvc = cd[-2]
     o = k["o"]
     h = k["h"]
     l = k["l"]
@@ -413,16 +689,19 @@ def scan(sym):
     rng = h-l
     if rng <= 0:
         return 0
-    body = abs(c-o)
     e15 = ema(cl, 35)
     h1 = toh1(cd)
     e60 = ema([x["c"] for x in h1], 35)
+    e50 = ema([x["c"] for x in h1], 50)
     a15 = adx(cd)
     a60 = adx(h1)
     at = atrs(cd)
-    if None in (e15, e60, a15, a60):
+    mh1, mh2 = macd2(cl)
+    if None in (e15, e60, e50, a15, a60):
         return 0
     if not at:
+        return 0
+    if mh1 is None:
         return 0
     atr = at[-1]
     aavg = sum(at[-20:])/min(20, len(at))
@@ -432,7 +711,7 @@ def scan(sym):
     sup, res = pivots(cd)
     f = fun()
     f["ev"] += 1
-    if a60 <= 15 or a15 <= 15:
+    if a60 <= 22 or a15 <= 20:
         return 0
     if atr <= 0.4*aavg:
         return 0
@@ -446,8 +725,6 @@ def scan(sym):
     grn3 = all(x["c"] > x["o"] for x in l3)
     up60 = c > e60
     dn60 = c < e60
-    rej_c = True
-    rej_p = True
     lo20 = min(x["l"] for x in cd[-20:])
     hi20 = max(x["h"] for x in cd[-20:])
     step = 0.5 if c > 50 else 0.005
@@ -455,28 +732,32 @@ def scan(sym):
     rt = rb + step
     near_s = sup is not None
     if near_s:
-        near_s = abs(l-sup)/c*100 <= 0.5
+        near_s = abs(l-sup) <= 0.5*atr
     near_s = near_s or abs(l-rb)/c*100 <= 0.15
     near_r = res is not None
     if near_r:
-        near_r = abs(h-res)/c*100 <= 0.5
+        near_r = abs(h-res) <= 0.5*atr
     near_r = near_r or abs(h-rt)/c*100 <= 0.15
     side = None
     kind = ""
-    c1 = up60 and c > e15 and near_s
-    p1 = dn60 and c < e15 and near_r
-    mid_c = c1 and rn <= 55 and rn > rp and c > o
+    c1 = up60 and c > e15 and near_s and c > e50
+    p1 = dn60 and c < e15 and near_r and c < e50
+    mid_c = c1 and 40 <= rn <= 55 and rn > rp
+    if mid_c:
+        mid_c = pat_call(k, pvc) and mh1 > 0 and mh2 > 0
     if mid_c:
         mid_c = (hi20-c) > 0.3*atr
-    mid_p = p1 and rn >= 45 and rn < rp and c < o
+    mid_p = p1 and 45 <= rn <= 60 and rn < rp
+    if mid_p:
+        mid_p = pat_put(k, pvc) and mh1 < 0 and mh2 < 0
     if mid_p:
         mid_p = (c-lo20) > 0.3*atr
     if mid_c or mid_p:
         f["f2"] += 1
-    if mid_c and rej_c and not red3:
+    if mid_c and not red3:
         side = "صعود 🟢 (CALL)"
         kind = "CALL"
-    elif mid_p and rej_p and not grn3:
+    elif mid_p and not grn3:
         side = "هبوط 🔴 (PUT)"
         kind = "PUT"
     if side is not None:
@@ -512,6 +793,8 @@ def scan(sym):
                      " شمعة تأكيد بنفس الاتجاه → كن جاهزاً!")
     if side is None:
         return 0
+    if mem.get("S_" + nm) is not None:
+        return 0
     if not cantrade():
         return 0
     day = getday()
@@ -521,14 +804,15 @@ def scan(sym):
     mem["pend"]["sd"] = kind
     mem["pend"]["en"] = c
     mem["pend"]["ev"] = time.time()+TSEC
-    send("📊 توصية تداول جديدة 🚀\n"
+    send("🟢 توصية ذهبية 🚀\n"
          "\n"
          "• الزوج: " + nm + "\n"
          "• الفريم: " + TF_LABEL + "\n"
          "• مدة الصفقة: " + DUR + "\n"
          "• الوقت: " + hhmm() + "\n"
          "• الاتجاه: " + side + "\n"
-         "• البروتوكول: غيث v6.14 LIVE\n"
+         "• تأكيد: 3 فريمات + MACD + نمط شمعة ✔️\n"
+         "• البروتوكول: غيث v6.18 STRONG\n"
          "• صفقة اليوم: "
          + str(day["trades"]) + "\n"
          "\n"
@@ -541,10 +825,12 @@ if __name__ == "__main__":
     today = datetime.datetime.utcnow().strftime("%Y-%m-%d")
     if mem.get("boot") != today:
         mem["boot"] = today
-        send("🌅 غيث v6.14 LIVE صاحي 📡 (ويكند محمي)")
+        send("🌅 غيث v6.18 STRONG صاحي 💪")
     seen = 0
     while time.time() < start + 200:
         try:
+            reports()
+            listen_replies()
             pending()
             sniper()
             rc = fetch("EURUSD=X", "15m", "1d")
