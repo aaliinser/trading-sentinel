@@ -48,6 +48,12 @@ def hhmm():
     t += datetime.timedelta(hours=TZ)
     return t.strftime("%H:%M")
 
+def market_open():
+    t = datetime.datetime.utcnow()
+    if t.weekday() >= 5:
+        return False
+    return True
+
 def fetch(sym, itv, rng):
     url = HOST + PATH + sym
     pp = {"interval": itv, "range": rng}
@@ -320,6 +326,8 @@ def pending():
     daystop()
 
 def sniper():
+    if not market_open():
+        return
     for pr in PAIRS:
         nm = pr[0:3] + "/" + pr[3:6]
         sw = mem.get("S_" + nm)
@@ -385,6 +393,8 @@ def sniper():
         time.sleep(0.3)
 
 def scan(sym):
+    if not market_open():
+        return 0
     nm = sym[0:3] + "/" + sym[3:6]
     c15 = fetch(sym, "15m", "3d")
     if len(c15) < 150:
@@ -531,7 +541,7 @@ if __name__ == "__main__":
     today = datetime.datetime.utcnow().strftime("%Y-%m-%d")
     if mem.get("boot") != today:
         mem["boot"] = today
-        send("🌅 غيث v6.14 LIVE صاحي 📡")
+        send("🌅 غيث v6.14 LIVE صاحي 📡 (ويكند محمي)")
     seen = 0
     while time.time() < start + 200:
         try:
