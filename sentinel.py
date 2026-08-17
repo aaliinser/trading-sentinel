@@ -369,6 +369,9 @@ def prune_trades():
     for mid in kill:
         del op[mid]
 
+# =====================================================================
+# listen_replies v2.1 — شبكتا أمان لقراءة اسم الزوج
+# =====================================================================
 def listen_replies():
     if not TG:
         return
@@ -412,7 +415,6 @@ def listen_replies():
                     if rc2.get("nm", "") in txt_raw:
                         rec = rc2
                         break
-            # fallback: استخدام آخر إشارة مرسلة خلال 30 دقيقة
             if rec is None and mem.get("last_sig"):
                 ls = mem["last_sig"]
                 if time.time() - ls.get("t", 0) < 1800:
@@ -423,13 +425,28 @@ def listen_replies():
                         if rc2.get("nm") == ls.get("nm"):
                             rec = rc2
                             break
+            # شبكة أمان 1: قراءة الزوج من نص الرسالة المقتبسة (حتى لو قديمة)
+            if rec is None and rep is not None:
+                rtxt = rep.get("text") or ""
+                if "الزوج:" in rtxt:
+                    try:
+                        nm2 = rtxt.split("الزوج:")[1].split("\n")[0].strip()
+                        rec = {"nm": nm2, "adhoc": True}
+                    except Exception:
+                        rec = None
+            # شبكة أمان 2: قراءة الزوج من نص رسالتك أنت
+            if rec is None:
+                for cand in PAIRS:
+                    nm2 = cand[0:3] + "/" + cand[3:6]
+                    if nm2 in txt_raw:
+                        rec = {"nm": nm2, "adhoc": True}
+                        break
             if rec is None:
                 send("⚠️ ما قدرت أربط ردك بصفقة مفتوحة\n"
                      "\n"
                      "• استخدم خاصية الرد (Reply) على رسالة الإشارة\n"
                      "• أو اكتب اسم الزوج مع النتيجة، مثال: EUR/USD ربحت")
                 continue
-            rec["done"] = True
             if win:
                 day["mwin"] = day.get("mwin", 0)+1
                 mo["mwin"] = mo.get("mwin", 0)+1
@@ -443,6 +460,8 @@ def listen_replies():
                 day["pnl"] = round(day.get("pnl", 0.0)-STAKE, 2)
                 mo["pnl"] = round(mo.get("pnl", 0.0)-STAKE, 2)
                 t = "❌ خاسرة -" + str(STAKE) + "$"
+            if not rec.get("adhoc"):
+                rec["done"] = True
             send("💰 تم تسجيل صفقتك\n"
                  "\n"
                  "• الزوج: " + rec.get("nm", "?") + "\n"
@@ -557,7 +576,7 @@ def pending():
     daystop()
 
 # =====================================================================
-# الدالة المُرقّعة: sniper v2 FINAL
+# sniper v3 FINAL — مع الانقلاب التراكمي (3 إغلاقات)
 # =====================================================================
 def sniper():
     if not market_open():
@@ -579,9 +598,9 @@ def sniper():
             c5 = fetch(pr, "5m", "1d")
         except Exception:
             continue
-        if len(c5) < 3:
+        if len(c5) < 4:
             continue
-        k = c5[-2]          # الشمعة المغلقة (وليس الوليدة)
+        k = c5[-2]
         prev5 = c5[-3]
         if sw.get("lt") == k["t"]:
             continue
@@ -616,7 +635,13 @@ def sniper():
             rej = body_dn >= 0.4 * span or pat_put(k, prev5)
             rejected = rej and c < lvl
             rsi_ok = rnx is None or rnx >= 42
+            # شرط انقلاب سريع: شمعة واحدة قوية اخترقت صعوداً
             flip = (c > lvl) and (body_up >= 0.5 * span)
+            # شرط انقلاب تراكمي: 3 إغلاقات متتالية فوق المستوى
+            if not flip and c > lvl:
+                r3 = c5[-4:-1]
+                if len(r3) == 3 and all(x["c"] > lvl for x in r3):
+                    flip = True
 
             if flip:
                 sw["dir"] = "CALL"
@@ -652,7 +677,6 @@ def sniper():
                              "• السعر لسه ما وصل للمستوى بعد\n"
                              "• المراقبة باقية بانتظار لمس حقيقي 🛡️")
                 else:
-                    # قبل إطلاق الفضية: إغلاق سجل التجهيز القديم
                     op = mem.get("open_trades", {})
                     for mid2 in list(op.keys()):
                         rc2 = op[mid2]
@@ -705,7 +729,13 @@ def sniper():
             rej = body_up >= 0.4 * span or pat_call(k, prev5)
             rejected = rej and c > lvl
             rsi_ok = rnx is None or rnx <= 58
+            # شرط انقلاب سريع: شمعة واحدة قوية اخترقت هبوطاً
             flip = (c < lvl) and (body_dn >= 0.5 * span)
+            # شرط انقلاب تراكمي: 3 إغلاقات متتالية تحت المستوى
+            if not flip and c < lvl:
+                r3 = c5[-4:-1]
+                if len(r3) == 3 and all(x["c"] < lvl for x in r3):
+                    flip = True
 
             if flip:
                 sw["dir"] = "PUT"
@@ -950,7 +980,7 @@ if __name__ == "__main__":
     today = datetime.datetime.utcnow().strftime("%Y-%m-%d")
     if mem.get("boot") != today:
         mem["boot"] = today
-        send("🌅 غيث v6.19 FULL صاحي 🛡️ (درع باتجاهين)")
+        send("🌅 غيث v6.19 FULL صاحب 🛡️ (درع باتجاهين)")
     seen = 0
     while time.time() < start + 200:
         try:
