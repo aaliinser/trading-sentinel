@@ -369,9 +369,6 @@ def prune_trades():
     for mid in kill:
         del op[mid]
 
-# =====================================================================
-# listen_replies v2.1 — شبكتا أمان لقراءة اسم الزوج
-# =====================================================================
 def listen_replies():
     if not TG:
         return
@@ -415,38 +412,13 @@ def listen_replies():
                     if rc2.get("nm", "") in txt_raw:
                         rec = rc2
                         break
-            if rec is None and mem.get("last_sig"):
-                ls = mem["last_sig"]
-                if time.time() - ls.get("t", 0) < 1800:
-                    for mid2 in op:
-                        rc2 = op[mid2]
-                        if rc2.get("done"):
-                            continue
-                        if rc2.get("nm") == ls.get("nm"):
-                            rec = rc2
-                            break
-            # شبكة أمان 1: قراءة الزوج من نص الرسالة المقتبسة (حتى لو قديمة)
-            if rec is None and rep is not None:
-                rtxt = rep.get("text") or ""
-                if "الزوج:" in rtxt:
-                    try:
-                        nm2 = rtxt.split("الزوج:")[1].split("\n")[0].strip()
-                        rec = {"nm": nm2, "adhoc": True}
-                    except Exception:
-                        rec = None
-            # شبكة أمان 2: قراءة الزوج من نص رسالتك أنت
-            if rec is None:
-                for cand in PAIRS:
-                    nm2 = cand[0:3] + "/" + cand[3:6]
-                    if nm2 in txt_raw:
-                        rec = {"nm": nm2, "adhoc": True}
-                        break
             if rec is None:
                 send("⚠️ ما قدرت أربط ردك بصفقة مفتوحة\n"
                      "\n"
                      "• استخدم خاصية الرد (Reply) على رسالة الإشارة\n"
                      "• أو اكتب اسم الزوج مع النتيجة، مثال: EUR/USD ربحت")
                 continue
+            rec["done"] = True
             if win:
                 day["mwin"] = day.get("mwin", 0)+1
                 mo["mwin"] = mo.get("mwin", 0)+1
@@ -460,8 +432,6 @@ def listen_replies():
                 day["pnl"] = round(day.get("pnl", 0.0)-STAKE, 2)
                 mo["pnl"] = round(mo.get("pnl", 0.0)-STAKE, 2)
                 t = "❌ خاسرة -" + str(STAKE) + "$"
-            if not rec.get("adhoc"):
-                rec["done"] = True
             send("💰 تم تسجيل صفقتك\n"
                  "\n"
                  "• الزوج: " + rec.get("nm", "?") + "\n"
@@ -575,9 +545,6 @@ def pending():
     mem["pend"] = None
     daystop()
 
-# =====================================================================
-# sniper v3 FINAL — مع الانقلاب التراكمي (3 إغلاقات)
-# =====================================================================
 def sniper():
     if not market_open():
         return
@@ -588,23 +555,14 @@ def sniper():
             continue
         if time.time() - sw["t"] > 10800:
             mem["S_" + nm] = None
-            send("⌛ انتهاء مراقبة\n"
-                 "\n"
-                 "• الزوج: " + nm + "\n"
-                 "• مرت 3 ساعات بدون إشارة أو انقلاب\n"
-                 "• أُغلقت المراقبة بهدوء ⌛")
             continue
         try:
             c5 = fetch(pr, "5m", "1d")
         except Exception:
             continue
-        if len(c5) < 4:
-            continue
-        k = c5[-2]
-        prev5 = c5[-3]
+        k = c5[-1]
         if sw.get("lt") == k["t"]:
             continue
-        sw["lt"] = k["t"]
         o = k["o"]
         h = k["h"]
         l = k["l"]
@@ -614,8 +572,10 @@ def sniper():
         span = max(h - l, 1e-9)
         body_dn = o - c
         body_up = c - o
+        prev5 = c5[-2]
         pd = mem.get("pend")
         if pd is not None and pd.get("nm") == nm:
+            sw["lt"] = k["t"]
             continue
         try:
             c15x = fetch(pr, "15m", "1d")
@@ -626,62 +586,38 @@ def sniper():
         lp = live_price(pr)
         lpv = lp if lp is not None else c
         lp_txt = ("%.3f" % lp if lp > 50 else "%.5f" % lp) if lp else "تقريبي (شمعة)"
-        dev_dn = (lvl - lpv) / c
-        dev_up = (lpv - lvl) / c
-
-        # ========== PUT ==========
         if sw["dir"] == "PUT":
             touched = h >= lvl - 0.00025 * c
             rej = body_dn >= 0.4 * span or pat_put(k, prev5)
             rejected = rej and c < lvl
             rsi_ok = rnx is None or rnx >= 42
-            # شرط انقلاب سريع: شمعة واحدة قوية اخترقت صعوداً
-            flip = (c > lvl) and (body_up >= 0.5 * span)
-            # شرط انقلاب تراكمي: 3 إغلاقات متتالية فوق المستوى
-            if not flip and c > lvl:
-                r3 = c5[-4:-1]
-                if len(r3) == 3 and all(x["c"] > lvl for x in r3):
-                    flip = True
-
-            if flip:
-                sw["dir"] = "CALL"
-                sw["t"] = time.time()
-                sw["qlog"] = 0
-                sw["plog"] = 0
-                send("🔄 انقلاب المستوى\n"
-                     "\n"
-                     "• الزوج: " + nm + "\n"
-                     "• المستوى: " + txt + "\n"
-                     "• شمعة مغلقة قوية اخترقت المستوى صعوداً 🟢\n"
-                     "• المستوى صار دعماً محتملاً\n"
-                     "• الخطة الجديدة: ريتست + تأكيد صاعد → فضية CALL 🔄")
-            elif touched and rejected and rsi_ok:
+            dev_dn = (lvl - lpv) / c
+            dev_up = (lpv - lvl) / c
+            if touched and rejected and rsi_ok:
                 if dev_dn > MAX_DEV:
-                    if not sw.get("plog"):
-                        sw["plog"] = 1
-                        send("🛡️ حماية الانحراف\n"
-                             "\n"
-                             "• الزوج: " + nm + "\n"
-                             "• المستوى: " + txt + "\n"
-                             "• السعر الحي: " + lp_txt + "\n"
-                             "• السعر بعيد الآن → لا مطاردة\n"
-                             "• المراقبة باقية بانتظار الريتست 🛡️")
+                    mem["S_" + nm] = None
+                    send("🛡️ حماية الانحراف\n"
+                         "\n"
+                         "• الزوج: " + nm + "\n"
+                         "• المستوى: " + txt + "\n"
+                         "• السعر الحي: " + lp_txt + "\n"
+                         "• الانحراف تحت المستوى: " + str(round(dev_dn*10000, 1)) + " نقطة\n"
+                         "• الحالة: السعر نزل بعيد → الإشارة أُلغيت\n"
+                         "• النتيجة: وفّرنا عليك مطاردة هبوط 🛡️")
+                    sw["lt"] = k["t"]
                 elif dev_up > MAX_AHEAD:
-                    if not sw.get("plog"):
-                        sw["plog"] = 1
-                        send("🛡️ حماية التبكير\n"
-                             "\n"
-                             "• الزوج: " + nm + "\n"
-                             "• المستوى: " + txt + "\n"
-                             "• السعر الحي: " + lp_txt + "\n"
-                             "• السعر لسه ما وصل للمستوى بعد\n"
-                             "• المراقبة باقية بانتظار لمس حقيقي 🛡️")
+                    mem["S_" + nm] = None
+                    send("🛡️ حماية التبكير\n"
+                         "\n"
+                         "• الزوج: " + nm + "\n"
+                         "• المستوى: " + txt + "\n"
+                         "• السعر الحي: " + lp_txt + "\n"
+                         "• السعر لسه ما نزل للمستوى بعد\n"
+                         "• الحالة: بيانات متأخرة أو فرق منصة\n"
+                         "• النتيجة: أُلغيت — بانتظار لمس حقيقي 🛡️")
+                    sw["lt"] = k["t"]
                 else:
-                    op = mem.get("open_trades", {})
-                    for mid2 in list(op.keys()):
-                        rc2 = op[mid2]
-                        if rc2.get("nm") == nm and not rc2.get("done") and rc2.get("type") == "prep":
-                            rc2["done"] = True
+                    sw["lt"] = k["t"]
                     mem["S_" + nm] = None
                     dd = getday()
                     dd["sigs"] = dd.get("sigs", 0)+1
@@ -691,7 +627,7 @@ def sniper():
                          "• المستوى: " + txt + "\n"
                          "• السعر الحي الآن: " + lp_txt + "\n"
                          "• الاتجاه: هبوط 🔴\n"
-                         "• لمس + رفض على شمعة 5م مغلقة ✔️\n"
+                         "• لمس + رفض (نمط أو جسم قوي) ✔️\n"
                          "• السعر داخل المنطقة الذهبية → ادخل فورا\n"
                          "• مدة الصفقة: 15 دقيقة\n"
                          "• البروتوكول: غيث v6.19 FULL\n"
@@ -699,83 +635,41 @@ def sniper():
                          "📝 بعد الصفقة رد بـ: ربحت / خسرت")
                     if mid:
                         op = mem.setdefault("open_trades", {})
-                        op[str(mid)] = {"nm": nm, "done": False, "t": time.time(), "type": "sig"}
-                        mem["last_sig"] = {"nm": nm, "mid": mid, "t": time.time()}
+                        op[str(mid)] = {"nm": nm, "done": False, "t": time.time()}
             elif c > lvl + 0.0015 * c:
                 mem["S_" + nm] = None
-                send("🔇 إغلاق مراقبة\n"
-                     "\n"
-                     "• الزوج: " + nm + "\n"
-                     "• السعر ابتعد فوق المستوى بدون شمعة انقلاب قوية\n"
-                     "• أُغلقت المراقبة 🔇")
-            elif touched:
-                if not sw.get("qlog"):
-                    sw["qlog"] = 1
-                    why = []
-                    if not rejected:
-                        why.append("لا رفض واضح (جسم/نمط)")
-                    if not rsi_ok:
-                        why.append("بوابة RSI (<42)")
-                    send("🔍 لمس بدون إشارة\n"
-                         "\n"
-                         "• الزوج: " + nm + "\n"
-                         "• المستوى: " + txt + "\n"
-                         "• السبب: " + " + ".join(why) + "\n"
-                         "• المراقبة مستمرة 🔍")
-
-        # ========== CALL ==========
         else:
             touched = l <= lvl + 0.00025 * c
             rej = body_up >= 0.4 * span or pat_call(k, prev5)
             rejected = rej and c > lvl
             rsi_ok = rnx is None or rnx <= 58
-            # شرط انقلاب سريع: شمعة واحدة قوية اخترقت هبوطاً
-            flip = (c < lvl) and (body_dn >= 0.5 * span)
-            # شرط انقلاب تراكمي: 3 إغلاقات متتالية تحت المستوى
-            if not flip and c < lvl:
-                r3 = c5[-4:-1]
-                if len(r3) == 3 and all(x["c"] < lvl for x in r3):
-                    flip = True
-
-            if flip:
-                sw["dir"] = "PUT"
-                sw["t"] = time.time()
-                sw["qlog"] = 0
-                sw["plog"] = 0
-                send("🔄 انقلاب المستوى\n"
-                     "\n"
-                     "• الزوج: " + nm + "\n"
-                     "• المستوى: " + txt + "\n"
-                     "• شمعة مغلقة قوية اخترقت المستوى هبوطاً 🔴\n"
-                     "• المستوى صار مقاومة محتملة\n"
-                     "• الخطة الجديدة: ريتست + تأكيد هابط → فضية PUT 🔄")
-            elif touched and rejected and rsi_ok:
+            dev_dn = (lvl - lpv) / c
+            dev_up = (lpv - lvl) / c
+            if touched and rejected and rsi_ok:
                 if dev_up > MAX_DEV:
-                    if not sw.get("plog"):
-                        sw["plog"] = 1
-                        send("🛡️ حماية الانحراف\n"
-                             "\n"
-                             "• الزوج: " + nm + "\n"
-                             "• المستوى: " + txt + "\n"
-                             "• السعر الحي: " + lp_txt + "\n"
-                             "• السعر بعيد الآن → لا مطاردة\n"
-                             "• المراقبة باقية بانتظار الريتست 🛡️")
+                    mem["S_" + nm] = None
+                    send("🛡️ حماية الانحراف\n"
+                         "\n"
+                         "• الزوج: " + nm + "\n"
+                         "• المستوى: " + txt + "\n"
+                         "• السعر الحي: " + lp_txt + "\n"
+                         "• الانحراف فوق المستوى: " + str(round(dev_up*10000, 1)) + " نقطة\n"
+                         "• الحالة: السعر طلع بعيد → الإشارة أُلغيت\n"
+                         "• النتيجة: وفّرنا عليك مطاردة صعود 🛡️")
+                    sw["lt"] = k["t"]
                 elif dev_dn > MAX_AHEAD:
-                    if not sw.get("plog"):
-                        sw["plog"] = 1
-                        send("🛡️ حماية التبكير\n"
-                             "\n"
-                             "• الزوج: " + nm + "\n"
-                             "• المستوى: " + txt + "\n"
-                             "• السعر الحي: " + lp_txt + "\n"
-                             "• السعر لسه ما وصل للمستوى بعد\n"
-                             "• المراقبة باقية بانتظار لمس حقيقي 🛡️")
+                    mem["S_" + nm] = None
+                    send("🛡️ حماية التبكير\n"
+                         "\n"
+                         "• الزوج: " + nm + "\n"
+                         "• المستوى: " + txt + "\n"
+                         "• السعر الحي: " + lp_txt + "\n"
+                         "• السعر لسه ما صعد للمستوى بعد\n"
+                         "• الحالة: بيانات متأخرة أو فرق منصة\n"
+                         "• النتيجة: أُلغيت — بانتظار لمس حقيقي 🛡️")
+                    sw["lt"] = k["t"]
                 else:
-                    op = mem.get("open_trades", {})
-                    for mid2 in list(op.keys()):
-                        rc2 = op[mid2]
-                        if rc2.get("nm") == nm and not rc2.get("done") and rc2.get("type") == "prep":
-                            rc2["done"] = True
+                    sw["lt"] = k["t"]
                     mem["S_" + nm] = None
                     dd = getday()
                     dd["sigs"] = dd.get("sigs", 0)+1
@@ -785,7 +679,7 @@ def sniper():
                          "• المستوى: " + txt + "\n"
                          "• السعر الحي الآن: " + lp_txt + "\n"
                          "• الاتجاه: صعود 🟢\n"
-                         "• لمس + رفض على شمعة 5م مغلقة ✔️\n"
+                         "• لمس + رفض (نمط أو جسم قوي) ✔️\n"
                          "• السعر داخل المنطقة الذهبية → ادخل فورا\n"
                          "• مدة الصفقة: 15 دقيقة\n"
                          "• البروتوكول: غيث v6.19 FULL\n"
@@ -793,29 +687,9 @@ def sniper():
                          "📝 بعد الصفقة رد بـ: ربحت / خسرت")
                     if mid:
                         op = mem.setdefault("open_trades", {})
-                        op[str(mid)] = {"nm": nm, "done": False, "t": time.time(), "type": "sig"}
-                        mem["last_sig"] = {"nm": nm, "mid": mid, "t": time.time()}
+                        op[str(mid)] = {"nm": nm, "done": False, "t": time.time()}
             elif c < lvl - 0.0015 * c:
                 mem["S_" + nm] = None
-                send("🔇 إغلاق مراقبة\n"
-                     "\n"
-                     "• الزوج: " + nm + "\n"
-                     "• السعر ابتعد تحت المستوى بدون شمعة انقلاب قوية\n"
-                     "• أُغلقت المراقبة 🔇")
-            elif touched:
-                if not sw.get("qlog"):
-                    sw["qlog"] = 1
-                    why = []
-                    if not rejected:
-                        why.append("لا رفض واضح (جسم/نمط)")
-                    if not rsi_ok:
-                        why.append("بوابة RSI (>58)")
-                    send("🔍 لمس بدون إشارة\n"
-                         "\n"
-                         "• الزوج: " + nm + "\n"
-                         "• المستوى: " + txt + "\n"
-                         "• السبب: " + " + ".join(why) + "\n"
-                         "• المراقبة مستمرة 🔍")
         time.sleep(0.3)
 
 def scan(sym):
@@ -935,17 +809,13 @@ def scan(sym):
                 mem[wk] = [wtxt, now]
                 mem["S_" + nm] = {"lvl": wl, "t": now}
                 mem["S_" + nm]["dir"] = "CALL" if "صعود" in wt else "PUT"
-                mid = send("👀 تنبيه تجهيز\n"
+                send("👀 تنبيه تجهيز\n"
                      "\n"
                      "• الزوج: " + nm + "\n"
                      "• المستوى المستدير: " + wtxt + "\n"
                      "• الاتجاه المتوقع: " + wt + "\n"
                      "• الخطة: إذا لمس المستوى وتكوّنت"
                      " شمعة تأكيد بنفس الاتجاه → كن جاهزاً!")
-                if mid:
-                    op = mem.setdefault("open_trades", {})
-                    op[str(mid)] = {"nm": nm, "done": False, "t": time.time(), "type": "prep"}
-                    mem["last_sig"] = {"nm": nm, "mid": mid, "t": time.time()}
     if side is None:
         return 0
     if mem.get("S_" + nm) is not None:
@@ -980,7 +850,7 @@ if __name__ == "__main__":
     today = datetime.datetime.utcnow().strftime("%Y-%m-%d")
     if mem.get("boot") != today:
         mem["boot"] = today
-        send("🌅 غيث v6.19 FULL صاحب 🛡️ (درع باتجاهين)")
+        send("🌅 غيث v6.19 FULL صاحي 🛡️ (درع باتجاهين)")
     seen = 0
     while time.time() < start + 200:
         try:
