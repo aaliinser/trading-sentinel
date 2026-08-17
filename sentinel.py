@@ -326,8 +326,6 @@ def fun():
 
 def daystop():
     day = getday()
-    if False:
-        return
     m = None
     if day["pnl"] >= TARGET:
         m = "🎯 هدف اليوم تحقق"
@@ -346,8 +344,6 @@ def daystop():
 
 def cantrade():
     day = getday()
-    if False:
-        return False
     if day["trades"] >= MAXT:
         return False
     if day["loss"] >= MAXL:
@@ -630,7 +626,7 @@ def sniper():
                          "• لمس + رفض (نمط أو جسم قوي) ✔️\n"
                          "• السعر داخل المنطقة الذهبية → ادخل فورا\n"
                          "• مدة الصفقة: 15 دقيقة\n"
-                         "• البروتوكول: غيث v6.19 FULL\n"
+                         "• البروتوكول: غيث v6.20 CLEAN\n"
                          "\n"
                          "📝 بعد الصفقة رد بـ: ربحت / خسرت")
                     if mid:
@@ -682,7 +678,7 @@ def sniper():
                          "• لمس + رفض (نمط أو جسم قوي) ✔️\n"
                          "• السعر داخل المنطقة الذهبية → ادخل فورا\n"
                          "• مدة الصفقة: 15 دقيقة\n"
-                         "• البروتوكول: غيث v6.19 FULL\n"
+                         "• البروتوكول: غيث v6.20 CLEAN\n"
                          "\n"
                          "📝 بعد الصفقة رد بـ: ربحت / خسرت")
                     if mid:
@@ -696,7 +692,7 @@ def scan(sym):
     if not market_open():
         return 0
     nm = sym[0:3] + "/" + sym[3:6]
-    c15 = fetch(sym, "15m", "3d")
+    c15 = fetch(sym, "15m", "7d")
     if len(c15) < 150:
         return 0
     cd = c15[:-1]
@@ -837,7 +833,7 @@ def scan(sym):
          "• الوقت: " + hhmm() + "\n"
          "• الاتجاه: " + side + "\n"
          "• تأكيد: 3 فريمات + MACD + نمط شمعة ✔️\n"
-         "• البروتوكول: غيث v6.19 FULL\n"
+         "• البروتوكول: غيث v6.20 CLEAN\n"
          "• صفقة اليوم: "
          + str(day["trades"]) + "\n"
          "\n"
@@ -850,7 +846,7 @@ if __name__ == "__main__":
     today = datetime.datetime.utcnow().strftime("%Y-%m-%d")
     if mem.get("boot") != today:
         mem["boot"] = today
-        send("🌅 غيث v6.19 FULL صاحي 🛡️ (درع باتجاهين)")
+        send("🌅 غيث v6.20 CLEAN صاحي 🧹 (7d + تنظيف)")
     seen = 0
     while time.time() < start + 200:
         try:
