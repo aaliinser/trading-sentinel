@@ -3,22 +3,18 @@
 
 """
 =====================================================================
-🚀 غيث البروتوكول المزدوج — نسخة GitHub Actions النهائية (v6)
-Ghaith Dual Protocol - GitHub Actions Final Edition
+🚀 غيث البروتوكول المزدوج — نسخة v7 (منطقة الدخول الذهبية)
+Ghaith Dual Protocol - Golden Entry Zone Edition
 
-هذه النسخة = المستوى 1 + حفظ الحالة + إصلاح فترات البيانات:
+✅ جديد v7: كل توصية ذهبية تعرض الآن:
+   - منطقة الدخول الذهبية (من X إلى Y) محسوبة حول المستوى
+   - "ادخل الآن من السعر الحي: Z"
+   - تحذير "لا تدخل إذا خرج السعر خارج المنطقة"
 
-✅ تعديلات المستوى 1:
-1) MIN_SIGNAL_SCORE = 2 (بدلاً من 3) → 2-5 إشارات يومياً
-2) ADX_MIN_M15 = 18.0 (بدلاً من 20.0)
-3) ADX_MIN_H1 = 20.0 (بدلاً من 22.0)
-
-✅ إصلاح حفظ الحالة (v5):
-4) مستويات المراقبة تُحفظ في ghaith_state.json ولا تضيع بين التشغيلات
-
-✅ إصلاح فترات البيانات (v6) — يحل خطأ 'EMA_35':
-5) جلب H1 لمدة 30 يوم بدلاً من 7 أيام (حتى تتوفر 200+ شمعة للمؤشرات)
-6) جلب M15 للقناص لمدة 7 أيام بدلاً من يومين (حتى يتوفر RSI)
+المحتويات السابقة المُبقاة كاملة:
+- المستوى 1: MIN_SIGNAL_SCORE=2, ADX_MIN_M15=18, ADX_MIN_H1=20
+- حفظ الحالة والمراقبات بين تشغيلات GitHub Actions
+- إصلاح فترات البيانات: H1=30d, M15 للقناص=7d
 
 تنويه: لا توجد نسبة نجاح مضمونة. الهدف هو الانتقائية الصارمة.
 =====================================================================
@@ -127,7 +123,7 @@ class Config:
     COOLDOWN_AFTER_LOSSES = max(env_int("COOLDOWN_AFTER_LOSSES", 2), 1)
     COOLDOWN_MINUTES = max(env_int("COOLDOWN_MINUTES", 120), 0)
 
-    # ✅ المستوى 1: 2/4 (يسمح بغياب شرطين من أصل أربعة)
+    # المستوى 1
     MIN_SIGNAL_SCORE = min(max(env_int("MIN_SIGNAL_SCORE", 2), 1), 4)
     SCANNER_MAX_SCORE = 4
 
@@ -143,7 +139,6 @@ class Config:
     ATR_MIN_RATIO = 0.4
     ATR_MAX_RATIO = 2.5
 
-    # ✅ المستوى 1: عتبات ADX مخففة قليلاً
     ADX_MIN_M15 = 18.0
     ADX_MIN_H1 = 20.0
 
@@ -640,7 +635,7 @@ class Scanner:
         # 3) LEVEL مربوطة بمستوى صالح
         scores["LEVEL"] = 1 if level is not None else 0
 
-        # 4) QUALITY: ADX على M15 وH1 معاً (بعتبات المستوى 1)
+        # 4) QUALITY: ADX على M15 وH1 معاً
         if self._valid(last["ADX"], last["ATR_PERCENTILE"], h1_last.get("ADX")):
             adx_m15 = float(last["ADX"])
             adx_h1 = float(h1_last["ADX"])
@@ -792,6 +787,9 @@ class Sniper:
             self.last_sniper_candle[watch_key] = last_candle_time
             return SniperResult.WAITING, None
 
+        # ✅ جديد v7: حساب منطقة الدخول الذهبية
+        zone_low, zone_high = self._entry_zone(level, direction)
+
         signal = {
             "id": f"{watch['symbol']}|{last_candle_time.isoformat()}|{direction}",
             "symbol": watch["symbol"],
@@ -800,6 +798,8 @@ class Sniper:
             "level": level,
             "level_type": watch.get("level_type", "UNKNOWN"),
             "entry_price": live_price,
+            "entry_zone_low": zone_low,    # ✅ جديد v7
+            "entry_zone_high": zone_high,  # ✅ جديد v7
             "signal_score": watch["signal_score"] + 1,
             "max_score": watch["max_score"] + 1,
             "candle_time": last_candle_time,
@@ -809,6 +809,18 @@ class Sniper:
 
         self.last_sniper_candle[watch_key] = last_candle_time
         return SniperResult.SIGNAL, signal
+
+    def _entry_zone(self, level: float, direction: str) -> Tuple[float, float]:
+        """
+        ✅ جديد v7: منطقة الدخول الذهبية حول المستوى.
+        CALL: من (المستوى - حد التبكير) إلى (المستوى + حد الانحراف)
+        PUT : من (المستوى - حد الانحراف) إلى (المستوى + حد التبكير)
+        """
+        dev = Config.MAX_DEV * level
+        ahead = Config.MAX_AHEAD * level
+        if direction == "CALL":
+            return level - ahead, level + dev
+        return level - dev, level + ahead
 
     def _check_space_to_move(self, df5: pd.DataFrame, direction: str, close: float) -> bool:
         if df5.empty or len(df5) < 20:
@@ -1109,6 +1121,11 @@ class TelegramNotifier:
         if not self.enabled:
             self.logger.warning("Telegram غير مفعّل. الرسائل ستُحفظ في اللوج فقط.")
 
+    @staticmethod
+    def _fmt(value: float) -> str:
+        """تنسيق السعر حسب حجمه (3 خانات للأزواج الكبيرة، 5 للبقية)."""
+        return f"{value:.3f}" if value > 50 else f"{value:.5f}"
+
     def send_message(self, text: str, reply_to: Optional[int] = None) -> Optional[int]:
         if not self.enabled:
             self.logger.info(f"TELEGRAM_DISABLED:\n{text}")
@@ -1138,7 +1155,7 @@ class TelegramNotifier:
         return None
 
     def send_watch_alert(self, watch: Dict[str, Any]) -> None:
-        level_txt = f"{watch['level']:.3f}" if watch['level'] > 50 else f"{watch['level']:.5f}"
+        level_txt = self._fmt(watch['level'])
         direction_txt = "صعود 🟢" if watch["direction"] == "CALL" else "هبوط 🔴"
         msg = (
             f"👀 تنبيه تجهيز\n\n"
@@ -1152,17 +1169,23 @@ class TelegramNotifier:
         self.send_message(msg)
 
     def send_signal(self, signal: Dict[str, Any]) -> Optional[int]:
+        """✅ v7: التوصية الذهبية مع منطقة الدخول الذهبية وتعليمات الدخول."""
         direction = "صعود 🟢 (CALL)" if signal["direction"] == "CALL" else "هبوط 🔴 (PUT)"
-        level_txt = f"{signal['level']:.3f}" if signal['level'] > 50 else f"{signal['level']:.5f}"
-        price_txt = f"{signal['entry_price']:.3f}" if signal['entry_price'] > 50 else f"{signal['entry_price']:.5f}"
+        level_txt = self._fmt(signal['level'])
+        price_txt = self._fmt(signal['entry_price'])
+        zone_low_txt = self._fmt(signal.get('entry_zone_low', signal['level']))
+        zone_high_txt = self._fmt(signal.get('entry_zone_high', signal['level']))
+
         msg = (
             f"🟢 توصية ذهبية 🚀\n\n"
             f"• الزوج: {signal['name']}\n"
             f"• المستوى: {level_txt} ({signal['level_type']})\n"
-            f"• السعر الحي: {price_txt}\n"
             f"• الاتجاه: {direction}\n"
-            f"• جودة الإشارة: {signal['signal_score']}/{signal['max_score']}\n"
+            f"🎯 منطقة الدخول الذهبية: من {zone_low_txt} إلى {zone_high_txt}\n"
+            f"💰 ادخل الآن من السعر الحي: {price_txt}\n"
+            f"🚫 لا تدخل إذا خرج السعر خارج المنطقة\n"
             f"• مدة الصفقة: {signal['expiry_minutes']} دقيقة\n"
+            f"• جودة الإشارة: {signal['signal_score']}/{signal['max_score']}\n"
             f"• البروتوكول: غيث المزدوج (المستوى 1)\n"
             f"• {self.risk.status_text()}\n\n"
             f"📝 بعد الصفقة رد بـ: ربحت / خسرت (استخدم خاصية Reply)"
@@ -1342,7 +1365,7 @@ class GhaithBot:
         self.scanner.notifier = self.notifier
         self.sniper.notifier = self.notifier
 
-        # ✅ تحميل المراقبات المحفوظة من التشغيلات السابقة
+        # تحميل المراقبات المحفوظة من التشغيلات السابقة
         self.watch_levels: Dict[str, Dict[str, Any]] = self.state.get("watch_levels", {}) or {}
         self._watch_lock = threading.Lock()
 
@@ -1370,7 +1393,7 @@ class GhaithBot:
                 # ثم السكان (قد يُنشئ مراقبات جديدة)
                 self._run_scanner()
 
-                # ✅ حفظ المراقبات حتى لا تضيع بين التشغيلات
+                # حفظ المراقبات حتى لا تضيع بين التشغيلات
                 self._save_watches()
 
             except Exception as exc:
@@ -1381,7 +1404,7 @@ class GhaithBot:
         self.logger.info("انتهى وقت التشغيل المخصص لهذه الدورة (GH Actions). الحالة محفوظة.")
 
     def _save_watches(self) -> None:
-        """✅ حفظ مستويات المراقبة في ملف الحالة."""
+        """حفظ مستويات المراقبة في ملف الحالة."""
         with self._watch_lock:
             self.state.set("watch_levels", self.watch_levels)
         self.state.save()
@@ -1392,7 +1415,7 @@ class GhaithBot:
             self.state.set("boot_date", today)
             self.state.save()
             msg = (
-                f"🚀 غيث البروتوكول المزدوج (المستوى 1) بدأ التشغيل\n\n"
+                f"🚀 غيث البروتوكول المزدوج (المستوى 1 - v7) بدأ التشغيل\n\n"
                 f"• الرموز: {len(Config.SYMBOLS)} زوج\n"
                 f"• فريم الماسح: {Config.SCAN_TIMEFRAME}\n"
                 f"• فريم القناص: {Config.SNIPER_TIMEFRAME}\n"
@@ -1412,7 +1435,6 @@ class GhaithBot:
         for symbol in Config.SYMBOLS:
             try:
                 df15 = self.data.fetch(symbol, Config.SCAN_TIMEFRAME, "7d")
-                # ✅ إصلاح v6: جلب H1 لمدة 30 يوم (كانت 7 أيام = شموع غير كافية)
                 df60 = self.data.fetch(symbol, Config.TREND_TIMEFRAME, "30d")
                 if df15.empty or df60.empty:
                     continue
@@ -1445,7 +1467,6 @@ class GhaithBot:
             try:
                 symbol = watch["symbol"]
                 df5 = self.data.fetch(symbol, Config.SNIPER_TIMEFRAME, "2d")
-                # ✅ إصلاح v6: جلب M15 للقناص لمدة 7 أيام (كانت يومين = RSI غير متوفر)
                 df15 = self.data.fetch(symbol, Config.SCAN_TIMEFRAME, "7d")
                 if df5.empty or df15.empty:
                     continue
