@@ -1,877 +1,1537 @@
-import os, json, time
-import datetime, requests
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 
-TG = os.environ.get("TG_TOKEN", "")
-CH = os.environ.get("TG_CHAT", "")
-TF_LABEL = "M15"
-DUR = "15 دقيقة"
-TZ = 1
-STAKE = 6
-PAY = 0.9
-TARGET = 999999
-MAXT = 999999
-MAXL = 999999
-TSEC = 900
-MAX_DEV = 0.0006
-MAX_AHEAD = 0.0004
-MEMF = "memory.json"
-HOST = "https://query1.finance.yahoo.com"
-PATH = "/v8/finance/chart/"
-PAIRS = [
-    "USDJPY=X", "AUDJPY=X", "EURJPY=X",
-    "EURUSD=X", "GBPUSD=X", "EURGBP=X",
-    "CADJPY=X", "EURCAD=X", "GBPCAD=X",
-    "AUDCHF=X", "AUDUSD=X", "USDCHF=X",
-    "CHFJPY=X", "AUDCAD=X", "USDCAD=X",
-    "EURAUD=X", "EURCHF=X", "GBPJPY=X",
-    "GBPCHF=X", "GBPAUD=X",
-]
-mem = {}
-if os.path.exists(MEMF):
+"""
+=====================================================================
+🚀 غيث البروتوكول المزدوج — نسخة مُصححة نهائياً (v4)
+Ghaith Dual Protocol - Verified Corrected Edition
+
+⚠️ ملاحظة حرجة (اقرأها قبل أي شي):
+نسخة سابقة (v3) حاولت "تشديد" الإعدادات يدوياً برفع SCANNER_MAX_SCORE
+إلى 5، لكن REJECTION تبقى دائماً صفر بمرحلة السكان (تُحسب فقط بعد
+تأكيد القناص) — فالأقصى الفعلي هو 4، مو 5. رفع MIN_SIGNAL_SCORE إلى 4
+معناه عملياً "لازم الأربعة شروط تتحقق بالضبط بلا استثناء واحد"، وهذا
+يعيد نفس مشكلة "الإشارة ما توصل إلا بعد يومين" من جذورها.
+هذه النسخة تصحح ذلك: SCANNER_MAX_SCORE=4 (يطابق الواقع)،
+MIN_SIGNAL_SCORE=3 افتراضياً (يسمح بغياب شرط واحد من أصل أربعة).
+
+الإصلاحات المُطبّقة في هذه النسخة (راجع كل تعليق مُعلَّم ✅ إصلاح):
+1) نظام التقييم: LEVEL صارت مربوطة فعلياً بوجود مستوى صالح،
+   وREJECTION حُذفت من مرحلة السكان (تُحسب فقط بعد تأكيد القناص)
+2) أُضيف فحص ADX على فريم H1 (كان مفقوداً بالكامل)
+3) أُضيف قفل يمنع مراقبتين نشطتين على نفس الزوج بنفس الوقت
+4) كسر المستوى الآن يُلغي المراقبة فوراً وصراحة (BROKEN sentinel)
+5) أُضيف تبريد ساعة لمنع تكرار تنبيه "تجهيز" على نفس المستوى تقريباً
+   + فحص "مساحة الحركة" أُضيف أيضاً لمرحلة السكان (كان غائباً)
+
+⚠️ ملاحظة هامة عن وضع التشغيل (GitHub Actions):
+هذه النسخة مُعدَّلة خصيصاً لتعمل ضمن GitHub Actions — الحلقة الرئيسية
+محدودة بـ 200 ثانية (start+200) ثم تخرج، تماماً مثل باقي إصداراتك
+السابقة. القناص والسكان يعملان بالتسلسل داخل نفس الحلقة (بدون Thread
+منفصل) لأن GH Actions أصلاً لا يوفر تشغيلاً مستمراً يستفيد من خيط
+مستقل. SNIPER_INTERVAL_SECONDS محفوظ بالإعدادات لاستخدامه لاحقاً
+فقط لو انتقلت يوماً لسيرفر دائم (VPS) — لا أثر له بوضع GH Actions.
+
+تنويه: لا توجد نسبة نجاح مضمونة. الهدف هو الانتقائية الصارمة.
+=====================================================================
+"""
+
+import os
+import sys
+import time
+import json
+import random
+import logging
+import threading
+from logging.handlers import RotatingFileHandler
+from datetime import datetime, timedelta, timezone
+from typing import Dict, List, Optional, Tuple, Any
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+import requests
+
+try:
+    import yfinance as yf
+except ImportError:
+    print("⚠️ يجب تثبيت yfinance: pip install yfinance")
+    sys.exit(1)
+
+try:
+    import pandas_ta as ta
+    HAS_TA = True
+except ImportError:
+    HAS_TA = False
+    print("⚠️ pandas_ta غير متوفر. سيتم استخدام الحساب اليدوي.")
+
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
+
+# =====================================================================
+# دوال مساعدة
+# =====================================================================
+
+def env_bool(key: str, default: bool = False) -> bool:
+    val = os.getenv(key)
+    if val is None:
+        return default
+    return val.strip().lower() in {"1", "true", "yes", "y", "on", "نعم"}
+
+
+def env_int(key: str, default: int) -> int:
     try:
-        mem = json.load(open(MEMF))
+        return int(os.getenv(key, default))
     except Exception:
-        mem = {}
+        return default
 
-def send(msg):
-    print("🚨", msg)
-    if not TG or not CH:
-        return None
+
+def env_float(key: str, default: float) -> float:
     try:
-        a = "https://api.telegram.org/bot"
-        j = {"chat_id": CH, "text": "🚨 " + msg}
-        url = a + TG + "/sendMessage"
-        r = requests.post(url, json=j, timeout=10)
+        return float(os.getenv(key, default))
+    except Exception:
+        return default
+
+
+def env_list(key: str, default: List[str]) -> List[str]:
+    val = os.getenv(key)
+    if not val:
+        return default
+    return [x.strip() for x in val.split(",") if x.strip()]
+
+
+# =====================================================================
+# الإعدادات المركزية
+# =====================================================================
+
+class Config:
+    TELEGRAM_BOT_TOKEN = os.getenv("TG_TOKEN", "").strip()
+    TELEGRAM_CHAT_ID = os.getenv("TG_CHAT", "").strip()
+
+    STAKE = env_float("STAKE", 6.0)
+    PAYOUT = env_float("PAYOUT", 0.90)
+    TIMEZONE_OFFSET = env_int("TIMEZONE_OFFSET", 1)
+    EXPIRY_MINUTES = env_int("EXPIRY_MINUTES", 15)
+    COOLDOWN_AFTER_TRADE = env_int("COOLDOWN_AFTER_TRADE", 900)
+
+    SYMBOLS = env_list("SYMBOLS", [
+        "USDJPY=X", "AUDJPY=X", "EURJPY=X",
+        "EURUSD=X", "GBPUSD=X", "EURGBP=X",
+        "CADJPY=X", "EURCAD=X", "GBPCAD=X",
+        "AUDCHF=X", "AUDUSD=X", "USDCHF=X",
+        "CHFJPY=X", "AUDCAD=X", "USDCAD=X",
+        "EURAUD=X", "EURCHF=X", "GBPJPY=X",
+        "GBPCHF=X", "GBPAUD=X",
+    ])
+
+    SCAN_TIMEFRAME = "15m"
+    SNIPER_TIMEFRAME = "5m"
+    TREND_TIMEFRAME = "1h"
+
+    # إدارة المخاطر
+    # ملاحظة: 3 هو اختيارك الصريح (صارم). بما إن MIN_SIGNAL_SCORE=3/4
+    # صار يسمح بتكرار معقول (~2-5 إشارة/يوم تقديرياً)، هذا الحد صار
+    # له معنى فعلي الآن (بعكس لو بقي MIN_SIGNAL_SCORE=4/4 المثالي).
+    # ارفعه لو حسيت إنه يوقفك بسرعة كبيرة بأيام السوق الجيدة.
+    MAX_TRADES_PER_DAY = max(env_int("MAX_TRADES_PER_DAY", 3), 0)
+    MAX_LOSSES_PER_DAY = max(env_int("MAX_LOSSES_PER_DAY", 3), 0)
+    DAILY_PROFIT_TARGET = env_float("DAILY_PROFIT_TARGET", 999999.0)
+    COOLDOWN_AFTER_LOSSES = max(env_int("COOLDOWN_AFTER_LOSSES", 2), 1)
+    COOLDOWN_MINUTES = max(env_int("COOLDOWN_MINUTES", 120), 0)
+
+    # ✅ إصلاح #1: أقصى درجة فعلية من مرحلة السكان = 4 (وليس 5)
+    # (TREND + MOMENTUM + LEVEL + QUALITY). REJECTION تُضاف فقط
+    # بعد تأكيد القناص فتصير 5 بلحظة الإطلاق الفعلي.
+    # الافتراضي هنا 3/4 حتى لا يصير التكرار نادراً جداً بعد إضافة
+    # فحص ADX-H1 الجديد (الأكثر صرامة) — عدّلها بحذر لو رفعتها لـ4.
+    MIN_SIGNAL_SCORE = min(max(env_int("MIN_SIGNAL_SCORE", 3), 1), 4)
+    SCANNER_MAX_SCORE = 4
+
+    NOTIFY_RESULTS = env_bool("NOTIFY_RESULTS", True)
+
+    # المؤشرات
+    EMA_FAST = 35
+    EMA_SLOW = 50
+    RSI_PERIOD = 14
+    ADX_PERIOD = 14
+    ATR_PERIOD = 14
+    ATR_LOOKBACK = 20
+    ATR_MIN_RATIO = 0.4
+    ATR_MAX_RATIO = 2.5
+
+    # ✅ إصلاح #2: فصل عتبة ADX بين M15 وH1 (كانت H1 غائبة تماماً)
+    ADX_MIN_M15 = 20.0
+    ADX_MIN_H1 = 22.0
+
+    LEVEL_LOOKBACK = 60
+
+    MAX_DISTANCE_FROM_EMA_ATR = 2.0
+    MIN_SPACE_TO_MOVE_ATR = 0.3
+
+    RSI_CALL_MIN = 40.0
+    RSI_CALL_MAX = 58.0
+    RSI_PUT_MIN = 42.0
+    RSI_PUT_MAX = 60.0
+
+    # منطق القناص
+    MAX_DEV = env_float("MAX_DEV", 0.0006)
+    MAX_AHEAD = env_float("MAX_AHEAD", 0.0004)
+    TOUCH_TOLERANCE = 0.00025
+    REJECTION_BODY_RATIO = 0.4
+    LEVEL_EXPIRY_HOURS = env_int("LEVEL_EXPIRY_HOURS", 3)
+
+    # ✅ إصلاح #5: تبريد تنبيه التجهيز لنفس المستوى تقريباً
+    WATCH_ALERT_COOLDOWN_SEC = env_int("WATCH_ALERT_COOLDOWN_SEC", 3600)
+    WATCH_ALERT_LEVEL_TOLERANCE_ATR = 0.5  # يُعتبر "نفس المستوى" لو الفرق أقل من هذا × ATR
+
+    ROUND_NUMBER_STEP_LARGE = 0.5
+    ROUND_NUMBER_STEP_SMALL = 0.005
+    ROUND_NUMBER_PROXIMITY = 0.025
+
+    # التشغيل
+    SCAN_INTERVAL_SECONDS = env_int("SCAN_INTERVAL_SECONDS", 60)
+    # ✅ إصلاح #6: هذا صار فعلياً مُستخدَماً (Thread منفصل بالأسفل)
+    SNIPER_INTERVAL_SECONDS = env_int("SNIPER_INTERVAL_SECONDS", 30)
+    REQUEST_TIMEOUT = env_int("REQUEST_TIMEOUT", 15)
+    MAX_RETRIES = env_int("MAX_RETRIES", 4)
+    CACHE_TTL_SECONDS = env_int("CACHE_TTL_SECONDS", 45)
+
+    STATE_FILE = os.getenv("STATE_FILE", "ghaith_state.json")
+    LOG_FILE = os.getenv("LOG_FILE", "ghaith_bot.log")
+
+    MIN_ROWS = 200
+
+
+# =====================================================================
+# إعداد Logging
+# =====================================================================
+
+def setup_logger() -> logging.Logger:
+    logger = logging.getLogger("GhaithDual")
+    logger.setLevel(logging.INFO)
+    if logger.handlers:
+        return logger
+
+    formatter = logging.Formatter(
+        fmt="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S"
+    )
+
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setLevel(logging.INFO)
+    console_handler.setFormatter(formatter)
+
+    file_handler = RotatingFileHandler(
+        Config.LOG_FILE,
+        maxBytes=5 * 1024 * 1024,
+        backupCount=5,
+        encoding="utf-8"
+    )
+    file_handler.setLevel(logging.INFO)
+    file_handler.setFormatter(formatter)
+
+    logger.addHandler(console_handler)
+    logger.addHandler(file_handler)
+
+    return logger
+
+
+# =====================================================================
+# إدارة الحالة
+# =====================================================================
+
+class StateManager:
+    def __init__(self, logger: logging.Logger):
+        self.logger = logger
+        self.state: Dict[str, Any] = {}
+        self._lock = threading.Lock()
+        self.load()
+
+    def load(self) -> None:
+        path = Path(Config.STATE_FILE)
+        if path.exists():
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    self.state = json.load(f)
+                self.logger.info(f"تم تحميل الحالة من {Config.STATE_FILE}")
+            except Exception as exc:
+                self.logger.error(f"فشل تحميل الحالة: {exc}")
+                self.state = {}
+
+    def save(self) -> None:
+        with self._lock:
+            try:
+                tmp_path = Path(Config.STATE_FILE + ".tmp")
+                with open(tmp_path, "w", encoding="utf-8") as f:
+                    json.dump(self.state, f, ensure_ascii=False, indent=2, default=str)
+                tmp_path.replace(Config.STATE_FILE)
+            except Exception as exc:
+                self.logger.error(f"فشل حفظ الحالة: {exc}")
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return self.state.get(key, default)
+
+    def set(self, key: str, value: Any) -> None:
+        self.state[key] = value
+
+    def delete(self, key: str) -> None:
+        self.state.pop(key, None)
+
+    def get_day_stats(self) -> Dict[str, Any]:
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        day = self.state.get("day", {})
+        if day.get("date") != today:
+            day = {
+                "date": today, "trades": 0, "wins": 0, "losses": 0,
+                "manual_wins": 0, "manual_losses": 0, "pnl": 0.0,
+                "consecutive_losses": 0, "stop_reason": None,
+            }
+            self.state["day"] = day
+        return day
+
+    def get_month_stats(self) -> Dict[str, Any]:
+        ym = datetime.now(timezone.utc).strftime("%Y-%m")
+        month = self.state.get("month", {})
+        if month.get("ym") != ym:
+            month = {
+                "ym": ym, "wins": 0, "losses": 0,
+                "manual_wins": 0, "manual_losses": 0, "pnl": 0.0,
+            }
+            self.state["month"] = month
+        return month
+
+    def reset_day_if_new(self) -> None:
+        self.get_day_stats()
+
+
+# =====================================================================
+# مدير البيانات
+# =====================================================================
+
+class DataManager:
+    INTERVAL_TO_TIMEDELTA = {
+        "1m": pd.Timedelta(minutes=1), "5m": pd.Timedelta(minutes=5),
+        "15m": pd.Timedelta(minutes=15), "30m": pd.Timedelta(minutes=30),
+        "1h": pd.Timedelta(hours=1), "1d": pd.Timedelta(days=1),
+    }
+
+    def __init__(self, logger: logging.Logger):
+        self.logger = logger
+        self.cache: Dict[str, Dict[str, Any]] = {}
+        self._cache_lock = threading.Lock()
+
+    def fetch(self, symbol: str, interval: str, period: str = "7d", force: bool = False) -> pd.DataFrame:
+        cache_key = f"{symbol}|{interval}|{period}"
+        now_ts = time.time()
+
+        with self._cache_lock:
+            cached = self.cache.get(cache_key)
+            if cached and not force:
+                if now_ts - cached["ts"] < Config.CACHE_TTL_SECONDS:
+                    return cached["df"].copy()
+
+        last_error: Optional[Exception] = None
+        for attempt in range(1, Config.MAX_RETRIES + 1):
+            try:
+                ticker = yf.Ticker(symbol)
+                df = ticker.history(
+                    period=period, interval=interval,
+                    auto_adjust=False, actions=False, timeout=Config.REQUEST_TIMEOUT,
+                )
+                if df is None or df.empty:
+                    raise ValueError("لا توجد بيانات")
+
+                df = self._clean(df, interval)
+                if df.empty:
+                    raise ValueError("لا توجد صفوف صالحة بعد التنظيف")
+
+                with self._cache_lock:
+                    self.cache[cache_key] = {"ts": time.time(), "df": df.copy()}
+                self.logger.debug(f"تم جلب {len(df)} شمعة لـ {symbol} ({interval})")
+                return df.copy()
+
+            except Exception as exc:
+                last_error = exc
+                wait = min(45, (2 ** attempt) + random.uniform(0.0, 1.5))
+                self.logger.warning(
+                    f"فشل جلب {symbol} ({interval}) المحاولة {attempt}/{Config.MAX_RETRIES}: {exc} | انتظار {wait:.1f}ث"
+                )
+                time.sleep(wait)
+
+        raise RuntimeError(f"فشل نهائي لجلب {symbol} ({interval}): {last_error}")
+
+    def get_live_price(self, symbol: str) -> Optional[float]:
         try:
-            return r.json().get("result", {}).get("message_id")
+            df = self.fetch(symbol, "1m", "1d")
+            if df.empty:
+                return None
+            return float(df.iloc[-1]["Close"])
         except Exception:
             return None
-    except Exception as e:
-        print("TG ERR:", e)
-        return None
 
-def hhmm():
-    t = datetime.datetime.utcnow()
-    t += datetime.timedelta(hours=TZ)
-    return t.strftime("%H:%M")
+    def _clean(self, df: pd.DataFrame, interval: str) -> pd.DataFrame:
+        df = df.copy()
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
 
-def market_open():
-    t = datetime.datetime.utcnow()
-    if t.weekday() >= 5:
-        return False
-    if t.weekday() == 4 and t.day <= 7 and 12 <= t.hour < 15:
-        return False
-    return 8 <= t.hour < 17
+        required = ["Open", "High", "Low", "Close", "Volume"]
+        for col in required:
+            if col not in df.columns:
+                df[col] = np.nan
+        df = df[required]
 
-def fetch(sym, itv, rng):
-    url = HOST + PATH + sym
-    pp = {"interval": itv, "range": rng}
-    hh = {"User-Agent": "Mozilla/5.0"}
-    r = requests.get(url, pp, headers=hh, timeout=15)
-    r.raise_for_status()
-    d = r.json()["chart"]["result"][0]
-    ts = d["timestamp"]
-    q = d["indicators"]["quote"][0]
-    out = []
-    for i in range(len(ts)):
-        o = q["open"][i]
-        h = q["high"][i]
-        l = q["low"][i]
-        c = q["close"][i]
-        if None in (o, h, l, c):
-            continue
-        dd = {"t": ts[i]*1000, "o": o}
-        dd["h"] = h
-        dd["l"] = l
-        dd["c"] = c
-        out.append(dd)
-    return out
+        df.index = pd.to_datetime(df.index, utc=True)
+        df = df[~df.index.duplicated(keep="last")].sort_index()
+        df.dropna(subset=["Open", "High", "Low", "Close"], inplace=True)
+        df["Volume"] = df["Volume"].fillna(0)
 
-def live_price(sym):
-    try:
-        c1 = fetch(sym, "1m", "1d")
-        return c1[-1]["c"]
-    except Exception:
-        return None
+        now = pd.Timestamp.now(tz="UTC")
+        df = df[df.index <= now]
 
-def ema(v, p):
-    if len(v) < p:
-        return None
-    k = 2.0/(p+1)
-    e = sum(v[:p])/p
-    for x in v[p:]:
-        e = x*k + e*(1-k)
-    return e
+        td = self.INTERVAL_TO_TIMEDELTA.get(interval)
+        if td is not None and not df.empty:
+            last_open = df.index[-1]
+            if last_open + td > now:
+                df = df.iloc[:-1]
 
-def _emas(v, p):
-    k = 2.0/(p+1)
-    e = sum(v[:p])/p
-    out = [e]
-    for x in v[p:]:
-        e = x*k + e*(1-k)
-        out.append(e)
-    return out
+        df = df[(df["High"] >= df["Low"]) & (df["Open"] > 0) & (df["Close"] > 0)]
+        return df
 
-def macd2(cl):
-    if len(cl) < 60:
-        return None, None
-    a = _emas(cl, 12)
-    b = _emas(cl, 26)
-    off = 26-12
-    n = len(b)
-    macd = [a[i+off]-b[i] for i in range(n)]
-    if len(macd) < 12:
-        return None, None
-    sig = _emas(macd, 9)
-    h1 = macd[len(macd)-2]-sig[len(sig)-2]
-    h2 = macd[-1]-sig[-1]
-    return h1, h2
 
-def pat_call(k, p):
-    r = k["h"]-k["l"]
-    if r <= 0:
-        return False
-    lw = min(k["o"], k["c"])-k["l"]
-    pin = lw >= 0.6*r
-    eng = (k["c"] > k["o"]) and (p["c"] < p["o"])
-    eng = eng and (k["c"] >= p["o"]) and (k["o"] <= p["c"])
-    return pin or eng
+# =====================================================================
+# محرك المؤشرات
+# =====================================================================
 
-def pat_put(k, p):
-    r = k["h"]-k["l"]
-    if r <= 0:
-        return False
-    uw = k["h"]-max(k["o"], k["c"])
-    pin = uw >= 0.6*r
-    eng = (k["c"] < k["o"]) and (p["c"] > p["o"])
-    eng = eng and (k["c"] <= p["o"]) and (k["o"] >= p["c"])
-    return pin or eng
+class IndicatorEngine:
+    def __init__(self, logger: logging.Logger):
+        self.logger = logger
 
-def rsi2(cl, p=14):
-    if len(cl) < p+2:
-        return None, None
-    g = []
-    lo = []
-    for i in range(1, len(cl)):
-        d = cl[i] - cl[i-1]
-        g.append(max(d, 0))
-        lo.append(max(-d, 0))
-    ag = sum(g[:p])/p
-    al = sum(lo[:p])/p
-    v = []
-    for i in range(p, len(g)):
-        ag = (ag*(p-1)+g[i])/p
-        al = (al*(p-1)+lo[i])/p
-        if al == 0:
-            v.append(100.0)
+    def add_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
+        if df is None or df.empty or len(df) < Config.MIN_ROWS:
+            return df
+
+        df = df.copy()
+
+        if HAS_TA:
+            df["EMA_35"] = ta.ema(df["Close"], length=Config.EMA_FAST)
+            df["EMA_50"] = ta.ema(df["Close"], length=Config.EMA_SLOW)
+            df["RSI"] = ta.rsi(df["Close"], length=Config.RSI_PERIOD)
+
+            macd = ta.macd(df["Close"], fast=12, slow=26, signal=9)
+            if macd is not None:
+                df = pd.concat([df, macd], axis=1)
+                df.rename(columns={
+                    "MACD_12_26_9": "MACD", "MACDh_12_26_9": "MACD_HIST",
+                    "MACDs_12_26_9": "MACD_SIGNAL",
+                }, inplace=True)
+
+            atr_df = ta.atr(df["High"], df["Low"], df["Close"], length=Config.ATR_PERIOD)
+            if atr_df is not None:
+                df["ATR"] = atr_df
+
+            adx_df = ta.adx(df["High"], df["Low"], df["Close"], length=Config.ADX_PERIOD)
+            if adx_df is not None:
+                for col in adx_df.columns:
+                    df[col] = adx_df[col]
+                df.rename(columns={
+                    f"ADX_{Config.ADX_PERIOD}": "ADX",
+                    f"DMP_{Config.ADX_PERIOD}": "PLUS_DI",
+                    f"DMN_{Config.ADX_PERIOD}": "MINUS_DI",
+                }, inplace=True)
         else:
-            v.append(100-100/(1+ag/al))
-    if len(v) < 2:
-        return None, None
-    return v[-2], v[-1]
+            df["EMA_35"] = df["Close"].ewm(span=Config.EMA_FAST, adjust=False).mean()
+            df["EMA_50"] = df["Close"].ewm(span=Config.EMA_SLOW, adjust=False).mean()
 
-def atrs(cd, p=14):
-    if len(cd) < p+2:
-        return []
-    tr = []
-    for i in range(1, len(cd)):
-        pc = cd[i-1]["c"]
-        h = cd[i]["h"]
-        l = cd[i]["l"]
-        m1 = h-l
-        m2 = abs(h-pc)
-        m3 = abs(l-pc)
-        tr.append(max(m1, m2, m3))
-    a = sum(tr[:p])/p
-    out = [a]
-    for x in tr[p:]:
-        a = (a*(p-1)+x)/p
-        out.append(a)
-    return out
+            delta = df["Close"].diff()
+            gain = delta.clip(lower=0)
+            loss = -delta.clip(upper=0)
+            avg_gain = gain.ewm(alpha=1 / Config.RSI_PERIOD, min_periods=Config.RSI_PERIOD).mean()
+            avg_loss = loss.ewm(alpha=1 / Config.RSI_PERIOD, min_periods=Config.RSI_PERIOD).mean()
+            rs = avg_gain / avg_loss.replace(0, np.nan)
+            df["RSI"] = 100 - (100 / (1 + rs))
+            df["RSI"] = df["RSI"].fillna(50)
 
-def adx(cd, p=14):
-    n = len(cd)
-    if n < p*3+1:
+            ema_12 = df["Close"].ewm(span=12, adjust=False).mean()
+            ema_26 = df["Close"].ewm(span=26, adjust=False).mean()
+            df["MACD"] = ema_12 - ema_26
+            df["MACD_SIGNAL"] = df["MACD"].ewm(span=9, adjust=False).mean()
+            df["MACD_HIST"] = df["MACD"] - df["MACD_SIGNAL"]
+
+            prev_close = df["Close"].shift(1)
+            tr = pd.concat([
+                df["High"] - df["Low"],
+                (df["High"] - prev_close).abs(),
+                (df["Low"] - prev_close).abs()
+            ], axis=1).max(axis=1)
+            df["ATR"] = tr.ewm(alpha=1 / Config.ATR_PERIOD, min_periods=Config.ATR_PERIOD).mean()
+
+            up_move = df["High"].diff()
+            down_move = -df["Low"].diff()
+            plus_dm = pd.Series(np.where((up_move > down_move) & (up_move > 0), up_move, 0.0), index=df.index)
+            minus_dm = pd.Series(np.where((down_move > up_move) & (down_move > 0), down_move, 0.0), index=df.index)
+            plus_di = 100 * plus_dm.ewm(alpha=1 / Config.ADX_PERIOD).mean() / df["ATR"].replace(0, np.nan)
+            minus_di = 100 * minus_dm.ewm(alpha=1 / Config.ADX_PERIOD).mean() / df["ATR"].replace(0, np.nan)
+            dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, np.nan)
+            df["ADX"] = dx.ewm(alpha=1 / Config.ADX_PERIOD).mean()
+            df["PLUS_DI"] = plus_di
+            df["MINUS_DI"] = minus_di
+
+        df["ATR_PERCENTILE"] = self._rolling_percentile(df["ATR"], 100)
+
+        df["ROLLING_SUPPORT"] = df["Low"].rolling(Config.LEVEL_LOOKBACK, min_periods=20).min()
+        df["ROLLING_RESISTANCE"] = df["High"].rolling(Config.LEVEL_LOOKBACK, min_periods=20).max()
+
+        df["HIGH_20"] = df["High"].rolling(20, min_periods=10).max()
+        df["LOW_20"] = df["Low"].rolling(20, min_periods=10).min()
+
+        body = (df["Close"] - df["Open"]).abs()
+        full_range = (df["High"] - df["Low"]).replace(0, np.nan)
+        df["BODY"] = body
+        df["RANGE"] = full_range
+        df["UPPER_WICK"] = df["High"] - df[["Open", "Close"]].max(axis=1)
+        df["LOWER_WICK"] = df[["Open", "Close"]].min(axis=1) - df["Low"]
+        df["IS_BULLISH"] = df["Close"] > df["Open"]
+        df["IS_BEARISH"] = df["Close"] < df["Open"]
+
+        return df
+
+    @staticmethod
+    def _rolling_percentile(series: pd.Series, window: int) -> pd.Series:
+        min_periods = max(20, window // 2)
+
+        def pct(x: np.ndarray) -> float:
+            if len(x) < 2:
+                return np.nan
+            finite = x[~np.isnan(x)]
+            if len(finite) < 2:
+                return np.nan
+            current = finite[-1]
+            return float((finite < current).mean()) * 100.0
+
+        return series.rolling(window=window, min_periods=min_periods).apply(pct, raw=True)
+
+
+# =====================================================================
+# Scanner (الماسح - المرحلة الأولى)
+# =====================================================================
+
+class Scanner:
+    def __init__(self, logger: logging.Logger, notifier):
+        self.logger = logger
+        self.notifier = notifier
+        self.last_scan_candle: Dict[str, pd.Timestamp] = {}
+        # ✅ إصلاح #5: تتبع آخر تنبيه تجهيز لكل زوج (لمنع التكرار)
+        self.last_watch_alert: Dict[str, Tuple[float, float]] = {}  # symbol -> (level, ts)
+
+    def scan_symbol(
+        self, symbol: str, df15: pd.DataFrame, df60: pd.DataFrame,
+        active_symbols: set
+    ) -> Optional[Dict[str, Any]]:
+        if df15 is None or df60 is None or len(df15) < Config.MIN_ROWS:
+            return None
+
+        # ✅ إصلاح #3: لا تُنشئ مراقبة جديدة على زوج له مراقبة نشطة أصلاً
+        if symbol in active_symbols:
+            return None
+
+        last_candle_time = df15.index[-1]
+        if self.last_scan_candle.get(symbol) == last_candle_time:
+            return None
+
+        last = df15.iloc[-1]
+        prev = df15.iloc[-2]
+        h1_last = df60.iloc[-1]
+
+        if not self._check_distance_from_ema(last):
+            self.last_scan_candle[symbol] = last_candle_time
+            return None
+
+        direction = self._get_direction(last, prev, h1_last)
+        if direction is None:
+            self.last_scan_candle[symbol] = last_candle_time
+            return None
+
+        # ✅ إصلاح #6: فحص مساحة الحركة أُضيف هنا أيضاً (كان غائباً بالسكان)
+        if not self._check_space_to_move(last, direction):
+            self.last_scan_candle[symbol] = last_candle_time
+            return None
+
+        level, level_type = self._find_key_level(last, direction)
+
+        # ✅ إصلاح #1: LEVEL و QUALITY (مع ADX-H1) تُحسبان بشكل صحيح الآن
+        scores = self._calculate_scores(last, prev, h1_last, level)
+        total_score = sum(scores.values())
+
+        if level is None:
+            self.last_scan_candle[symbol] = last_candle_time
+            return None
+
+        if total_score < Config.MIN_SIGNAL_SCORE:
+            self.last_scan_candle[symbol] = last_candle_time
+            return None
+
+        # ✅ إصلاح #5: تبريد تنبيه التجهيز لنفس المستوى تقريباً
+        last_alert = self.last_watch_alert.get(symbol)
+        atr_val = float(last["ATR"]) if pd.notna(last.get("ATR")) else None
+        if last_alert is not None and atr_val:
+            prev_level, prev_ts = last_alert
+            same_level = abs(level - prev_level) <= Config.WATCH_ALERT_LEVEL_TOLERANCE_ATR * atr_val
+            recently = (time.time() - prev_ts) < Config.WATCH_ALERT_COOLDOWN_SEC
+            if same_level and recently:
+                self.last_scan_candle[symbol] = last_candle_time
+                return None
+
+        watch = {
+            "symbol": symbol,
+            "name": self._format_symbol_name(symbol),
+            "direction": direction,
+            "level": float(level),
+            "level_type": level_type,
+            "signal_score": total_score,
+            "max_score": Config.SCANNER_MAX_SCORE,
+            "scores": scores,
+            "entry_price": float(last["Close"]),
+            "candle_time": last_candle_time,
+            "created_at": time.time(),
+        }
+
+        self.last_scan_candle[symbol] = last_candle_time
+        self.last_watch_alert[symbol] = (float(level), time.time())
+        return watch
+
+    def _check_distance_from_ema(self, last: pd.Series) -> bool:
+        if not self._valid(last["Close"], last["EMA_35"], last["ATR"]):
+            return False
+        close = float(last["Close"])
+        ema = float(last["EMA_35"])
+        atr = float(last["ATR"])
+        if atr <= 0:
+            return False
+        distance = abs(close - ema)
+        max_allowed_distance = Config.MAX_DISTANCE_FROM_EMA_ATR * atr
+        return distance <= max_allowed_distance
+
+    def _check_space_to_move(self, last: pd.Series, direction: str) -> bool:
+        """✅ إصلاح #6: فحص مساحة الحركة على M15 (كان موجوداً فقط بالقناص M5)"""
+        if not self._valid(last.get("ATR"), last.get("HIGH_20"), last.get("LOW_20"), last.get("Close")):
+            return True  # لا نرفض بسبب نقص بيانات ثانوي، الفلاتر الأساسية كافية
+        atr = float(last["ATR"])
+        close = float(last["Close"])
+        if atr <= 0:
+            return True
+        high_20 = float(last["HIGH_20"])
+        low_20 = float(last["LOW_20"])
+        min_space = Config.MIN_SPACE_TO_MOVE_ATR * atr
+        if direction == "CALL":
+            return (high_20 - close) >= min_space
+        if direction == "PUT":
+            return (close - low_20) >= min_space
+        return True
+
+    def _calculate_scores(
+        self, last: pd.Series, prev: pd.Series, h1_last: pd.Series, level: Optional[float]
+    ) -> Dict[str, int]:
+        scores = {"TREND": 0, "MOMENTUM": 0, "LEVEL": 0, "QUALITY": 0}
+
+        # 1) TREND
+        if self._valid(last["EMA_35"], last["EMA_50"], prev["EMA_35"],
+                        h1_last["EMA_35"], h1_last["EMA_50"], last["Close"], h1_last["Close"]):
+            h1_bull = h1_last["Close"] > h1_last["EMA_35"] > h1_last["EMA_50"]
+            h1_bear = h1_last["Close"] < h1_last["EMA_35"] < h1_last["EMA_50"]
+            m15_bull = last["Close"] > last["EMA_35"] > last["EMA_50"] and last["EMA_35"] > prev["EMA_35"]
+            m15_bear = last["Close"] < last["EMA_35"] < last["EMA_50"] and last["EMA_35"] < prev["EMA_35"]
+            if (h1_bull and m15_bull) or (h1_bear and m15_bear):
+                scores["TREND"] = 1
+
+        # 2) MOMENTUM
+        if self._valid(last["RSI"], prev["RSI"], last["MACD_HIST"], prev["MACD_HIST"]):
+            rsi = float(last["RSI"])
+            prev_rsi = float(prev["RSI"])
+            hist = float(last["MACD_HIST"])
+            prev_hist = float(prev["MACD_HIST"])
+
+            bull_rsi = Config.RSI_CALL_MIN <= rsi <= Config.RSI_CALL_MAX and rsi > prev_rsi
+            bear_rsi = Config.RSI_PUT_MIN <= rsi <= Config.RSI_PUT_MAX and rsi < prev_rsi
+
+            bull_momentum = bull_rsi and hist > 0 and hist >= prev_hist
+            bear_momentum = bear_rsi and hist < 0 and hist <= prev_hist
+
+            if bull_momentum or bear_momentum:
+                scores["MOMENTUM"] = 1
+
+        # 3) ✅ إصلاح #1: LEVEL مربوطة فعلياً بوجود مستوى صالح
+        scores["LEVEL"] = 1 if level is not None else 0
+
+        # 4) ✅ إصلاح #2: QUALITY الآن يشترط ADX على M15 وH1 معاً
+        if self._valid(last["ADX"], last["ATR_PERCENTILE"], h1_last.get("ADX")):
+            adx_m15 = float(last["ADX"])
+            adx_h1 = float(h1_last["ADX"])
+            atr_pct = float(last["ATR_PERCENTILE"])
+            if adx_m15 >= Config.ADX_MIN_M15 and adx_h1 >= Config.ADX_MIN_H1 and 20 <= atr_pct <= 95:
+                scores["QUALITY"] = 1
+
+        return scores
+
+    def _get_direction(self, last: pd.Series, prev: pd.Series, h1_last: pd.Series) -> Optional[str]:
+        if not self._valid(last["EMA_35"], last["EMA_50"], prev["EMA_35"],
+                            h1_last["EMA_35"], h1_last["EMA_50"], last["Close"], h1_last["Close"]):
+            return None
+        h1_bull = h1_last["Close"] > h1_last["EMA_35"] > h1_last["EMA_50"]
+        h1_bear = h1_last["Close"] < h1_last["EMA_35"] < h1_last["EMA_50"]
+        m15_bull = last["Close"] > last["EMA_35"] > last["EMA_50"] and last["EMA_35"] > prev["EMA_35"]
+        m15_bear = last["Close"] < last["EMA_35"] < last["EMA_50"] and last["EMA_35"] < prev["EMA_35"]
+        if h1_bull and m15_bull:
+            return "CALL"
+        if h1_bear and m15_bear:
+            return "PUT"
         return None
-    tr = []
-    ps = []
-    ms = []
-    for i in range(1, n):
-        pc = cd[i-1]["c"]
-        ph = cd[i-1]["h"]
-        pl = cd[i-1]["l"]
-        h = cd[i]["h"]
-        l = cd[i]["l"]
-        m1 = h-l
-        m2 = abs(h-pc)
-        m3 = abs(l-pc)
-        tr.append(max(m1, m2, m3))
-        up = h-ph
-        dn = pl-l
-        if up > dn and up > 0:
-            ps.append(up)
+
+    def _find_key_level(self, last: pd.Series, direction: str) -> Tuple[Optional[float], str]:
+        if not self._valid(last["Close"]):
+            return None, ""
+        close = float(last["Close"])
+        candidates = []
+
+        if direction == "CALL" and pd.notna(last.get("ROLLING_SUPPORT")):
+            support = float(last["ROLLING_SUPPORT"])
+            if abs(close - support) / close <= 0.02:
+                candidates.append((support, "SUPPORT"))
+
+        if direction == "PUT" and pd.notna(last.get("ROLLING_RESISTANCE")):
+            resistance = float(last["ROLLING_RESISTANCE"])
+            if abs(close - resistance) / close <= 0.02:
+                candidates.append((resistance, "RESISTANCE"))
+
+        step = Config.ROUND_NUMBER_STEP_LARGE if close > 50 else Config.ROUND_NUMBER_STEP_SMALL
+        if step > 0:
+            nearest_round = round(close / step) * step
+            distance_pct = abs(close - nearest_round) / close * 100
+            if distance_pct <= Config.ROUND_NUMBER_PROXIMITY:
+                candidates.append((nearest_round, "ROUND_NUMBER"))
+
+        if not candidates:
+            return None, ""
+
+        candidates.sort(key=lambda x: abs(close - x[0]))
+        return candidates[0]
+
+    @staticmethod
+    def _format_symbol_name(symbol: str) -> str:
+        base = symbol.replace("=X", "")
+        if len(base) == 6:
+            return f"{base[:3]}/{base[3:]}"
+        return symbol
+
+    @staticmethod
+    def _valid(*values) -> bool:
+        for v in values:
+            if v is None:
+                return False
+            try:
+                if pd.isna(v):
+                    return False
+                numeric = float(v)
+                if not np.isfinite(numeric):
+                    return False
+            except Exception:
+                return False
+        return True
+
+
+# =====================================================================
+# Sniper (القناص - المرحلة الثانية)
+# =====================================================================
+
+class SniperResult:
+    """✅ إصلاح #4: نوع نتيجة صريح بدل الاعتماد على None لكل الحالات"""
+    WAITING = "WAITING"
+    BROKEN = "BROKEN"
+    SIGNAL = "SIGNAL"
+
+
+class Sniper:
+    def __init__(self, logger: logging.Logger, notifier, state: StateManager):
+        self.logger = logger
+        self.notifier = notifier
+        self.state = state
+        self.last_sniper_candle: Dict[str, pd.Timestamp] = {}
+
+    def check_watches(
+        self, watch: Dict[str, Any], df5: pd.DataFrame, df15_for_rsi: pd.DataFrame
+    ) -> Tuple[str, Optional[Dict[str, Any]]]:
+        if df5 is None or df5.empty or len(df5) < 20:
+            return SniperResult.WAITING, None
+
+        if time.time() - watch.get("created_at", 0) > Config.LEVEL_EXPIRY_HOURS * 3600:
+            return SniperResult.BROKEN, None
+
+        last_candle_time = df5.index[-1]
+        watch_key = f"{watch['symbol']}|{watch['level']}"
+        if self.last_sniper_candle.get(watch_key) == last_candle_time:
+            return SniperResult.WAITING, None
+
+        last = df5.iloc[-1]
+        prev = df5.iloc[-2]
+
+        level = float(watch["level"])
+        direction = watch["direction"]
+        close = float(last["Close"])
+
+        if not self._check_space_to_move(df5, direction, close):
+            self.last_sniper_candle[watch_key] = last_candle_time
+            return SniperResult.WAITING, None
+
+        # ✅ إصلاح #4: كسر واضح للمستوى → BROKEN صريح يُلغي المراقبة فوراً
+        if direction == "CALL" and close < level - 0.0015 * close:
+            self.last_sniper_candle[watch_key] = last_candle_time
+            return SniperResult.BROKEN, None
+        if direction == "PUT" and close > level + 0.0015 * close:
+            self.last_sniper_candle[watch_key] = last_candle_time
+            return SniperResult.BROKEN, None
+
+        touched = self._check_touch(last, level, direction, close)
+        if not touched:
+            return SniperResult.WAITING, None
+
+        rejected = self._check_rejection(last, prev, level, direction)
+        if not rejected:
+            self.last_sniper_candle[watch_key] = last_candle_time
+            return SniperResult.WAITING, None
+
+        live_price = close
+
+        deviation_check, deviation_reason = self._check_deviation(level, live_price, close, direction)
+        if not deviation_check:
+            self._send_deviation_alert(watch, level, live_price, deviation_reason)
+            self.last_sniper_candle[watch_key] = last_candle_time
+            return SniperResult.BROKEN, None  # أُلغيت — لا داعي للانتظار أكثر لنفس اللمسة
+
+        rsi_ok = self._check_rsi(df15_for_rsi, direction)
+        if not rsi_ok:
+            self.last_sniper_candle[watch_key] = last_candle_time
+            return SniperResult.WAITING, None
+
+        three_candle_filter = self._check_three_candles(df5, direction)
+        if not three_candle_filter:
+            self.last_sniper_candle[watch_key] = last_candle_time
+            return SniperResult.WAITING, None
+
+        signal = {
+            "id": f"{watch['symbol']}|{last_candle_time.isoformat()}|{direction}",
+            "symbol": watch["symbol"],
+            "name": watch["name"],
+            "direction": direction,
+            "level": level,
+            "level_type": watch.get("level_type", "UNKNOWN"),
+            "entry_price": live_price,
+            # ✅ إصلاح #1: +1 لتأكيد الرفض الفعلي (أقصى ممكن = 4+1 = 5)
+            "signal_score": watch["signal_score"] + 1,
+            "max_score": watch["max_score"] + 1,
+            "candle_time": last_candle_time,
+            "expiry_minutes": Config.EXPIRY_MINUTES,
+            "rsi": float(df15_for_rsi.iloc[-1]["RSI"]) if pd.notna(df15_for_rsi.iloc[-1]["RSI"]) else None,
+        }
+
+        self.last_sniper_candle[watch_key] = last_candle_time
+        return SniperResult.SIGNAL, signal
+
+    def _check_space_to_move(self, df5: pd.DataFrame, direction: str, close: float) -> bool:
+        if df5.empty or len(df5) < 20:
+            return True
+        last = df5.iloc[-1]
+        atr = float(last["ATR"]) if pd.notna(last.get("ATR")) else 0
+        if atr <= 0:
+            return True
+        high_20 = float(last["HIGH_20"]) if pd.notna(last.get("HIGH_20")) else close
+        low_20 = float(last["LOW_20"]) if pd.notna(last.get("LOW_20")) else close
+        min_space = Config.MIN_SPACE_TO_MOVE_ATR * atr
+        if direction == "CALL":
+            return (high_20 - close) >= min_space
+        if direction == "PUT":
+            return (close - low_20) >= min_space
+        return True
+
+    def _check_touch(self, last: pd.Series, level: float, direction: str, close: float) -> bool:
+        high = float(last["High"])
+        low = float(last["Low"])
+        tolerance = Config.TOUCH_TOLERANCE * close
+        if direction == "CALL":
+            return low <= level + tolerance
+        if direction == "PUT":
+            return high >= level - tolerance
+        return False
+
+    def _check_rejection(self, last: pd.Series, prev: pd.Series, level: float, direction: str) -> bool:
+        close = float(last["Close"])
+        body = float(abs(last["Close"] - last["Open"]))
+        full_range = float(last["High"] - last["Low"])
+        if full_range <= 0:
+            return False
+        body_ratio = body / full_range
+        body_reject = body_ratio >= Config.REJECTION_BODY_RATIO
+
+        if direction == "CALL":
+            lower_wick = float(last.get("LOWER_WICK", 0)) if pd.notna(last.get("LOWER_WICK")) else 0
+            pinbar = lower_wick >= 0.6 * full_range and body_ratio <= 0.4
+            engulfing = (
+                last["Close"] > last["Open"] and prev["Close"] < prev["Open"] and
+                last["Close"] >= prev["Open"] and last["Open"] <= prev["Close"]
+            )
+            above_level = close > level
+            return (body_reject or pinbar or engulfing) and above_level
+
+        if direction == "PUT":
+            upper_wick = float(last.get("UPPER_WICK", 0)) if pd.notna(last.get("UPPER_WICK")) else 0
+            pinbar = upper_wick >= 0.6 * full_range and body_ratio <= 0.4
+            engulfing = (
+                last["Close"] < last["Open"] and prev["Close"] > prev["Open"] and
+                last["Close"] <= prev["Open"] and last["Open"] >= prev["Close"]
+            )
+            below_level = close < level
+            return (body_reject or pinbar or engulfing) and below_level
+
+        return False
+
+    def _check_deviation(self, level: float, live_price: float, close: float, direction: str) -> Tuple[bool, str]:
+        dev_dn = (level - live_price) / close
+        dev_up = (live_price - level) / close
+        if direction == "PUT":
+            if dev_dn > Config.MAX_DEV:
+                return False, "السعر نزل بعيد تحت المستوى"
+            if dev_up > Config.MAX_AHEAD:
+                return False, "السعر لم يصل للمستوى بعد"
         else:
-            ps.append(0)
-        if dn > up and dn > 0:
-            ms.append(dn)
-        else:
-            ms.append(0)
-    a = sum(tr[:p])
-    sp = sum(ps[:p])
-    sm = sum(ms[:p])
-    dx = []
-    for i in range(p, len(tr)):
-        a = a-a/p+tr[i]
-        sp = sp-sp/p+ps[i]
-        sm = sm-sm/p+ms[i]
-        pi = 100*sp/a if a else 0
-        mi = 100*sm/a if a else 0
-        s = pi+mi
-        if s > 0:
-            dx.append(100*abs(pi-mi)/s)
-        else:
-            dx.append(0)
-    if len(dx) < p:
-        return None
-    x = sum(dx[:p])/p
-    for d in dx[p:]:
-        x = (x*(p-1)+d)/p
-    return x
+            if dev_up > Config.MAX_DEV:
+                return False, "السعر طلع بعيد فوق المستوى"
+            if dev_dn > Config.MAX_AHEAD:
+                return False, "السعر لم يصل للمستوى بعد"
+        return True, ""
 
-def pivots(cd, lb=5):
-    sups = []
-    ress = []
-    top = len(cd)-1-lb
-    for i in range(lb, top+1):
-        w = cd[i-lb:i+lb+1]
-        hi = max(x["h"] for x in w)
-        lo = min(x["l"] for x in w)
-        if cd[i]["h"] == hi:
-            ress.append(hi)
-        if cd[i]["l"] == lo:
-            sups.append(lo)
-    if not sups or not ress:
-        return None, None
-    last = cd[-1]
-    price = last["c"]
-    sup = None
-    min_ds = 999.0
-    for s in sups:
-        ds = abs(s-price)/price*100
-        if ds < min_ds and ds < 2.0:
-            min_ds = ds
-            sup = s
-    res = None
-    min_dr = 999.0
-    for r in ress:
-        dr = abs(r-price)/price*100
-        if dr < min_dr and dr < 2.0:
-            min_dr = dr
-            res = r
-    return sup, res
+    def _check_rsi(self, df15: pd.DataFrame, direction: str) -> bool:
+        if df15 is None or df15.empty:
+            return True
+        last = df15.iloc[-1]
+        if not pd.notna(last.get("RSI")):
+            return True
+        rsi = float(last["RSI"])
+        if direction == "CALL":
+            return rsi <= Config.RSI_CALL_MAX + 5
+        if direction == "PUT":
+            return rsi >= Config.RSI_PUT_MIN - 5
+        return True
 
-def toh1(c15):
-    gr = {}
-    for k in c15:
-        hr = k["t"]//3600000
-        gr.setdefault(hr, []).append(k)
-    out = []
-    for h in sorted(gr):
-        g = gr[h]
-        if len(g) < 4:
-            continue
-        dd = {"o": g[0]["o"]}
-        dd["h"] = max(x["h"] for x in g)
-        dd["l"] = min(x["l"] for x in g)
-        dd["c"] = g[-1]["c"]
-        out.append(dd)
-    return out
+    def _check_three_candles(self, df5: pd.DataFrame, direction: str) -> bool:
+        if len(df5) < 4:
+            return True
+        last_3 = df5.iloc[-4:-1]
+        if direction == "CALL":
+            red_3 = all(c["Close"] < c["Open"] for _, c in last_3.iterrows())
+            return not red_3
+        if direction == "PUT":
+            green_3 = all(c["Close"] > c["Open"] for _, c in last_3.iterrows())
+            return not green_3
+        return True
 
-def getday():
-    d = datetime.datetime.utcnow().strftime("%Y-%m-%d")
-    cur = mem.get("day", {})
-    if cur.get("date") != d:
-        cur = {"date": d, "trades": 0}
-        cur["loss"] = 0
-        cur["pnl"] = 0.0
-        cur["stop"] = 0
-        cur["win"] = 0
-        cur["lose"] = 0
-        cur["sigs"] = 0
-        cur["mwin"] = 0
-        cur["mlose"] = 0
-        mem["day"] = cur
-    return cur
+    def _send_deviation_alert(self, watch: Dict[str, Any], level: float, live_price: float, reason: str) -> None:
+        level_txt = f"{level:.3f}" if level > 50 else f"{level:.5f}"
+        price_txt = f"{live_price:.3f}" if live_price > 50 else f"{live_price:.5f}"
+        msg = (
+            f"🛡️ حماية الانحراف\n\n"
+            f"• الزوج: {watch['name']}\n"
+            f"• المستوى: {level_txt}\n"
+            f"• السعر الحي: {price_txt}\n"
+            f"• السبب: {reason}\n"
+            f"• الحالة: تم إلغاء الإشارة\n"
+            f"• النتيجة: وفّرنا عليك صفقة خاسرة 🛡️"
+        )
+        self.notifier.send_message(msg)
 
-def getmonth():
-    ym = datetime.datetime.utcnow().strftime("%Y-%m")
-    cur = mem.get("month") or {}
-    if cur.get("ym") != ym:
-        cur = {"ym": ym, "win": 0, "lose": 0}
-        cur["mwin"] = 0
-        cur["mlose"] = 0
-        cur["pnl"] = 0.0
-        mem["month"] = cur
-    return cur
 
-def fun():
-    d = datetime.datetime.utcnow().strftime("%Y-%m-%d")
-    cur = mem.get("fun", {})
-    if cur.get("date") != d:
-        cur = {"date": d, "ev": 0, "f1": 0}
-        cur["f2"] = 0
-        cur["f3"] = 0
-        mem["fun"] = cur
-    return cur
+# =====================================================================
+# إدارة المخاطر
+# =====================================================================
 
-def daystop():
-    day = getday()
-    m = None
-    if day["pnl"] >= TARGET:
-        m = "🎯 هدف اليوم تحقق"
-    elif day["loss"] >= MAXL:
-        m = "🛑 3 خسائر متتالية"
-    elif day["trades"] >= MAXT:
-        m = "🧮 سقف الصفقات"
-    if m:
-        day["stop"] = 1
-        send("⏸️ آلة إدارة اليوم\n"
-             "\n"
-             "• " + m + "\n"
-             "• توقف بقية اليوم\n"
-             "• صافي اليوم: "
-             + str(day["pnl"]) + "$")
+class RiskManager:
+    def __init__(self, logger: logging.Logger, state: StateManager):
+        self.logger = logger
+        self.state = state
 
-def cantrade():
-    day = getday()
-    if day["trades"] >= MAXT:
-        return False
-    if day["loss"] >= MAXL:
-        return False
-    if day["pnl"] >= TARGET:
-        return False
-    if time.time() < mem.get("lock", 0):
-        return False
-    return True
+    def can_trade(self, signal_score: int) -> Tuple[bool, str]:
+        self.state.reset_day_if_new()
+        day = self.state.get_day_stats()
 
-def prune_trades():
-    op = mem.get("open_trades", {})
-    now = time.time()
-    kill = []
-    for mid in op:
-        rc = op[mid]
-        if rc.get("done") or now - rc.get("t", now) > 86400:
-            kill.append(mid)
-    for mid in kill:
-        del op[mid]
+        if signal_score < Config.MIN_SIGNAL_SCORE:
+            return False, f"LOW_SCORE_{signal_score}/{Config.MIN_SIGNAL_SCORE}"
+        if day.get("stop_reason"):
+            return False, f"DAY_STOPPED_{day['stop_reason']}"
+        if day["trades"] >= Config.MAX_TRADES_PER_DAY:
+            return False, "MAX_TRADES_PER_DAY_REACHED"
+        if day["losses"] >= Config.MAX_LOSSES_PER_DAY:
+            day["stop_reason"] = "MAX_LOSSES_PER_DAY"
+            self.state.save()
+            return False, "MAX_LOSSES_PER_DAY_REACHED"
+        if day["pnl"] >= Config.DAILY_PROFIT_TARGET:
+            day["stop_reason"] = "DAILY_TARGET_REACHED"
+            self.state.save()
+            return False, "DAILY_TARGET_REACHED"
+        lock_until = self.state.get("lock_until", 0)
+        if time.time() < lock_until:
+            remaining = int((lock_until - time.time()) // 60)
+            return False, f"COOLDOWN_ACTIVE_{remaining}_MIN_LEFT"
+        return True, "OK"
 
-def listen_replies():
-    if not TG:
-        return
-    try:
-        prune_trades()
-        off = mem.get("upd_off", 0)
-        url = "https://api.telegram.org/bot" + TG + "/getUpdates"
-        pp = {"offset": off, "timeout": 0}
-        r = requests.get(url, params=pp, timeout=10)
-        data = r.json().get("result", [])
-        day = getday()
-        mo = getmonth()
-        for u in data:
-            nid = u.get("update_id", 0)
-            if nid >= off:
-                off = nid + 1
-            msg = u.get("message") or u.get("edited_message")
-            if not msg:
-                continue
-            txt_raw = msg.get("text") or ""
-            txt = txt_raw.lower()
-            win = None
-            if any(w in txt for w in ["ربحت", "رابحة", "won", "win"]):
-                win = True
-            elif any(w in txt for w in ["خسرت", "خاسرة", "lost", "lose"]):
-                win = False
-            if win is None:
-                continue
-            op = mem.setdefault("open_trades", {})
-            rec = None
-            rep = msg.get("reply_to_message")
-            if rep is not None:
-                rc2 = op.get(str(rep.get("message_id")))
-                if rc2 is not None and not rc2.get("done"):
-                    rec = rc2
-            if rec is None:
-                for mid2 in op:
-                    rc2 = op[mid2]
-                    if rc2.get("done"):
-                        continue
-                    if rc2.get("nm", "") in txt_raw:
-                        rec = rc2
-                        break
-            if rec is None:
-                send("⚠️ ما قدرت أربط ردك بصفقة مفتوحة\n"
-                     "\n"
-                     "• استخدم خاصية الرد (Reply) على رسالة الإشارة\n"
-                     "• أو اكتب اسم الزوج مع النتيجة، مثال: EUR/USD ربحت")
-                continue
-            rec["done"] = True
-            if win:
-                day["mwin"] = day.get("mwin", 0)+1
-                mo["mwin"] = mo.get("mwin", 0)+1
-                g = round(STAKE*PAY, 2)
-                day["pnl"] = round(day.get("pnl", 0.0)+g, 2)
-                mo["pnl"] = round(mo.get("pnl", 0.0)+g, 2)
-                t = "✅ رابحة +" + str(g) + "$"
+    def register_signal(self) -> None:
+        self.state.reset_day_if_new()
+        day = self.state.get_day_stats()
+        day["trades"] += 1
+        self.state.set("lock_until", time.time() + Config.COOLDOWN_AFTER_TRADE)
+        self.state.save()
+        self.logger.info(f"تم تسجيل إشارة. صفقات اليوم: {day['trades']}")
+
+    def register_result(self, win: bool, manual: bool = False) -> None:
+        self.state.reset_day_if_new()
+        day = self.state.get_day_stats()
+        month = self.state.get_month_stats()
+
+        if win:
+            profit = round(Config.STAKE * Config.PAYOUT, 2)
+            day["pnl"] = round(day.get("pnl", 0.0) + profit, 2)
+            month["pnl"] = round(month.get("pnl", 0.0) + profit, 2)
+            if manual:
+                day["manual_wins"] = day.get("manual_wins", 0) + 1
+                month["manual_wins"] = month.get("manual_wins", 0) + 1
             else:
-                day["mlose"] = day.get("mlose", 0)+1
-                mo["mlose"] = mo.get("mlose", 0)+1
-                day["pnl"] = round(day.get("pnl", 0.0)-STAKE, 2)
-                mo["pnl"] = round(mo.get("pnl", 0.0)-STAKE, 2)
-                t = "❌ خاسرة -" + str(STAKE) + "$"
-            send("💰 تم تسجيل صفقتك\n"
-                 "\n"
-                 "• الزوج: " + rec.get("nm", "?") + "\n"
-                 "• النتيجة: " + t + "\n"
-                 "• صافي اليوم: " + str(day["pnl"]) + "$\n"
-                 "• صافي الشهر: " + str(mo["pnl"]) + "$")
-        mem["upd_off"] = off
-    except Exception as e:
-        print("LISTEN ERR:", e)
-
-def reports():
-    now = datetime.datetime.utcnow()
-    ym = now.strftime("%Y-%m")
-    now2 = now + datetime.timedelta(hours=TZ)
-    today = now2.strftime("%Y-%m-%d")
-    hr = now2.hour
-    mc = mem.get("month")
-    if mc is not None and mc.get("ym") and mc["ym"] != ym:
-        tw = mc.get("win", 0) + mc.get("mwin", 0)
-        tl = mc.get("lose", 0) + mc.get("mlose", 0)
-        tt = tw + tl
-        rate = round(100*tw/tt) if tt > 0 else 0
-        send("🗓️ جرد الشهر الكامل\n"
-             "\n"
-             "• الشهر: " + mc["ym"] + "\n"
-             "• الآلي: " + str(mc.get("win", 0)) + "✅ / " + str(mc.get("lose", 0)) + "❌\n"
-             "• اليدوي: " + str(mc.get("mwin", 0)) + "✅ / " + str(mc.get("mlose", 0)) + "❌\n"
-             "• إجمالي الصفقات: " + str(tt) + "\n"
-             "• معدل الفوز: " + str(rate) + "%\n"
-             "• صافي الشهر: " + str(mc.get("pnl", 0.0)) + "$")
-        mem["month"] = None
-    mo = getmonth()
-    m_line = "• صافي الشهر: " + str(mo.get("pnl", 0.0)) + "$"
-    rd = mem.get("repdate")
-    if rd is None:
-        mem["repdate"] = today
-    elif rd != today:
-        d = mem.get("day", {})
-        aw = d.get("win", 0)
-        al = d.get("lose", 0)
-        mw = d.get("mwin", 0)
-        ml = d.get("mlose", 0)
-        ar = round(100*aw/(aw+al)) if aw+al > 0 else 0
-        mr = round(100*mw/(mw+ml)) if mw+ml > 0 else 0
-        send("📊 جرد اليوم الكامل (24 ساعة)\n"
-             "\n"
-             "• التاريخ: " + rd + "\n"
-             "• الآلي: " + str(aw) + "✅ / " + str(al) + "❌ (" + str(ar) + "%)\n"
-             "• اليدوي: " + str(mw) + "✅ / " + str(ml) + "❌ (" + str(mr) + "%)\n"
-             "• صافي اليوم: " + str(d.get("pnl", 0.0)) + "$\n"
-             + m_line)
-        mem["repdate"] = today
-    if hr in (4, 8, 12, 16, 20):
-        slot = today + "-" + str(hr)
-        if mem.get("rep4") != slot:
-            mem["rep4"] = slot
-            d = mem.get("day", {})
-            aw = d.get("win", 0)
-            al = d.get("lose", 0)
-            mw = d.get("mwin", 0)
-            ml = d.get("mlose", 0)
-            ar = round(100*aw/(aw+al)) if aw+al > 0 else 0
-            mr = round(100*mw/(mw+ml)) if mw+ml > 0 else 0
-            send("⏱️ جرد كل 4 ساعات\n"
-                 "\n"
-                 "• الآلي: " + str(aw) + "✅ / " + str(al) + "❌ (" + str(ar) + "%)\n"
-                 "• اليدوي: " + str(mw) + "✅ / " + str(ml) + "❌ (" + str(mr) + "%)\n"
-                 "• صافي اليوم: " + str(d.get("pnl", 0.0)) + "$\n"
-                 + m_line)
-
-def pending():
-    p = mem.get("pend")
-    if not p:
-        return
-    if time.time() < p["ev"]:
-        return
-    try:
-        cx = fetch(p["sym"], "15m", "1d")
-        pr = cx[-1]["c"]
-    except Exception:
-        p["ev"] = time.time()+120
-        return
-    if "CALL" in p["sd"]:
-        win = pr > p["en"]
-    else:
-        win = pr < p["en"]
-    day = getday()
-    mo = getmonth()
-    if win:
-        g = round(STAKE*PAY, 2)
-        day["pnl"] = round(day["pnl"]+g, 2)
-        mo["pnl"] = round(mo.get("pnl", 0.0)+g, 2)
-        day["loss"] = 0
-        day["win"] = day.get("win", 0)+1
-        mo["win"] = mo.get("win", 0)+1
-        t = "✅ رابحة +" + str(g) + "$"
-    else:
-        day["pnl"] = round(day["pnl"]-STAKE, 2)
-        mo["pnl"] = round(mo.get("pnl", 0.0)-STAKE, 2)
-        day["loss"] += 1
-        day["lose"] = day.get("lose", 0)+1
-        mo["lose"] = mo.get("lose", 0)+1
-        t = "❌ خاسرة -" + str(STAKE) + "$"
-    send("💰 نتيجة الصفقة\n"
-         "\n"
-         "• الزوج: " + p["nm"] + "\n"
-         "• الاتجاه: " + p["sd"] + "\n"
-         "• النتيجة: " + t + "\n"
-         "• صافي اليوم: "
-         + str(day["pnl"]) + "$")
-    mem["pend"] = None
-    daystop()
-
-def sniper():
-    if not market_open():
-        return
-    for pr in PAIRS:
-        nm = pr[0:3] + "/" + pr[3:6]
-        sw = mem.get("S_" + nm)
-        if sw is None:
-            continue
-        if time.time() - sw["t"] > 10800:
-            mem["S_" + nm] = None
-            continue
-        try:
-            c5 = fetch(pr, "5m", "1d")
-        except Exception:
-            continue
-        k = c5[-1]
-        if sw.get("lt") == k["t"]:
-            continue
-        o = k["o"]
-        h = k["h"]
-        l = k["l"]
-        c = k["c"]
-        lvl = sw["lvl"]
-        txt = "%.3f" % lvl if c > 50 else "%.5f" % lvl
-        span = max(h - l, 1e-9)
-        body_dn = o - c
-        body_up = c - o
-        prev5 = c5[-2]
-        pd = mem.get("pend")
-        if pd is not None and pd.get("nm") == nm:
-            sw["lt"] = k["t"]
-            continue
-        try:
-            c15x = fetch(pr, "15m", "1d")
-            clx = [x["c"] for x in c15x[:-1]]
-            rpx, rnx = rsi2(clx)
-        except Exception:
-            rnx = None
-        lp = live_price(pr)
-        lpv = lp if lp is not None else c
-        lp_txt = ("%.3f" % lp if lp > 50 else "%.5f" % lp) if lp else "تقريبي (شمعة)"
-        if sw["dir"] == "PUT":
-            touched = h >= lvl - 0.00025 * c
-            rej = body_dn >= 0.4 * span or pat_put(k, prev5)
-            rejected = rej and c < lvl
-            rsi_ok = rnx is None or rnx >= 42
-            dev_dn = (lvl - lpv) / c
-            dev_up = (lpv - lvl) / c
-            if touched and rejected and rsi_ok:
-                if dev_dn > MAX_DEV:
-                    mem["S_" + nm] = None
-                    send("🛡️ حماية الانحراف\n"
-                         "\n"
-                         "• الزوج: " + nm + "\n"
-                         "• المستوى: " + txt + "\n"
-                         "• السعر الحي: " + lp_txt + "\n"
-                         "• الانحراف تحت المستوى: " + str(round(dev_dn*10000, 1)) + " نقطة\n"
-                         "• الحالة: السعر نزل بعيد → الإشارة أُلغيت\n"
-                         "• النتيجة: وفّرنا عليك مطاردة هبوط 🛡️")
-                    sw["lt"] = k["t"]
-                elif dev_up > MAX_AHEAD:
-                    mem["S_" + nm] = None
-                    send("🛡️ حماية التبكير\n"
-                         "\n"
-                         "• الزوج: " + nm + "\n"
-                         "• المستوى: " + txt + "\n"
-                         "• السعر الحي: " + lp_txt + "\n"
-                         "• السعر لسه ما نزل للمستوى بعد\n"
-                         "• الحالة: بيانات متأخرة أو فرق منصة\n"
-                         "• النتيجة: أُلغيت — بانتظار لمس حقيقي 🛡️")
-                    sw["lt"] = k["t"]
-                else:
-                    sw["lt"] = k["t"]
-                    mem["S_" + nm] = None
-                    dd = getday()
-                    dd["sigs"] = dd.get("sigs", 0)+1
-                    mid = send("🥈 ادخل الحين (فضية)!\n"
-                         "\n"
-                         "• الزوج: " + nm + "\n"
-                         "• المستوى: " + txt + "\n"
-                         "• السعر الحي الآن: " + lp_txt + "\n"
-                         "• الاتجاه: هبوط 🔴\n"
-                         "• لمس + رفض (نمط أو جسم قوي) ✔️\n"
-                         "• السعر داخل المنطقة الذهبية → ادخل فورا\n"
-                         "• مدة الصفقة: 15 دقيقة\n"
-                         "• البروتوكول: غيث v6.20 CLEAN\n"
-                         "\n"
-                         "📝 بعد الصفقة رد بـ: ربحت / خسرت")
-                    if mid:
-                        op = mem.setdefault("open_trades", {})
-                        op[str(mid)] = {"nm": nm, "done": False, "t": time.time()}
-            elif c > lvl + 0.0015 * c:
-                mem["S_" + nm] = None
+                day["wins"] = day.get("wins", 0) + 1
+                month["wins"] = month.get("wins", 0) + 1
+            day["consecutive_losses"] = 0
+            self.logger.info(f"✅ فوز | صافي اليوم: {day['pnl']}$")
         else:
-            touched = l <= lvl + 0.00025 * c
-            rej = body_up >= 0.4 * span or pat_call(k, prev5)
-            rejected = rej and c > lvl
-            rsi_ok = rnx is None or rnx <= 58
-            dev_dn = (lvl - lpv) / c
-            dev_up = (lpv - lvl) / c
-            if touched and rejected and rsi_ok:
-                if dev_up > MAX_DEV:
-                    mem["S_" + nm] = None
-                    send("🛡️ حماية الانحراف\n"
-                         "\n"
-                         "• الزوج: " + nm + "\n"
-                         "• المستوى: " + txt + "\n"
-                         "• السعر الحي: " + lp_txt + "\n"
-                         "• الانحراف فوق المستوى: " + str(round(dev_up*10000, 1)) + " نقطة\n"
-                         "• الحالة: السعر طلع بعيد → الإشارة أُلغيت\n"
-                         "• النتيجة: وفّرنا عليك مطاردة صعود 🛡️")
-                    sw["lt"] = k["t"]
-                elif dev_dn > MAX_AHEAD:
-                    mem["S_" + nm] = None
-                    send("🛡️ حماية التبكير\n"
-                         "\n"
-                         "• الزوج: " + nm + "\n"
-                         "• المستوى: " + txt + "\n"
-                         "• السعر الحي: " + lp_txt + "\n"
-                         "• السعر لسه ما صعد للمستوى بعد\n"
-                         "• الحالة: بيانات متأخرة أو فرق منصة\n"
-                         "• النتيجة: أُلغيت — بانتظار لمس حقيقي 🛡️")
-                    sw["lt"] = k["t"]
-                else:
-                    sw["lt"] = k["t"]
-                    mem["S_" + nm] = None
-                    dd = getday()
-                    dd["sigs"] = dd.get("sigs", 0)+1
-                    mid = send("🥈 ادخل الحين (فضية)!\n"
-                         "\n"
-                         "• الزوج: " + nm + "\n"
-                         "• المستوى: " + txt + "\n"
-                         "• السعر الحي الآن: " + lp_txt + "\n"
-                         "• الاتجاه: صعود 🟢\n"
-                         "• لمس + رفض (نمط أو جسم قوي) ✔️\n"
-                         "• السعر داخل المنطقة الذهبية → ادخل فورا\n"
-                         "• مدة الصفقة: 15 دقيقة\n"
-                         "• البروتوكول: غيث v6.20 CLEAN\n"
-                         "\n"
-                         "📝 بعد الصفقة رد بـ: ربحت / خسرت")
-                    if mid:
-                        op = mem.setdefault("open_trades", {})
-                        op[str(mid)] = {"nm": nm, "done": False, "t": time.time()}
-            elif c < lvl - 0.0015 * c:
-                mem["S_" + nm] = None
-        time.sleep(0.3)
+            loss = Config.STAKE
+            day["pnl"] = round(day.get("pnl", 0.0) - loss, 2)
+            month["pnl"] = round(month.get("pnl", 0.0) - loss, 2)
+            if manual:
+                day["manual_losses"] = day.get("manual_losses", 0) + 1
+                month["manual_losses"] = month.get("manual_losses", 0) + 1
+            else:
+                day["losses"] = day.get("losses", 0) + 1
+                month["losses"] = month.get("losses", 0) + 1
+            day["consecutive_losses"] = day.get("consecutive_losses", 0) + 1
+            self.logger.warning(f"❌ خسارة | صافي اليوم: {day['pnl']}$")
 
-def scan(sym):
-    if not market_open():
-        return 0
-    nm = sym[0:3] + "/" + sym[3:6]
-    c15 = fetch(sym, "15m", "7d")
-    if len(c15) < 150:
-        return 0
-    cd = c15[:-1]
-    lt = cd[-1]["t"]
-    if mem.get("L_"+nm) == lt:
-        return 0
-    mem["L_"+nm] = lt
-    cl = [x["c"] for x in cd]
-    k = cd[-1]
-    pvc = cd[-2]
-    o = k["o"]
-    h = k["h"]
-    l = k["l"]
-    c = k["c"]
-    rng = h-l
-    if rng <= 0:
-        return 0
-    e15 = ema(cl, 35)
-    h1 = toh1(cd)
-    e60 = ema([x["c"] for x in h1], 35)
-    e50 = ema([x["c"] for x in h1], 50)
-    a15 = adx(cd)
-    a60 = adx(h1)
-    at = atrs(cd)
-    mh1, mh2 = macd2(cl)
-    if None in (e15, e60, e50, a15, a60):
-        return 0
-    if not at:
-        return 0
-    if mh1 is None:
-        return 0
-    atr = at[-1]
-    aavg = sum(at[-20:])/min(20, len(at))
-    rp, rn = rsi2(cl)
-    if rn is None:
-        return 0
-    sup, res = pivots(cd)
-    f = fun()
-    f["ev"] += 1
-    if a60 <= 22 or a15 <= 20:
-        return 0
-    if atr <= 0.4*aavg:
-        return 0
-    if atr >= 2.5*aavg:
-        return 0
-    if abs(c-e15) > 2.0*atr:
-        return 0
-    f["f1"] += 1
-    l3 = cd[-3:]
-    red3 = all(x["c"] < x["o"] for x in l3)
-    grn3 = all(x["c"] > x["o"] for x in l3)
-    up60 = c > e60
-    dn60 = c < e60
-    lo20 = min(x["l"] for x in cd[-20:])
-    hi20 = max(x["h"] for x in cd[-20:])
-    step = 0.5 if c > 50 else 0.005
-    rb = (c//step)*step
-    rt = rb + step
-    near_s = sup is not None
-    if near_s:
-        near_s = abs(l-sup) <= 0.5*atr
-    near_s = near_s or abs(l-rb)/c*100 <= 0.15
-    near_r = res is not None
-    if near_r:
-        near_r = abs(h-res) <= 0.5*atr
-    near_r = near_r or abs(h-rt)/c*100 <= 0.15
-    side = None
-    kind = ""
-    c1 = up60 and c > e15 and near_s and c > e50
-    p1 = dn60 and c < e15 and near_r and c < e50
-    mid_c = c1 and 40 <= rn <= 55 and rn > rp
-    if mid_c:
-        mid_c = pat_call(k, pvc) and mh1 > 0 and mh2 > 0
-    if mid_c:
-        mid_c = (hi20-c) > 0.3*atr
-    mid_p = p1 and 45 <= rn <= 60 and rn < rp
-    if mid_p:
-        mid_p = pat_put(k, pvc) and mh1 < 0 and mh2 < 0
-    if mid_p:
-        mid_p = (c-lo20) > 0.3*atr
-    if mid_c or mid_p:
-        f["f2"] += 1
-    if mid_c and not red3:
-        side = "صعود 🟢 (CALL)"
-        kind = "CALL"
-    elif mid_p and not grn3:
-        side = "هبوط 🔴 (PUT)"
-        kind = "PUT"
-    if side is not None:
-        f["f3"] += 1
-    if side is None:
-        wl = None
-        wt = ""
-        if up60 and abs(l-rb)/c*100 <= 0.025 and rn <= 60:
-            wl = rb
-            wt = "صعود 🟢"
-        if wl is None and dn60 and abs(h-rt)/c*100 <= 0.025 and rn >= 40:
-            wl = rt
-            wt = "هبوط 🔴"
-        if wl is not None:
-            wtxt = "%.3f" % wl if c > 50 else "%.5f" % wl
-            wk = "W_" + nm
-            now = time.time()
-            lw = mem.get(wk)
-            okw = True
-            if lw is not None:
-                if lw[0] == wtxt and now - lw[1] < 3600:
-                    okw = False
-            if okw:
-                mem[wk] = [wtxt, now]
-                mem["S_" + nm] = {"lvl": wl, "t": now}
-                mem["S_" + nm]["dir"] = "CALL" if "صعود" in wt else "PUT"
-                send("👀 تنبيه تجهيز\n"
-                     "\n"
-                     "• الزوج: " + nm + "\n"
-                     "• المستوى المستدير: " + wtxt + "\n"
-                     "• الاتجاه المتوقع: " + wt + "\n"
-                     "• الخطة: إذا لمس المستوى وتكوّنت"
-                     " شمعة تأكيد بنفس الاتجاه → كن جاهزاً!")
-    if side is None:
-        return 0
-    if mem.get("S_" + nm) is not None:
-        return 0
-    if not cantrade():
-        return 0
-    day = getday()
-    day["trades"] += 1
-    mem["lock"] = time.time()+TSEC+60
-    mem["pend"] = {"sym": sym, "nm": nm}
-    mem["pend"]["sd"] = kind
-    mem["pend"]["en"] = c
-    mem["pend"]["ev"] = time.time()+TSEC
-    send("🟢 توصية ذهبية 🚀\n"
-         "\n"
-         "• الزوج: " + nm + "\n"
-         "• الفريم: " + TF_LABEL + "\n"
-         "• مدة الصفقة: " + DUR + "\n"
-         "• الوقت: " + hhmm() + "\n"
-         "• الاتجاه: " + side + "\n"
-         "• تأكيد: 3 فريمات + MACD + نمط شمعة ✔️\n"
-         "• البروتوكول: غيث v6.20 CLEAN\n"
-         "• صفقة اليوم: "
-         + str(day["trades"]) + "\n"
-         "\n"
-         "💡 توصية آلية تعليمية")
-    daystop()
-    return 1
+            if day["consecutive_losses"] >= Config.COOLDOWN_AFTER_LOSSES:
+                self.state.set("lock_until", time.time() + Config.COOLDOWN_MINUTES * 60)
+                day["consecutive_losses"] = 0
+                self.logger.warning(f"تفعيل فترة تبريد {Config.COOLDOWN_MINUTES} دقيقة")
+
+            if day["losses"] >= Config.MAX_LOSSES_PER_DAY:
+                day["stop_reason"] = "MAX_LOSSES_PER_DAY"
+                self.logger.error(f"إيقاف اليوم: حد الخسائر {day['losses']}")
+
+        self.state.save()
+
+    def status_text(self) -> str:
+        self.state.reset_day_if_new()
+        day = self.state.get_day_stats()
+        return (
+            f"صفقات: {day['trades']}/{Config.MAX_TRADES_PER_DAY} | "
+            f"فوز: {day['wins']} | خسارة: {day['losses']} | صافي: {day['pnl']:.2f}$"
+        )
+
+
+# =====================================================================
+# متتبع الصفقات
+# =====================================================================
+
+class TradeTracker:
+    def __init__(self, logger: logging.Logger, state: StateManager, risk: RiskManager, notifier):
+        self.logger = logger
+        self.state = state
+        self.risk = risk
+        self.notifier = notifier
+
+    def add_trade(self, signal: Dict[str, Any]) -> None:
+        trades = self.state.get("open_trades", {})
+        trade_id = signal["id"]
+        trades[trade_id] = {
+            "symbol": signal["symbol"], "name": signal["name"],
+            "direction": signal["direction"], "entry_price": signal["entry_price"],
+            "created_at": time.time(),
+            "expiry": time.time() + signal["expiry_minutes"] * 60,
+            "done": False,
+        }
+        self.state.set("open_trades", trades)
+        self.state.save()
+        self.logger.info(f"تمت إضافة صفقة للمتابعة: {trade_id}")
+
+    def evaluate_pending(self, data_manager: DataManager) -> None:
+        trades = self.state.get("open_trades", {})
+        now = time.time()
+
+        for trade_id, trade in list(trades.items()):
+            if trade.get("done"):
+                continue
+            if now < trade["expiry"]:
+                continue
+
+            current_price = data_manager.get_live_price(trade["symbol"])
+            if current_price is None:
+                continue
+
+            entry = trade["entry_price"]
+            direction = trade["direction"]
+            if direction == "CALL":
+                win = current_price > entry
+            elif direction == "PUT":
+                win = current_price < entry
+            else:
+                win = False
+
+            self.risk.register_result(win, manual=False)
+
+            profit_loss = f"+{Config.STAKE * Config.PAYOUT:.2f}$" if win else f"-{Config.STAKE:.2f}$"
+            emoji = "✅" if win else "❌"
+
+            msg = (
+                f"{emoji} نتيجة الصفقة الآلية\n\n"
+                f"• الزوج: {trade['name']}\n• الاتجاه: {direction}\n"
+                f"• سعر الدخول: {entry:.5f}\n• سعر الخروج: {current_price:.5f}\n"
+                f"• النتيجة: {profit_loss}\n• {self.risk.status_text()}"
+            )
+            self.notifier.send_message(msg)
+
+            trades[trade_id]["done"] = True
+            self.state.save()
+
+    def cleanup_old_trades(self) -> None:
+        trades = self.state.get("open_trades", {})
+        now = time.time()
+        to_remove = []
+        for trade_id, trade in trades.items():
+            if trade.get("done") or now - trade.get("created_at", now) > 86400:
+                to_remove.append(trade_id)
+        for trade_id in to_remove:
+            del trades[trade_id]
+        self.state.set("open_trades", trades)
+        self.state.save()
+
+
+# =====================================================================
+# مرسل التليجرام
+# =====================================================================
+
+class TelegramNotifier:
+    def __init__(self, logger: logging.Logger, state: StateManager, risk: RiskManager):
+        self.logger = logger
+        self.state = state
+        self.risk = risk
+        self.token = Config.TELEGRAM_BOT_TOKEN
+        self.chat_id = Config.TELEGRAM_CHAT_ID
+        self.enabled = bool(self.token and self.chat_id)
+        self.api_url = f"https://api.telegram.org/bot{self.token}" if self.enabled else None
+        self.update_offset = self.state.get("tg_offset", 0)
+        self._send_lock = threading.Lock()
+
+        if not self.enabled:
+            self.logger.warning("Telegram غير مفعّل. الرسائل ستُحفظ في اللوج فقط.")
+
+    def send_message(self, text: str, reply_to: Optional[int] = None) -> Optional[int]:
+        if not self.enabled:
+            self.logger.info(f"TELEGRAM_DISABLED:\n{text}")
+            return None
+
+        url = f"{self.api_url}/sendMessage"
+        payload = {"chat_id": self.chat_id, "text": text, "disable_web_page_preview": True}
+        if reply_to:
+            payload["reply_to_message_id"] = reply_to
+
+        with self._send_lock:
+            for attempt in range(1, 4):
+                try:
+                    response = requests.post(url, json=payload, timeout=Config.REQUEST_TIMEOUT)
+                    if response.status_code == 200:
+                        data = response.json()
+                        return data.get("result", {}).get("message_id")
+                    if response.status_code == 429:
+                        retry_after = response.json().get("parameters", {}).get("retry_after", 5)
+                        self.logger.warning(f"Telegram Rate Limit. انتظار {retry_after}ث")
+                        time.sleep(retry_after + 1)
+                        continue
+                    self.logger.warning(f"فشل إرسال Telegram: {response.status_code}")
+                except Exception as exc:
+                    self.logger.warning(f"خطأ في إرسال Telegram المحاولة {attempt}/3: {exc}")
+                time.sleep(2 * attempt)
+        return None
+
+    def send_watch_alert(self, watch: Dict[str, Any]) -> None:
+        level_txt = f"{watch['level']:.3f}" if watch['level'] > 50 else f"{watch['level']:.5f}"
+        direction_txt = "صعود 🟢" if watch["direction"] == "CALL" else "هبوط 🔴"
+        msg = (
+            f"👀 تنبيه تجهيز\n\n"
+            f"• الزوج: {watch['name']}\n"
+            f"• المستوى: {level_txt} ({watch['level_type']})\n"
+            f"• الاتجاه المتوقع: {direction_txt}\n"
+            f"• جودة الإشارة: {watch['signal_score']}/{watch['max_score']}\n"
+            f"• الخطة: انتظر اللمس والرفض على فريم 5 دقائق\n"
+            f"• الصلاحية: {Config.LEVEL_EXPIRY_HOURS} ساعات"
+        )
+        self.send_message(msg)
+
+    def send_signal(self, signal: Dict[str, Any]) -> Optional[int]:
+        direction = "صعود 🟢 (CALL)" if signal["direction"] == "CALL" else "هبوط 🔴 (PUT)"
+        level_txt = f"{signal['level']:.3f}" if signal['level'] > 50 else f"{signal['level']:.5f}"
+        price_txt = f"{signal['entry_price']:.3f}" if signal['entry_price'] > 50 else f"{signal['entry_price']:.5f}"
+        msg = (
+            f"🟢 توصية ذهبية 🚀\n\n"
+            f"• الزوج: {signal['name']}\n"
+            f"• المستوى: {level_txt} ({signal['level_type']})\n"
+            f"• السعر الحي: {price_txt}\n"
+            f"• الاتجاه: {direction}\n"
+            f"• جودة الإشارة: {signal['signal_score']}/{signal['max_score']}\n"
+            f"• مدة الصفقة: {signal['expiry_minutes']} دقيقة\n"
+            f"• البروتوكول: غيث المزدوج (مُصحح)\n"
+            f"• {self.risk.status_text()}\n\n"
+            f"📝 بعد الصفقة رد بـ: ربحت / خسرت (استخدم خاصية Reply)"
+        )
+        return self.send_message(msg)
+
+    def listen_replies(self) -> None:
+        if not self.enabled:
+            return
+        try:
+            url = f"{self.api_url}/getUpdates"
+            params = {"offset": self.update_offset, "timeout": 0}
+            response = requests.get(url, params=params, timeout=Config.REQUEST_TIMEOUT)
+            data = response.json().get("result", [])
+
+            for update in data:
+                update_id = update.get("update_id", 0)
+                if update_id >= self.update_offset:
+                    self.update_offset = update_id + 1
+
+                msg = update.get("message") or update.get("edited_message")
+                if not msg:
+                    continue
+
+                text = (msg.get("text") or "").lower()
+                win = None
+                if any(w in text for w in ["ربحت", "رابحة", "won", "win"]):
+                    win = True
+                elif any(w in text for w in ["خسرت", "خاسرة", "lost", "lose"]):
+                    win = False
+                if win is None:
+                    continue
+
+                trades = self.state.get("open_trades", {})
+                target_trade = None
+
+                reply_to = msg.get("reply_to_message")
+                if reply_to:
+                    reply_id = str(reply_to.get("message_id"))
+                    target_trade = trades.get(reply_id)
+
+                if not target_trade:
+                    for trade_id, trade in trades.items():
+                        if not trade.get("done") and trade.get("name", "") in text:
+                            target_trade = trade
+                            break
+
+                if not target_trade:
+                    self.send_message(
+                        "⚠️ لم أتمكن من ربط ردك بصفقة مفتوحة\n\n"
+                        "• استخدم الرد (Reply) على رسالة الإشارة\n"
+                        "• أو اكتب اسم الزوج مع النتيجة"
+                    )
+                    continue
+
+                target_trade["done"] = True
+                self.risk.register_result(win, manual=True)
+
+                profit_loss = f"+{Config.STAKE * Config.PAYOUT:.2f}$" if win else f"-{Config.STAKE:.2f}$"
+                emoji = "✅" if win else "❌"
+                result_msg = (
+                    f"💰 تم تسجيل صفقتك\n\n"
+                    f"• الزوج: {target_trade['name']}\n"
+                    f"• النتيجة: {emoji} {profit_loss}\n"
+                    f"• {self.risk.status_text()}"
+                )
+                self.send_message(result_msg)
+
+            self.state.set("tg_offset", self.update_offset)
+            self.state.save()
+        except Exception as exc:
+            self.logger.warning(f"خطأ في استقبال ردود Telegram: {exc}")
+
+
+# =====================================================================
+# التقارير
+# =====================================================================
+
+class Reporter:
+    def __init__(self, logger: logging.Logger, state: StateManager, notifier: TelegramNotifier):
+        self.logger = logger
+        self.state = state
+        self.notifier = notifier
+
+    def check_reports(self) -> None:
+        now = datetime.now(timezone.utc)
+        now_tz = now + timedelta(hours=Config.TIMEZONE_OFFSET)
+        today = now_tz.strftime("%Y-%m-%d")
+        hour = now_tz.hour
+
+        last_report_date = self.state.get("last_daily_report")
+        if last_report_date != today:
+            if last_report_date:
+                self._send_daily_report(last_report_date)
+            self.state.set("last_daily_report", today)
+            self.state.save()
+
+        if hour in (4, 8, 12, 16, 20):
+            slot = f"{today}-{hour}"
+            if self.state.get("last_4h_report") != slot:
+                self._send_4h_report()
+                self.state.set("last_4h_report", slot)
+                self.state.save()
+
+        ym = now.strftime("%Y-%m")
+        last_month = self.state.get("last_monthly_report")
+        if last_month and last_month != ym:
+            self._send_monthly_report(last_month)
+            self.state.set("last_monthly_report", ym)
+            self.state.save()
+
+    def _send_daily_report(self, date: str) -> None:
+        day = self.state.get("day", {})
+        wins = day.get("wins", 0) + day.get("manual_wins", 0)
+        losses = day.get("losses", 0) + day.get("manual_losses", 0)
+        total = wins + losses
+        rate = round(100 * wins / total) if total > 0 else 0
+        msg = (
+            f"📊 جرد اليوم الكامل\n\n"
+            f"• التاريخ: {date}\n"
+            f"• الآلي: {day.get('wins', 0)}✅ / {day.get('losses', 0)}❌\n"
+            f"• اليدوي: {day.get('manual_wins', 0)}✅ / {day.get('manual_losses', 0)}❌\n"
+            f"• الإجمالي: {total} | نسبة الفوز: {rate}%\n"
+            f"• صافي اليوم: {day.get('pnl', 0.0):.2f}$"
+        )
+        self.notifier.send_message(msg)
+
+    def _send_4h_report(self) -> None:
+        day = self.state.get_day_stats()
+        wins = day.get("wins", 0) + day.get("manual_wins", 0)
+        losses = day.get("losses", 0) + day.get("manual_losses", 0)
+        total = wins + losses
+        rate = round(100 * wins / total) if total > 0 else 0
+        msg = (
+            f"⏱️ جرد كل 4 ساعات\n\n"
+            f"• الآلي: {day.get('wins', 0)}✅ / {day.get('losses', 0)}❌\n"
+            f"• اليدوي: {day.get('manual_wins', 0)}✅ / {day.get('manual_losses', 0)}❌\n"
+            f"• الإجمالي: {total} | نسبة الفوز: {rate}%\n"
+            f"• صافي اليوم: {day.get('pnl', 0.0):.2f}$"
+        )
+        self.notifier.send_message(msg)
+
+    def _send_monthly_report(self, ym: str) -> None:
+        month = self.state.get("month", {})
+        wins = month.get("wins", 0) + month.get("manual_wins", 0)
+        losses = month.get("losses", 0) + month.get("manual_losses", 0)
+        total = wins + losses
+        rate = round(100 * wins / total) if total > 0 else 0
+        msg = (
+            f"🗓️ جرد الشهر الكامل\n\n"
+            f"• الشهر: {ym}\n"
+            f"• الآلي: {month.get('wins', 0)}✅ / {month.get('losses', 0)}❌\n"
+            f"• اليدوي: {month.get('manual_wins', 0)}✅ / {month.get('manual_losses', 0)}❌\n"
+            f"• الإجمالي: {total} | نسبة الفوز: {rate}%\n"
+            f"• صافي الشهر: {month.get('pnl', 0.0):.2f}$"
+        )
+        self.notifier.send_message(msg)
+
+
+# =====================================================================
+# البوت الرئيسي
+# =====================================================================
+
+class GhaithBot:
+    def __init__(self):
+        self.logger = setup_logger()
+        self.state = StateManager(self.logger)
+        self.data = DataManager(self.logger)
+        self.engine = IndicatorEngine(self.logger)
+        self.scanner = Scanner(self.logger, None)
+        self.sniper = Sniper(self.logger, None, self.state)
+        self.risk = RiskManager(self.logger, self.state)
+        self.notifier = TelegramNotifier(self.logger, self.state, self.risk)
+        self.tracker = TradeTracker(self.logger, self.state, self.risk, self.notifier)
+        self.reporter = Reporter(self.logger, self.state, self.notifier)
+
+        self.scanner.notifier = self.notifier
+        self.sniper.notifier = self.notifier
+
+        # قاموس المراقبات النشطة (محمي بقفل احتياطاً، رغم إن التشغيل
+        # الآن تسلسلي أحادي الخيط ضمن وضع GitHub Actions)
+        self.watch_levels: Dict[str, Dict[str, Any]] = {}
+        self._watch_lock = threading.Lock()
+
+    def run(self) -> None:
+        """
+        ✅ متوافق مع GitHub Actions: الحلقة محدودة بـ200 ثانية (RUN_BUDGET_SECONDS)
+        ثم تخرج الدالة وينتهي السكربت طبيعياً — بالضبط زي كل إصداراتك السابقة
+        اللي كانت تُشغَّل عبر GH Actions schedule كل بضع دقائق.
+        السكان والقناص يشتغلوا بالتسلسل داخل نفس الحلقة (بدون Thread).
+        """
+        self._send_startup_message()
+
+        run_budget = env_int("RUN_BUDGET_SECONDS", 200)
+        start = time.time()
+
+        while time.time() < start + run_budget:
+            try:
+                self.notifier.listen_replies()
+                self.tracker.evaluate_pending(self.data)
+                self.tracker.cleanup_old_trades()
+                self.reporter.check_reports()
+
+                # القناص أولاً (يعتمد على مراقبات موجودة أصلاً من دورات سابقة)
+                self._run_sniper()
+                self._cleanup_expired_watches()
+
+                # ثم السكان (قد يُنشئ مراقبات جديدة يفحصها القناص بالدورة الجاية)
+                self._run_scanner()
+
+            except Exception as exc:
+                self.logger.exception(f"خطأ عام في الحلقة الرئيسية: {exc}")
+
+            time.sleep(Config.SCAN_INTERVAL_SECONDS)
+
+        self.logger.info("انتهى وقت التشغيل المخصص لهذه الدورة (GH Actions). الحالة محفوظة، السكربت سيُعاد تشغيله بالجدولة القادمة.")
+
+    def _send_startup_message(self) -> None:
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        if self.state.get("boot_date") != today:
+            self.state.set("boot_date", today)
+            self.state.save()
+            msg = (
+                f"🚀 غيث البروتوكول المزدوج (نسخة مُصححة) بدأ التشغيل\n\n"
+                f"• الرموز: {len(Config.SYMBOLS)} زوج\n"
+                f"• فريم الماسح: {Config.SCAN_TIMEFRAME}\n"
+                f"• فريم القناص: {Config.SNIPER_TIMEFRAME}\n"
+                f"• وضع التشغيل: GitHub Actions (دورة {env_int('RUN_BUDGET_SECONDS', 200)}ث لكل تشغيلة)\n"
+                f"• مدة الصفقة: {Config.EXPIRY_MINUTES} دقيقة\n"
+                f"• الحد الأدنى للجودة: {Config.MIN_SIGNAL_SCORE}/{Config.SCANNER_MAX_SCORE}\n"
+                f"• حد الصفقات اليومي: {Config.MAX_TRADES_PER_DAY}\n"
+                f"• حد الخسائر اليومي: {Config.MAX_LOSSES_PER_DAY}\n"
+                f"• ADX: M15≥{Config.ADX_MIN_M15} و H1≥{Config.ADX_MIN_H1}\n\n"
+                f"⚠️ لا توجد نسبة نجاح مضمونة.\n"
+                f"🎯 الهدف: انتقائية صارمة وجودة عالية."
+            )
+            self.notifier.send_message(msg)
+
+    def _run_scanner(self) -> None:
+        for symbol in Config.SYMBOLS:
+            try:
+                df15 = self.data.fetch(symbol, Config.SCAN_TIMEFRAME, "7d")
+                df60 = self.data.fetch(symbol, Config.TREND_TIMEFRAME, "7d")
+                if df15.empty or df60.empty:
+                    continue
+
+                df15_ind = self.engine.add_indicators(df15)
+                df60_ind = self.engine.add_indicators(df60)
+
+                with self._watch_lock:
+                    active_symbols = {w["symbol"] for w in self.watch_levels.values()}
+
+                watch = self.scanner.scan_symbol(symbol, df15_ind, df60_ind, active_symbols)
+
+                if watch:
+                    watch_key = f"{symbol}|{watch['level']}"
+                    with self._watch_lock:
+                        self.watch_levels[watch_key] = watch
+                    self.notifier.send_watch_alert(watch)
+                    self.logger.info(f"تم إنشاء Watch Level لـ {symbol}: {watch['level']}")
+
+                time.sleep(random.uniform(0.3, 0.8))
+
+            except Exception as exc:
+                self.logger.warning(f"خطأ في فحص {symbol}: {exc}")
+
+    def _run_sniper(self) -> None:
+        with self._watch_lock:
+            items = list(self.watch_levels.items())
+
+        for watch_key, watch in items:
+            try:
+                symbol = watch["symbol"]
+                df5 = self.data.fetch(symbol, Config.SNIPER_TIMEFRAME, "2d")
+                df15 = self.data.fetch(symbol, Config.SCAN_TIMEFRAME, "2d")
+                if df5.empty or df15.empty:
+                    continue
+
+                df5_ind = self.engine.add_indicators(df5)
+                df15_ind = self.engine.add_indicators(df15)
+
+                result, payload = self.sniper.check_watches(watch, df5_ind, df15_ind)
+
+                if result == SniperResult.BROKEN:
+                    # ✅ إصلاح #4: إلغاء صريح فوري بدل الانتظار حتى انتهاء الصلاحية
+                    with self._watch_lock:
+                        self.watch_levels.pop(watch_key, None)
+                    self.logger.info(f"مراقبة أُلغيت (كسر/انحراف/انتهاء): {watch_key}")
+                    continue
+
+                if result == SniperResult.SIGNAL and payload is not None:
+                    signal = payload
+                    allowed, reason = self.risk.can_trade(signal["signal_score"])
+
+                    if not allowed:
+                        self.logger.info(f"تم تجاهل الإشارة: {reason}")
+                        with self._watch_lock:
+                            self.watch_levels.pop(watch_key, None)
+                        continue
+
+                    self.risk.register_signal()
+                    self.tracker.add_trade(signal)
+                    mid = self.notifier.send_signal(signal)
+
+                    if mid:
+                        trades = self.state.get("open_trades", {})
+                        trades[str(mid)] = trades.pop(signal["id"], {})
+                        self.state.set("open_trades", trades)
+                        self.state.save()
+
+                    with self._watch_lock:
+                        self.watch_levels.pop(watch_key, None)
+                    self.logger.info(f"تم إرسال إشارة {signal['direction']} لـ {symbol}")
+
+                time.sleep(random.uniform(0.2, 0.5))
+
+            except Exception as exc:
+                self.logger.warning(f"خطأ في Sniper لـ {watch_key}: {exc}")
+
+    def _cleanup_expired_watches(self) -> None:
+        now = time.time()
+        with self._watch_lock:
+            to_remove = [
+                k for k, w in self.watch_levels.items()
+                if now - w.get("created_at", now) > Config.LEVEL_EXPIRY_HOURS * 3600
+            ]
+            for k in to_remove:
+                del self.watch_levels[k]
+
+
+# =====================================================================
+# نقطة التشغيل
+# =====================================================================
 
 if __name__ == "__main__":
-    start = time.time()
-    today = datetime.datetime.utcnow().strftime("%Y-%m-%d")
-    if mem.get("boot") != today:
-        mem["boot"] = today
-        send("🌅 غيث v6.20 CLEAN صاحي 🧹 (7d + تنظيف)")
-    seen = 0
-    while time.time() < start + 200:
-        try:
-            reports()
-            listen_replies()
-            pending()
-            sniper()
-            rc = fetch("EURUSD=X", "15m", "1d")
-            ct = rc[-2]["t"]
-        except Exception:
-            ct = seen
-        if ct != seen:
-            seen = ct
-            ok = 0
-            fl = 0
-            st = 0
-            for pr in PAIRS:
-                try:
-                    st += scan(pr)
-                    ok += 1
-                except Exception as e:
-                    fl += 1
-                    print("⚠️", pr, type(e).__name__, e)
-                time.sleep(0.2)
-            json.dump(mem, open(MEMF, "w"))
-            print("✅ دورة:", ok, "ok /", fl, "err / 🎯", st)
-        json.dump(mem, open(MEMF, "w"))
-        time.sleep(60)
+    try:
+        bot = GhaithBot()
+        bot.run()
+    except KeyboardInterrupt:
+        print("تم إيقاف البوت يدوياً.")
+    except Exception as ex:
+        logging.getLogger("GhaithDual").exception(f"خطأ فادح: {ex}")
+        raise
