@@ -3,34 +3,27 @@
 
 """
 =====================================================================
-🚀 غيث البروتوكول المزدوج — نسخة مُصححة نهائياً (v4)
-Ghaith Dual Protocol - Verified Corrected Edition
+🚀 غيث البروتوكول المزدوج — نسخة GitHub Actions النهائية (v5)
+Ghaith Dual Protocol - GitHub Actions Final Edition
 
-⚠️ ملاحظة حرجة (اقرأها قبل أي شي):
-نسخة سابقة (v3) حاولت "تشديد" الإعدادات يدوياً برفع SCANNER_MAX_SCORE
-إلى 5، لكن REJECTION تبقى دائماً صفر بمرحلة السكان (تُحسب فقط بعد
-تأكيد القناص) — فالأقصى الفعلي هو 4، مو 5. رفع MIN_SIGNAL_SCORE إلى 4
-معناه عملياً "لازم الأربعة شروط تتحقق بالضبط بلا استثناء واحد"، وهذا
-يعيد نفس مشكلة "الإشارة ما توصل إلا بعد يومين" من جذورها.
-هذه النسخة تصحح ذلك: SCANNER_MAX_SCORE=4 (يطابق الواقع)،
-MIN_SIGNAL_SCORE=3 افتراضياً (يسمح بغياب شرط واحد من أصل أربعة).
+هذه النسخة = المستوى 1 (زيادة طفيفة آمنة) + إصلاح حفظ الحالة:
 
-الإصلاحات المُطبّقة في هذه النسخة (راجع كل تعليق مُعلَّم ✅ إصلاح):
-1) نظام التقييم: LEVEL صارت مربوطة فعلياً بوجود مستوى صالح،
-   وREJECTION حُذفت من مرحلة السكان (تُحسب فقط بعد تأكيد القناص)
-2) أُضيف فحص ADX على فريم H1 (كان مفقوداً بالكامل)
-3) أُضيف قفل يمنع مراقبتين نشطتين على نفس الزوج بنفس الوقت
-4) كسر المستوى الآن يُلغي المراقبة فوراً وصراحة (BROKEN sentinel)
-5) أُضيف تبريد ساعة لمنع تكرار تنبيه "تجهيز" على نفس المستوى تقريباً
-   + فحص "مساحة الحركة" أُضيف أيضاً لمرحلة السكان (كان غائباً)
+✅ تعديلات المستوى 1:
+1) MIN_SIGNAL_SCORE = 2 (بدلاً من 3) → 2-5 إشارات يومياً
+2) ADX_MIN_M15 = 18.0 (بدلاً من 20.0)
+3) ADX_MIN_H1 = 20.0 (بدلاً من 22.0)
 
-⚠️ ملاحظة هامة عن وضع التشغيل (GitHub Actions):
-هذه النسخة مُعدَّلة خصيصاً لتعمل ضمن GitHub Actions — الحلقة الرئيسية
-محدودة بـ 200 ثانية (start+200) ثم تخرج، تماماً مثل باقي إصداراتك
-السابقة. القناص والسكان يعملان بالتسلسل داخل نفس الحلقة (بدون Thread
-منفصل) لأن GH Actions أصلاً لا يوفر تشغيلاً مستمراً يستفيد من خيط
-مستقل. SNIPER_INTERVAL_SECONDS محفوظ بالإعدادات لاستخدامه لاحقاً
-فقط لو انتقلت يوماً لسيرفر دائم (VPS) — لا أثر له بوضع GH Actions.
+✅ إصلاح حفظ الحالة (جديد v5):
+4) مستويات المراقبة (Watch Levels) تُحفظ الآن في ghaith_state.json
+   ولا تضيع بين تشغيلات GitHub Actions (مثل memory.json في الكود القديم).
+
+الإصلاحات السابقة المُبقاة:
+- LEVEL مربوطة بمستوى صالح، REJECTION تُحسب بعد تأكيد القناص فقط
+- ADX على H1 + قفل المراقبات + BROKEN sentinel
+- تبريد تنبيه التجهيز + مساحة الحركة في السكان والقناص
+
+⚠️ وضع التشغيل: GitHub Actions — الحلقة محدودة بـ 200 ثانية ثم تخرج،
+ويُعاد تشغيلها بالجدولة. الحالة تُسترجع عبر actions/cache في الـ Workflow.
 
 تنويه: لا توجد نسبة نجاح مضمونة. الهدف هو الانتقائية الصارمة.
 =====================================================================
@@ -133,22 +126,14 @@ class Config:
     TREND_TIMEFRAME = "1h"
 
     # إدارة المخاطر
-    # ملاحظة: 3 هو اختيارك الصريح (صارم). بما إن MIN_SIGNAL_SCORE=3/4
-    # صار يسمح بتكرار معقول (~2-5 إشارة/يوم تقديرياً)، هذا الحد صار
-    # له معنى فعلي الآن (بعكس لو بقي MIN_SIGNAL_SCORE=4/4 المثالي).
-    # ارفعه لو حسيت إنه يوقفك بسرعة كبيرة بأيام السوق الجيدة.
     MAX_TRADES_PER_DAY = max(env_int("MAX_TRADES_PER_DAY", 3), 0)
     MAX_LOSSES_PER_DAY = max(env_int("MAX_LOSSES_PER_DAY", 3), 0)
     DAILY_PROFIT_TARGET = env_float("DAILY_PROFIT_TARGET", 999999.0)
     COOLDOWN_AFTER_LOSSES = max(env_int("COOLDOWN_AFTER_LOSSES", 2), 1)
     COOLDOWN_MINUTES = max(env_int("COOLDOWN_MINUTES", 120), 0)
 
-    # ✅ إصلاح #1: أقصى درجة فعلية من مرحلة السكان = 4 (وليس 5)
-    # (TREND + MOMENTUM + LEVEL + QUALITY). REJECTION تُضاف فقط
-    # بعد تأكيد القناص فتصير 5 بلحظة الإطلاق الفعلي.
-    # الافتراضي هنا 3/4 حتى لا يصير التكرار نادراً جداً بعد إضافة
-    # فحص ADX-H1 الجديد (الأكثر صرامة) — عدّلها بحذر لو رفعتها لـ4.
-    MIN_SIGNAL_SCORE = min(max(env_int("MIN_SIGNAL_SCORE", 3), 1), 4)
+    # ✅ المستوى 1: 2/4 (يسمح بغياب شرطين من أصل أربعة)
+    MIN_SIGNAL_SCORE = min(max(env_int("MIN_SIGNAL_SCORE", 2), 1), 4)
     SCANNER_MAX_SCORE = 4
 
     NOTIFY_RESULTS = env_bool("NOTIFY_RESULTS", True)
@@ -163,9 +148,9 @@ class Config:
     ATR_MIN_RATIO = 0.4
     ATR_MAX_RATIO = 2.5
 
-    # ✅ إصلاح #2: فصل عتبة ADX بين M15 وH1 (كانت H1 غائبة تماماً)
-    ADX_MIN_M15 = 20.0
-    ADX_MIN_H1 = 22.0
+    # ✅ المستوى 1: عتبات ADX مخففة قليلاً
+    ADX_MIN_M15 = 18.0
+    ADX_MIN_H1 = 20.0
 
     LEVEL_LOOKBACK = 60
 
@@ -184,17 +169,17 @@ class Config:
     REJECTION_BODY_RATIO = 0.4
     LEVEL_EXPIRY_HOURS = env_int("LEVEL_EXPIRY_HOURS", 3)
 
-    # ✅ إصلاح #5: تبريد تنبيه التجهيز لنفس المستوى تقريباً
+    # تبريد تنبيه التجهيز
     WATCH_ALERT_COOLDOWN_SEC = env_int("WATCH_ALERT_COOLDOWN_SEC", 3600)
-    WATCH_ALERT_LEVEL_TOLERANCE_ATR = 0.5  # يُعتبر "نفس المستوى" لو الفرق أقل من هذا × ATR
+    WATCH_ALERT_LEVEL_TOLERANCE_ATR = 0.5
 
+    # الأرقام المستديرة
     ROUND_NUMBER_STEP_LARGE = 0.5
     ROUND_NUMBER_STEP_SMALL = 0.005
     ROUND_NUMBER_PROXIMITY = 0.025
 
     # التشغيل
     SCAN_INTERVAL_SECONDS = env_int("SCAN_INTERVAL_SECONDS", 60)
-    # ✅ إصلاح #6: هذا صار فعلياً مُستخدَماً (Thread منفصل بالأسفل)
     SNIPER_INTERVAL_SECONDS = env_int("SNIPER_INTERVAL_SECONDS", 30)
     REQUEST_TIMEOUT = env_int("REQUEST_TIMEOUT", 15)
     MAX_RETRIES = env_int("MAX_RETRIES", 4)
@@ -524,8 +509,7 @@ class Scanner:
         self.logger = logger
         self.notifier = notifier
         self.last_scan_candle: Dict[str, pd.Timestamp] = {}
-        # ✅ إصلاح #5: تتبع آخر تنبيه تجهيز لكل زوج (لمنع التكرار)
-        self.last_watch_alert: Dict[str, Tuple[float, float]] = {}  # symbol -> (level, ts)
+        self.last_watch_alert: Dict[str, Tuple[float, float]] = {}
 
     def scan_symbol(
         self, symbol: str, df15: pd.DataFrame, df60: pd.DataFrame,
@@ -534,7 +518,6 @@ class Scanner:
         if df15 is None or df60 is None or len(df15) < Config.MIN_ROWS:
             return None
 
-        # ✅ إصلاح #3: لا تُنشئ مراقبة جديدة على زوج له مراقبة نشطة أصلاً
         if symbol in active_symbols:
             return None
 
@@ -555,14 +538,12 @@ class Scanner:
             self.last_scan_candle[symbol] = last_candle_time
             return None
 
-        # ✅ إصلاح #6: فحص مساحة الحركة أُضيف هنا أيضاً (كان غائباً بالسكان)
         if not self._check_space_to_move(last, direction):
             self.last_scan_candle[symbol] = last_candle_time
             return None
 
         level, level_type = self._find_key_level(last, direction)
 
-        # ✅ إصلاح #1: LEVEL و QUALITY (مع ADX-H1) تُحسبان بشكل صحيح الآن
         scores = self._calculate_scores(last, prev, h1_last, level)
         total_score = sum(scores.values())
 
@@ -574,7 +555,6 @@ class Scanner:
             self.last_scan_candle[symbol] = last_candle_time
             return None
 
-        # ✅ إصلاح #5: تبريد تنبيه التجهيز لنفس المستوى تقريباً
         last_alert = self.last_watch_alert.get(symbol)
         atr_val = float(last["ATR"]) if pd.notna(last.get("ATR")) else None
         if last_alert is not None and atr_val:
@@ -616,9 +596,8 @@ class Scanner:
         return distance <= max_allowed_distance
 
     def _check_space_to_move(self, last: pd.Series, direction: str) -> bool:
-        """✅ إصلاح #6: فحص مساحة الحركة على M15 (كان موجوداً فقط بالقناص M5)"""
         if not self._valid(last.get("ATR"), last.get("HIGH_20"), last.get("LOW_20"), last.get("Close")):
-            return True  # لا نرفض بسبب نقص بيانات ثانوي، الفلاتر الأساسية كافية
+            return True
         atr = float(last["ATR"])
         close = float(last["Close"])
         if atr <= 0:
@@ -663,10 +642,10 @@ class Scanner:
             if bull_momentum or bear_momentum:
                 scores["MOMENTUM"] = 1
 
-        # 3) ✅ إصلاح #1: LEVEL مربوطة فعلياً بوجود مستوى صالح
+        # 3) LEVEL مربوطة بمستوى صالح
         scores["LEVEL"] = 1 if level is not None else 0
 
-        # 4) ✅ إصلاح #2: QUALITY الآن يشترط ADX على M15 وH1 معاً
+        # 4) QUALITY: ADX على M15 وH1 معاً (بعتبات المستوى 1)
         if self._valid(last["ADX"], last["ATR_PERCENTILE"], h1_last.get("ADX")):
             adx_m15 = float(last["ADX"])
             adx_h1 = float(h1_last["ADX"])
@@ -747,7 +726,6 @@ class Scanner:
 # =====================================================================
 
 class SniperResult:
-    """✅ إصلاح #4: نوع نتيجة صريح بدل الاعتماد على None لكل الحالات"""
     WAITING = "WAITING"
     BROKEN = "BROKEN"
     SIGNAL = "SIGNAL"
@@ -785,7 +763,6 @@ class Sniper:
             self.last_sniper_candle[watch_key] = last_candle_time
             return SniperResult.WAITING, None
 
-        # ✅ إصلاح #4: كسر واضح للمستوى → BROKEN صريح يُلغي المراقبة فوراً
         if direction == "CALL" and close < level - 0.0015 * close:
             self.last_sniper_candle[watch_key] = last_candle_time
             return SniperResult.BROKEN, None
@@ -808,7 +785,7 @@ class Sniper:
         if not deviation_check:
             self._send_deviation_alert(watch, level, live_price, deviation_reason)
             self.last_sniper_candle[watch_key] = last_candle_time
-            return SniperResult.BROKEN, None  # أُلغيت — لا داعي للانتظار أكثر لنفس اللمسة
+            return SniperResult.BROKEN, None
 
         rsi_ok = self._check_rsi(df15_for_rsi, direction)
         if not rsi_ok:
@@ -828,7 +805,6 @@ class Sniper:
             "level": level,
             "level_type": watch.get("level_type", "UNKNOWN"),
             "entry_price": live_price,
-            # ✅ إصلاح #1: +1 لتأكيد الرفض الفعلي (أقصى ممكن = 4+1 = 5)
             "signal_score": watch["signal_score"] + 1,
             "max_score": watch["max_score"] + 1,
             "candle_time": last_candle_time,
@@ -1192,7 +1168,7 @@ class TelegramNotifier:
             f"• الاتجاه: {direction}\n"
             f"• جودة الإشارة: {signal['signal_score']}/{signal['max_score']}\n"
             f"• مدة الصفقة: {signal['expiry_minutes']} دقيقة\n"
-            f"• البروتوكول: غيث المزدوج (مُصحح)\n"
+            f"• البروتوكول: غيث المزدوج (المستوى 1)\n"
             f"• {self.risk.status_text()}\n\n"
             f"📝 بعد الصفقة رد بـ: ربحت / خسرت (استخدم خاصية Reply)"
         )
@@ -1371,17 +1347,15 @@ class GhaithBot:
         self.scanner.notifier = self.notifier
         self.sniper.notifier = self.notifier
 
-        # قاموس المراقبات النشطة (محمي بقفل احتياطاً، رغم إن التشغيل
-        # الآن تسلسلي أحادي الخيط ضمن وضع GitHub Actions)
-        self.watch_levels: Dict[str, Dict[str, Any]] = {}
+        # ✅ جديد v5: تحميل المراقبات المحفوظة من التشغيلات السابقة
+        # (بدونه، GitHub Actions ينسى كل المراقبات بين كل تشغيله!)
+        self.watch_levels: Dict[str, Dict[str, Any]] = self.state.get("watch_levels", {}) or {}
         self._watch_lock = threading.Lock()
 
     def run(self) -> None:
         """
-        ✅ متوافق مع GitHub Actions: الحلقة محدودة بـ200 ثانية (RUN_BUDGET_SECONDS)
-        ثم تخرج الدالة وينتهي السكربت طبيعياً — بالضبط زي كل إصداراتك السابقة
-        اللي كانت تُشغَّل عبر GH Actions schedule كل بضع دقائق.
-        السكان والقناص يشتغلوا بالتسلسل داخل نفس الحلقة (بدون Thread).
+        ✅ متوافق مع GitHub Actions: الحلقة محدودة بـ200 ثانية ثم تخرج،
+        ويُعاد التشغيل بالجدولة. الحالة والمراقبات تُحفظ وتُسترجع عبر الـ Workflow.
         """
         self._send_startup_message()
 
@@ -1395,19 +1369,28 @@ class GhaithBot:
                 self.tracker.cleanup_old_trades()
                 self.reporter.check_reports()
 
-                # القناص أولاً (يعتمد على مراقبات موجودة أصلاً من دورات سابقة)
+                # القناص أولاً (يفحص المراقبات المحفوظة من التشغيلات السابقة)
                 self._run_sniper()
                 self._cleanup_expired_watches()
 
-                # ثم السكان (قد يُنشئ مراقبات جديدة يفحصها القناص بالدورة الجاية)
+                # ثم السكان (قد يُنشئ مراقبات جديدة)
                 self._run_scanner()
+
+                # ✅ جديد v5: حفظ المراقبات حتى لا تضيع بين التشغيلات
+                self._save_watches()
 
             except Exception as exc:
                 self.logger.exception(f"خطأ عام في الحلقة الرئيسية: {exc}")
 
             time.sleep(Config.SCAN_INTERVAL_SECONDS)
 
-        self.logger.info("انتهى وقت التشغيل المخصص لهذه الدورة (GH Actions). الحالة محفوظة، السكربت سيُعاد تشغيله بالجدولة القادمة.")
+        self.logger.info("انتهى وقت التشغيل المخصص لهذه الدورة (GH Actions). الحالة محفوظة.")
+
+    def _save_watches(self) -> None:
+        """✅ جديد v5: حفظ مستويات المراقبة في ملف الحالة."""
+        with self._watch_lock:
+            self.state.set("watch_levels", self.watch_levels)
+        self.state.save()
 
     def _send_startup_message(self) -> None:
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -1415,16 +1398,17 @@ class GhaithBot:
             self.state.set("boot_date", today)
             self.state.save()
             msg = (
-                f"🚀 غيث البروتوكول المزدوج (نسخة مُصححة) بدأ التشغيل\n\n"
+                f"🚀 غيث البروتوكول المزدوج (المستوى 1) بدأ التشغيل\n\n"
                 f"• الرموز: {len(Config.SYMBOLS)} زوج\n"
                 f"• فريم الماسح: {Config.SCAN_TIMEFRAME}\n"
                 f"• فريم القناص: {Config.SNIPER_TIMEFRAME}\n"
-                f"• وضع التشغيل: GitHub Actions (دورة {env_int('RUN_BUDGET_SECONDS', 200)}ث لكل تشغيلة)\n"
+                f"• وضع التشغيل: GitHub Actions (دورة {env_int('RUN_BUDGET_SECONDS', 200)}ث)\n"
                 f"• مدة الصفقة: {Config.EXPIRY_MINUTES} دقيقة\n"
                 f"• الحد الأدنى للجودة: {Config.MIN_SIGNAL_SCORE}/{Config.SCANNER_MAX_SCORE}\n"
                 f"• حد الصفقات اليومي: {Config.MAX_TRADES_PER_DAY}\n"
                 f"• حد الخسائر اليومي: {Config.MAX_LOSSES_PER_DAY}\n"
-                f"• ADX: M15≥{Config.ADX_MIN_M15} و H1≥{Config.ADX_MIN_H1}\n\n"
+                f"• ADX: M15≥{Config.ADX_MIN_M15} و H1≥{Config.ADX_MIN_H1}\n"
+                f"• مراقبات محفوظة من سابق التشغيلات: {len(self.watch_levels)}\n\n"
                 f"⚠️ لا توجد نسبة نجاح مضمونة.\n"
                 f"🎯 الهدف: انتقائية صارمة وجودة عالية."
             )
@@ -1476,7 +1460,6 @@ class GhaithBot:
                 result, payload = self.sniper.check_watches(watch, df5_ind, df15_ind)
 
                 if result == SniperResult.BROKEN:
-                    # ✅ إصلاح #4: إلغاء صريح فوري بدل الانتظار حتى انتهاء الصلاحية
                     with self._watch_lock:
                         self.watch_levels.pop(watch_key, None)
                     self.logger.info(f"مراقبة أُلغيت (كسر/انحراف/انتهاء): {watch_key}")
