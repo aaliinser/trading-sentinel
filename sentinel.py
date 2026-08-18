@@ -3,15 +3,17 @@
 
 """
 =====================================================================
-🚀 غيث البروتوكول المزدوج — نسخة v7 (منطقة الدخول الذهبية)
-Ghaith Dual Protocol - Golden Entry Zone Edition
+🚀 غيث البروتوكول المزدوج — نسخة v8 (وقف الضياع الصامت)
+Ghaith Dual Protocol - No Silent Miss Edition
 
-✅ جديد v7: كل توصية ذهبية تعرض الآن:
-   - منطقة الدخول الذهبية (من X إلى Y) محسوبة حول المستوى
-   - "ادخل الآن من السعر الحي: Z"
-   - تحذير "لا تدخل إذا خرج السعر خارج المنطقة"
+✅ تعديلات v8 (القرار الموحّد):
+1) حُذف فلتر "3 شموع متتالية" من القناص (كان يلغي فرص الارتداد
+   الصحيحة من الدعم/المقاومة، لأن التصحيح طبيعي يكون بعكس الاتجاه)
+2) وُسّع MAX_DEV من 0.0006 إلى 0.0010 (منطقة ذهبية أوسع،
+   فلا تضيع الإشارة إذا ارتد السعر بسرعة)
 
 المحتويات السابقة المُبقاة كاملة:
+- v7: منطقة الدخول الذهبية + تعليمات "ادخل الآن من"
 - المستوى 1: MIN_SIGNAL_SCORE=2, ADX_MIN_M15=18, ADX_MIN_H1=20
 - حفظ الحالة والمراقبات بين تشغيلات GitHub Actions
 - إصلاح فترات البيانات: H1=30d, M15 للقناص=7d
@@ -153,7 +155,8 @@ class Config:
     RSI_PUT_MAX = 60.0
 
     # منطق القناص
-    MAX_DEV = env_float("MAX_DEV", 0.0006)
+    # ✅ v8: وُسّع من 0.0006 إلى 0.0010 (منطقة ذهبية أوسع = ضياع أقل)
+    MAX_DEV = env_float("MAX_DEV", 0.0010)
     MAX_AHEAD = env_float("MAX_AHEAD", 0.0004)
     TOUCH_TOLERANCE = 0.00025
     REJECTION_BODY_RATIO = 0.4
@@ -782,12 +785,10 @@ class Sniper:
             self.last_sniper_candle[watch_key] = last_candle_time
             return SniperResult.WAITING, None
 
-        three_candle_filter = self._check_three_candles(df5, direction)
-        if not three_candle_filter:
-            self.last_sniper_candle[watch_key] = last_candle_time
-            return SniperResult.WAITING, None
+        # ✅ v8: حُذف فلتر "3 شموع متتالية" من هنا — كان يلغي فرص
+        # الارتداد الصحيحة (التصحيح نحو الدعم طبيعي يكون بشموع حمراء)
 
-        # ✅ جديد v7: حساب منطقة الدخول الذهبية
+        # ✅ v7: حساب منطقة الدخول الذهبية
         zone_low, zone_high = self._entry_zone(level, direction)
 
         signal = {
@@ -798,8 +799,8 @@ class Sniper:
             "level": level,
             "level_type": watch.get("level_type", "UNKNOWN"),
             "entry_price": live_price,
-            "entry_zone_low": zone_low,    # ✅ جديد v7
-            "entry_zone_high": zone_high,  # ✅ جديد v7
+            "entry_zone_low": zone_low,
+            "entry_zone_high": zone_high,
             "signal_score": watch["signal_score"] + 1,
             "max_score": watch["max_score"] + 1,
             "candle_time": last_candle_time,
@@ -811,11 +812,7 @@ class Sniper:
         return SniperResult.SIGNAL, signal
 
     def _entry_zone(self, level: float, direction: str) -> Tuple[float, float]:
-        """
-        ✅ جديد v7: منطقة الدخول الذهبية حول المستوى.
-        CALL: من (المستوى - حد التبكير) إلى (المستوى + حد الانحراف)
-        PUT : من (المستوى - حد الانحراف) إلى (المستوى + حد التبكير)
-        """
+        """منطقة الدخول الذهبية حول المستوى (تتوسع تلقائياً مع MAX_DEV الجديد)."""
         dev = Config.MAX_DEV * level
         ahead = Config.MAX_AHEAD * level
         if direction == "CALL":
@@ -905,18 +902,6 @@ class Sniper:
             return rsi <= Config.RSI_CALL_MAX + 5
         if direction == "PUT":
             return rsi >= Config.RSI_PUT_MIN - 5
-        return True
-
-    def _check_three_candles(self, df5: pd.DataFrame, direction: str) -> bool:
-        if len(df5) < 4:
-            return True
-        last_3 = df5.iloc[-4:-1]
-        if direction == "CALL":
-            red_3 = all(c["Close"] < c["Open"] for _, c in last_3.iterrows())
-            return not red_3
-        if direction == "PUT":
-            green_3 = all(c["Close"] > c["Open"] for _, c in last_3.iterrows())
-            return not green_3
         return True
 
     def _send_deviation_alert(self, watch: Dict[str, Any], level: float, live_price: float, reason: str) -> None:
@@ -1123,7 +1108,7 @@ class TelegramNotifier:
 
     @staticmethod
     def _fmt(value: float) -> str:
-        """تنسيق السعر حسب حجمه (3 خانات للأزواج الكبيرة، 5 للبقية)."""
+        """تنسيق السعر حسب حجمه."""
         return f"{value:.3f}" if value > 50 else f"{value:.5f}"
 
     def send_message(self, text: str, reply_to: Optional[int] = None) -> Optional[int]:
@@ -1169,7 +1154,7 @@ class TelegramNotifier:
         self.send_message(msg)
 
     def send_signal(self, signal: Dict[str, Any]) -> Optional[int]:
-        """✅ v7: التوصية الذهبية مع منطقة الدخول الذهبية وتعليمات الدخول."""
+        """التوصية الذهبية مع منطقة الدخول الذهبية وتعليمات الدخول."""
         direction = "صعود 🟢 (CALL)" if signal["direction"] == "CALL" else "هبوط 🔴 (PUT)"
         level_txt = self._fmt(signal['level'])
         price_txt = self._fmt(signal['entry_price'])
@@ -1186,7 +1171,7 @@ class TelegramNotifier:
             f"🚫 لا تدخل إذا خرج السعر خارج المنطقة\n"
             f"• مدة الصفقة: {signal['expiry_minutes']} دقيقة\n"
             f"• جودة الإشارة: {signal['signal_score']}/{signal['max_score']}\n"
-            f"• البروتوكول: غيث المزدوج (المستوى 1)\n"
+            f"• البروتوكول: غيث المزدوج (v8)\n"
             f"• {self.risk.status_text()}\n\n"
             f"📝 بعد الصفقة رد بـ: ربحت / خسرت (استخدم خاصية Reply)"
         )
@@ -1370,10 +1355,7 @@ class GhaithBot:
         self._watch_lock = threading.Lock()
 
     def run(self) -> None:
-        """
-        ✅ متوافق مع GitHub Actions: الحلقة محدودة بـ200 ثانية ثم تخرج،
-        ويُعاد التشغيل بالجدولة. الحالة والمراقبات تُحفظ وتُسترجع عبر الـ Workflow.
-        """
+        """متوافق مع GitHub Actions: حلقة 200 ثانية + حفظ/استرجاع الحالة."""
         self._send_startup_message()
 
         run_budget = env_int("RUN_BUDGET_SECONDS", 200)
@@ -1386,14 +1368,9 @@ class GhaithBot:
                 self.tracker.cleanup_old_trades()
                 self.reporter.check_reports()
 
-                # القناص أولاً (يفحص المراقبات المحفوظة من التشغيلات السابقة)
                 self._run_sniper()
                 self._cleanup_expired_watches()
-
-                # ثم السكان (قد يُنشئ مراقبات جديدة)
                 self._run_scanner()
-
-                # حفظ المراقبات حتى لا تضيع بين التشغيلات
                 self._save_watches()
 
             except Exception as exc:
@@ -1415,7 +1392,7 @@ class GhaithBot:
             self.state.set("boot_date", today)
             self.state.save()
             msg = (
-                f"🚀 غيث البروتوكول المزدوج (المستوى 1 - v7) بدأ التشغيل\n\n"
+                f"🚀 غيث البروتوكول المزدوج (v8) بدأ التشغيل\n\n"
                 f"• الرموز: {len(Config.SYMBOLS)} زوج\n"
                 f"• فريم الماسح: {Config.SCAN_TIMEFRAME}\n"
                 f"• فريم القناص: {Config.SNIPER_TIMEFRAME}\n"
@@ -1425,6 +1402,7 @@ class GhaithBot:
                 f"• حد الصفقات اليومي: {Config.MAX_TRADES_PER_DAY}\n"
                 f"• حد الخسائر اليومي: {Config.MAX_LOSSES_PER_DAY}\n"
                 f"• ADX: M15≥{Config.ADX_MIN_M15} و H1≥{Config.ADX_MIN_H1}\n"
+                f"• MAX_DEV: {Config.MAX_DEV}\n"
                 f"• مراقبات محفوظة من سابق التشغيلات: {len(self.watch_levels)}\n\n"
                 f"⚠️ لا توجد نسبة نجاح مضمونة.\n"
                 f"🎯 الهدف: انتقائية صارمة وجودة عالية."
