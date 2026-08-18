@@ -3,20 +3,21 @@
 
 """
 =====================================================================
-🚀 غيث البروتوكول المزدوج — نسخة v8 (وقف الضياع الصامت)
-Ghaith Dual Protocol - No Silent Miss Edition
+🚀 غيث البروتوكول المزدوج — نسخة v9 (تقارير القناة الاحترافية)
+Ghaith Dual Protocol - Channel Reports Edition
 
-✅ تعديلات v8 (القرار الموحّد):
-1) حُذف فلتر "3 شموع متتالية" من القناص (كان يلغي فرص الارتداد
-   الصحيحة من الدعم/المقاومة، لأن التصحيح طبيعي يكون بعكس الاتجاه)
-2) وُسّع MAX_DEV من 0.0006 إلى 0.0010 (منطقة ذهبية أوسع،
-   فلا تضيع الإشارة إذا ارتد السعر بسرعة)
+✅ جديد v9:
+1) كل 4 ساعات: رسالة "نتائج إلى الآن" بنفس شكل القنوات الاحترافية
+   (تاريخ + ربح + خسارة + نسبة الفوز) — تُسحب تلقائياً من سجل البوت
+2) بعدها مباشرة: الرسالة الترويجية برابط قناتك العامة
+3) عدّاد دائم (all-time) للرابحة والخاسرة
+
+⚠️ سطر واحد فقط تعدّله: CHANNEL_LINK ← ضع رابط قناتك الحقيقي
 
 المحتويات السابقة المُبقاة كاملة:
-- v7: منطقة الدخول الذهبية + تعليمات "ادخل الآن من"
-- المستوى 1: MIN_SIGNAL_SCORE=2, ADX_MIN_M15=18, ADX_MIN_H1=20
-- حفظ الحالة والمراقبات بين تشغيلات GitHub Actions
-- إصلاح فترات البيانات: H1=30d, M15 للقناص=7d
+- v8: حذف فلتر 3 شموع من القناص + MAX_DEV=0.0010
+- v7: منطقة الدخول الذهبية + تعليمات الدخول
+- المستوى 1 + حفظ الحالة + إصلاح فترات البيانات
 
 تنويه: لا توجد نسبة نجاح مضمونة. الهدف هو الانتقائية الصارمة.
 =====================================================================
@@ -98,6 +99,9 @@ class Config:
     TELEGRAM_BOT_TOKEN = os.getenv("TG_TOKEN", "").strip()
     TELEGRAM_CHAT_ID = os.getenv("TG_CHAT", "").strip()
 
+    # ✅ جديد v9: رابط قناتك العامة — ⚠️ عدّل هذا السطر فقط وضع رابطك
+    CHANNEL_LINK = os.getenv("CHANNEL_LINK", "https://t.me/Ali_V3_Sniper_bot")
+
     STAKE = env_float("STAKE", 6.0)
     PAYOUT = env_float("PAYOUT", 0.90)
     TIMEZONE_OFFSET = env_int("TIMEZONE_OFFSET", 1)
@@ -154,8 +158,7 @@ class Config:
     RSI_PUT_MIN = 42.0
     RSI_PUT_MAX = 60.0
 
-    # منطق القناص
-    # ✅ v8: وُسّع من 0.0006 إلى 0.0010 (منطقة ذهبية أوسع = ضياع أقل)
+    # منطق القناص (v8)
     MAX_DEV = env_float("MAX_DEV", 0.0010)
     MAX_AHEAD = env_float("MAX_AHEAD", 0.0004)
     TOUCH_TOLERANCE = 0.00025
@@ -785,9 +788,6 @@ class Sniper:
             self.last_sniper_candle[watch_key] = last_candle_time
             return SniperResult.WAITING, None
 
-        # ✅ v8: حُذف فلتر "3 شموع متتالية" من هنا — كان يلغي فرص
-        # الارتداد الصحيحة (التصحيح نحو الدعم طبيعي يكون بشموع حمراء)
-
         # ✅ v7: حساب منطقة الدخول الذهبية
         zone_low, zone_high = self._entry_zone(level, direction)
 
@@ -812,7 +812,7 @@ class Sniper:
         return SniperResult.SIGNAL, signal
 
     def _entry_zone(self, level: float, direction: str) -> Tuple[float, float]:
-        """منطقة الدخول الذهبية حول المستوى (تتوسع تلقائياً مع MAX_DEV الجديد)."""
+        """منطقة الدخول الذهبية حول المستوى."""
         dev = Config.MAX_DEV * level
         ahead = Config.MAX_AHEAD * level
         if direction == "CALL":
@@ -965,6 +965,9 @@ class RiskManager:
         day = self.state.get_day_stats()
         month = self.state.get_month_stats()
 
+        # ✅ جديد v9: العدّاد الدائم (يُسحب تلقائياً لتقارير "نتائج إلى الآن")
+        alltime = self.state.get("alltime", {"wins": 0, "losses": 0})
+
         if win:
             profit = round(Config.STAKE * Config.PAYOUT, 2)
             day["pnl"] = round(day.get("pnl", 0.0) + profit, 2)
@@ -975,6 +978,7 @@ class RiskManager:
             else:
                 day["wins"] = day.get("wins", 0) + 1
                 month["wins"] = month.get("wins", 0) + 1
+            alltime["wins"] = alltime.get("wins", 0) + 1
             day["consecutive_losses"] = 0
             self.logger.info(f"✅ فوز | صافي اليوم: {day['pnl']}$")
         else:
@@ -987,6 +991,7 @@ class RiskManager:
             else:
                 day["losses"] = day.get("losses", 0) + 1
                 month["losses"] = month.get("losses", 0) + 1
+            alltime["losses"] = alltime.get("losses", 0) + 1
             day["consecutive_losses"] = day.get("consecutive_losses", 0) + 1
             self.logger.warning(f"❌ خسارة | صافي اليوم: {day['pnl']}$")
 
@@ -999,6 +1004,7 @@ class RiskManager:
                 day["stop_reason"] = "MAX_LOSSES_PER_DAY"
                 self.logger.error(f"إيقاف اليوم: حد الخسائر {day['losses']}")
 
+        self.state.set("alltime", alltime)
         self.state.save()
 
     def status_text(self) -> str:
@@ -1171,7 +1177,7 @@ class TelegramNotifier:
             f"🚫 لا تدخل إذا خرج السعر خارج المنطقة\n"
             f"• مدة الصفقة: {signal['expiry_minutes']} دقيقة\n"
             f"• جودة الإشارة: {signal['signal_score']}/{signal['max_score']}\n"
-            f"• البروتوكول: غيث المزدوج (v8)\n"
+            f"• البروتوكول: غيث المزدوج (v9)\n"
             f"• {self.risk.status_text()}\n\n"
             f"📝 بعد الصفقة رد بـ: ربحت / خسرت (استخدم خاصية Reply)"
         )
@@ -1282,6 +1288,45 @@ class Reporter:
             self.state.set("last_monthly_report", ym)
             self.state.save()
 
+    def _send_4h_report(self) -> None:
+        """✅ جديد v9: رسالة النتائج بشكل القنوات الاحترافية + الرسالة الترويجية."""
+        alltime = self.state.get("alltime", {"wins": 0, "losses": 0})
+        wins = alltime.get("wins", 0)
+        losses = alltime.get("losses", 0)
+        total = wins + losses
+        rate = round(100 * wins / total) if total > 0 else 0
+
+        now_tz = datetime.now(timezone.utc) + timedelta(hours=Config.TIMEZONE_OFFSET)
+        date_txt = now_tz.strftime("%d/%m/%Y")
+
+        stats_msg = (
+            f"🔶 نتائج إلى الآن 🔶\n\n"
+            f"📅 {date_txt}\n"
+            f"✅ {wins} ربح ❌ {losses} خسارة\n"
+            f"📊 المعدل التقريبي: {rate}%"
+        )
+        self.notifier.send_message(stats_msg)
+
+        # الرسالة الترويجية مباشرة بعدها
+        self.notifier.send_message(self._promo_message(now_tz.hour))
+
+    def _promo_message(self, hour: int) -> str:
+        """✅ جديد v9: رسالة ترويج رابط القناة العامة."""
+        greeting = "صباح الخير" if 5 <= hour < 17 else "مساء الخير"
+        return (
+            f"{greeting} جميعاً ❤️\n"
+            "\n"
+            "بتمنى من الكل يتفاعل على منشورات القناة العامة:\n"
+            f"👉 {Config.CHANNEL_LINK}\n"
+            "\n"
+            "حتى تبقى إشارات البوت متاحة للجميع بشكل مجاني وعام 🤝\n"
+            "\n"
+            "إذا كان التفاعل قليل؟\n"
+            "سيتم نقلها لمجموعات خاصة بالفريق (VIP) فقط 🔒\n"
+            "\n"
+            "شكراً لكم ودعمكم نستمر 🔥🙏"
+        )
+
     def _send_daily_report(self, date: str) -> None:
         day = self.state.get("day", {})
         wins = day.get("wins", 0) + day.get("manual_wins", 0)
@@ -1291,21 +1336,6 @@ class Reporter:
         msg = (
             f"📊 جرد اليوم الكامل\n\n"
             f"• التاريخ: {date}\n"
-            f"• الآلي: {day.get('wins', 0)}✅ / {day.get('losses', 0)}❌\n"
-            f"• اليدوي: {day.get('manual_wins', 0)}✅ / {day.get('manual_losses', 0)}❌\n"
-            f"• الإجمالي: {total} | نسبة الفوز: {rate}%\n"
-            f"• صافي اليوم: {day.get('pnl', 0.0):.2f}$"
-        )
-        self.notifier.send_message(msg)
-
-    def _send_4h_report(self) -> None:
-        day = self.state.get_day_stats()
-        wins = day.get("wins", 0) + day.get("manual_wins", 0)
-        losses = day.get("losses", 0) + day.get("manual_losses", 0)
-        total = wins + losses
-        rate = round(100 * wins / total) if total > 0 else 0
-        msg = (
-            f"⏱️ جرد كل 4 ساعات\n\n"
             f"• الآلي: {day.get('wins', 0)}✅ / {day.get('losses', 0)}❌\n"
             f"• اليدوي: {day.get('manual_wins', 0)}✅ / {day.get('manual_losses', 0)}❌\n"
             f"• الإجمالي: {total} | نسبة الفوز: {rate}%\n"
@@ -1392,7 +1422,7 @@ class GhaithBot:
             self.state.set("boot_date", today)
             self.state.save()
             msg = (
-                f"🚀 غيث البروتوكول المزدوج (v8) بدأ التشغيل\n\n"
+                f"🚀 غيث البروتوكول المزدوج (v9) بدأ التشغيل\n\n"
                 f"• الرموز: {len(Config.SYMBOLS)} زوج\n"
                 f"• فريم الماسح: {Config.SCAN_TIMEFRAME}\n"
                 f"• فريم القناص: {Config.SNIPER_TIMEFRAME}\n"
@@ -1402,7 +1432,6 @@ class GhaithBot:
                 f"• حد الصفقات اليومي: {Config.MAX_TRADES_PER_DAY}\n"
                 f"• حد الخسائر اليومي: {Config.MAX_LOSSES_PER_DAY}\n"
                 f"• ADX: M15≥{Config.ADX_MIN_M15} و H1≥{Config.ADX_MIN_H1}\n"
-                f"• MAX_DEV: {Config.MAX_DEV}\n"
                 f"• مراقبات محفوظة من سابق التشغيلات: {len(self.watch_levels)}\n\n"
                 f"⚠️ لا توجد نسبة نجاح مضمونة.\n"
                 f"🎯 الهدف: انتقائية صارمة وجودة عالية."
