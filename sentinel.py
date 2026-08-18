@@ -3,19 +3,20 @@
 
 """
 =====================================================================
-🚀 غيث البروتوكول المزدوج — نسخة v9 (تقارير القناة الاحترافية)
-Ghaith Dual Protocol - Channel Reports Edition
+🚀 غيث البروتوكول المزدوج — نسخة v10 (تنبيهات قريبة جداً)
+Ghaith Dual Protocol - Ultra-Close Alerts Edition
 
-✅ جديد v9:
-1) كل 4 ساعات: رسالة "نتائج إلى الآن" بنفس شكل القنوات الاحترافية
-   (تاريخ + ربح + خسارة + نسبة الفوز) — تُسحب تلقائياً من سجل البوت
-2) بعدها مباشرة: الرسالة الترويجية برابط قناتك العامة
-3) عدّاد دائم (all-time) للرابحة والخاسرة
+✅ جديد v10:
+1) التنبيه ما يننشأ إلا إذا السعر قريب جداً من المستوى
+   (داخل 0.5 ATR = نصف مدى شمعة M15) — بدل النسب الواسعة القديمة
+2) رسالة التجهيز صارت تعرض: السعر الحي الآن + البعد عن المستوى بالنقاط
+   فتعرف فوراً إذا السعر قريب أو بعيد بدون ما تفتح الشارت
 
 ⚠️ سطر واحد فقط تعدّله: CHANNEL_LINK ← ضع رابط قناتك الحقيقي
 
 المحتويات السابقة المُبقاة كاملة:
-- v8: حذف فلتر 3 شموع من القناص + MAX_DEV=0.0010
+- v9: تقارير كل 4 ساعات + الرسالة الترويجية + العدّاد الدائم
+- v8: حذف فلتر 3 شموع + MAX_DEV=0.0010
 - v7: منطقة الدخول الذهبية + تعليمات الدخول
 - المستوى 1 + حفظ الحالة + إصلاح فترات البيانات
 
@@ -99,8 +100,8 @@ class Config:
     TELEGRAM_BOT_TOKEN = os.getenv("TG_TOKEN", "").strip()
     TELEGRAM_CHAT_ID = os.getenv("TG_CHAT", "").strip()
 
-    # ✅ جديد v9: رابط قناتك العامة — ⚠️ عدّل هذا السطر فقط وضع رابطك
-    CHANNEL_LINK = os.getenv("CHANNEL_LINK", "https://t.me/Ali_V3_Sniper_bot")
+    # ✅ رابط قناتك العامة — ⚠️ عدّل هذا السطر فقط وضع رابطك
+    CHANNEL_LINK = os.getenv("CHANNEL_LINK", "https://t.me/YOUR_CHANNEL_USERNAME")
 
     STAKE = env_float("STAKE", 6.0)
     PAYOUT = env_float("PAYOUT", 0.90)
@@ -153,6 +154,11 @@ class Config:
     MAX_DISTANCE_FROM_EMA_ATR = 2.0
     MIN_SPACE_TO_MOVE_ATR = 0.3
 
+    # ✅ جديد v10: أقصى بُعد مسموح عن المستوى لإنشاء التنبيه
+    # (0.5 = نصف مدى شمعة M15 — قريب جداً)
+    # إذا حسيت التنبيهات قلت كثير، ارفعه إلى 0.8
+    LEVEL_PROXIMITY_ATR = env_float("LEVEL_PROXIMITY_ATR", 0.5)
+
     RSI_CALL_MIN = 40.0
     RSI_CALL_MAX = 58.0
     RSI_PUT_MIN = 42.0
@@ -172,7 +178,6 @@ class Config:
     # الأرقام المستديرة
     ROUND_NUMBER_STEP_LARGE = 0.5
     ROUND_NUMBER_STEP_SMALL = 0.005
-    ROUND_NUMBER_PROXIMITY = 0.025
 
     # التشغيل
     SCAN_INTERVAL_SECONDS = env_int("SCAN_INTERVAL_SECONDS", 60)
@@ -561,6 +566,11 @@ class Scanner:
                 self.last_scan_candle[symbol] = last_candle_time
                 return None
 
+        # ✅ جديد v10: حساب البعد الحالي عن المستوى بالنقاط
+        close_now = float(last["Close"])
+        pip = 0.01 if close_now > 50 else 0.0001
+        distance_pips = round(abs(close_now - level) / pip, 1)
+
         watch = {
             "symbol": symbol,
             "name": self._format_symbol_name(symbol),
@@ -570,7 +580,9 @@ class Scanner:
             "signal_score": total_score,
             "max_score": Config.SCANNER_MAX_SCORE,
             "scores": scores,
-            "entry_price": float(last["Close"]),
+            "entry_price": close_now,
+            "live_price": close_now,          # ✅ جديد v10
+            "distance_pips": distance_pips,   # ✅ جديد v10
             "candle_time": last_candle_time,
             "created_at": time.time(),
         }
@@ -666,26 +678,34 @@ class Scanner:
         return None
 
     def _find_key_level(self, last: pd.Series, direction: str) -> Tuple[Optional[float], str]:
+        """
+        ✅ جديد v10: المستوى لازم يكون قريب جداً من السعر
+        (داخل LEVEL_PROXIMITY_ATR × ATR) حتى يننشأ التنبيه.
+        """
         if not self._valid(last["Close"]):
             return None, ""
         close = float(last["Close"])
+        atr = float(last["ATR"]) if pd.notna(last.get("ATR")) else 0
+        if atr <= 0:
+            return None, ""
+        max_distance = Config.LEVEL_PROXIMITY_ATR * atr
+
         candidates = []
 
         if direction == "CALL" and pd.notna(last.get("ROLLING_SUPPORT")):
             support = float(last["ROLLING_SUPPORT"])
-            if abs(close - support) / close <= 0.02:
+            if abs(close - support) <= max_distance:
                 candidates.append((support, "SUPPORT"))
 
         if direction == "PUT" and pd.notna(last.get("ROLLING_RESISTANCE")):
             resistance = float(last["ROLLING_RESISTANCE"])
-            if abs(close - resistance) / close <= 0.02:
+            if abs(close - resistance) <= max_distance:
                 candidates.append((resistance, "RESISTANCE"))
 
         step = Config.ROUND_NUMBER_STEP_LARGE if close > 50 else Config.ROUND_NUMBER_STEP_SMALL
         if step > 0:
             nearest_round = round(close / step) * step
-            distance_pct = abs(close - nearest_round) / close * 100
-            if distance_pct <= Config.ROUND_NUMBER_PROXIMITY:
+            if abs(close - nearest_round) <= max_distance:
                 candidates.append((nearest_round, "ROUND_NUMBER"))
 
         if not candidates:
@@ -965,7 +985,7 @@ class RiskManager:
         day = self.state.get_day_stats()
         month = self.state.get_month_stats()
 
-        # ✅ جديد v9: العدّاد الدائم (يُسحب تلقائياً لتقارير "نتائج إلى الآن")
+        # ✅ v9: العدّاد الدائم
         alltime = self.state.get("alltime", {"wins": 0, "losses": 0})
 
         if win:
@@ -1146,13 +1166,18 @@ class TelegramNotifier:
         return None
 
     def send_watch_alert(self, watch: Dict[str, Any]) -> None:
+        """✅ v10: التنبيه صار يعرض السعر الحي والبعد عن المستوى بالنقاط."""
         level_txt = self._fmt(watch['level'])
+        live_txt = self._fmt(watch.get('live_price', watch['entry_price']))
+        distance = watch.get('distance_pips', 0)
         direction_txt = "صعود 🟢" if watch["direction"] == "CALL" else "هبوط 🔴"
         msg = (
             f"👀 تنبيه تجهيز\n\n"
             f"• الزوج: {watch['name']}\n"
             f"• المستوى: {level_txt} ({watch['level_type']})\n"
             f"• الاتجاه المتوقع: {direction_txt}\n"
+            f"📍 السعر الحي الآن: {live_txt}\n"
+            f"📏 يبعد عن المستوى: {distance} نقطة\n"
             f"• جودة الإشارة: {watch['signal_score']}/{watch['max_score']}\n"
             f"• الخطة: انتظر اللمس والرفض على فريم 5 دقائق\n"
             f"• الصلاحية: {Config.LEVEL_EXPIRY_HOURS} ساعات"
@@ -1177,7 +1202,7 @@ class TelegramNotifier:
             f"🚫 لا تدخل إذا خرج السعر خارج المنطقة\n"
             f"• مدة الصفقة: {signal['expiry_minutes']} دقيقة\n"
             f"• جودة الإشارة: {signal['signal_score']}/{signal['max_score']}\n"
-            f"• البروتوكول: غيث المزدوج (v9)\n"
+            f"• البروتوكول: غيث المزدوج (v10)\n"
             f"• {self.risk.status_text()}\n\n"
             f"📝 بعد الصفقة رد بـ: ربحت / خسرت (استخدم خاصية Reply)"
         )
@@ -1289,7 +1314,7 @@ class Reporter:
             self.state.save()
 
     def _send_4h_report(self) -> None:
-        """✅ جديد v9: رسالة النتائج بشكل القنوات الاحترافية + الرسالة الترويجية."""
+        """v9: رسالة النتائج + الرسالة الترويجية."""
         alltime = self.state.get("alltime", {"wins": 0, "losses": 0})
         wins = alltime.get("wins", 0)
         losses = alltime.get("losses", 0)
@@ -1307,11 +1332,9 @@ class Reporter:
         )
         self.notifier.send_message(stats_msg)
 
-        # الرسالة الترويجية مباشرة بعدها
         self.notifier.send_message(self._promo_message(now_tz.hour))
 
     def _promo_message(self, hour: int) -> str:
-        """✅ جديد v9: رسالة ترويج رابط القناة العامة."""
         greeting = "صباح الخير" if 5 <= hour < 17 else "مساء الخير"
         return (
             f"{greeting} جميعاً ❤️\n"
@@ -1324,7 +1347,7 @@ class Reporter:
             "إذا كان التفاعل قليل؟\n"
             "سيتم نقلها لمجموعات خاصة بالفريق (VIP) فقط 🔒\n"
             "\n"
-            "شكراً لكم ودعمكم نستمر 🔥🙏"
+            "شكراً لكم ودعمكم نستمر 🔥"
         )
 
     def _send_daily_report(self, date: str) -> None:
@@ -1422,7 +1445,7 @@ class GhaithBot:
             self.state.set("boot_date", today)
             self.state.save()
             msg = (
-                f"🚀 غيث البروتوكول المزدوج (v9) بدأ التشغيل\n\n"
+                f"🚀 غيث البروتوكول المزدوج (v10) بدأ التشغيل\n\n"
                 f"• الرموز: {len(Config.SYMBOLS)} زوج\n"
                 f"• فريم الماسح: {Config.SCAN_TIMEFRAME}\n"
                 f"• فريم القناص: {Config.SNIPER_TIMEFRAME}\n"
@@ -1431,7 +1454,7 @@ class GhaithBot:
                 f"• الحد الأدنى للجودة: {Config.MIN_SIGNAL_SCORE}/{Config.SCANNER_MAX_SCORE}\n"
                 f"• حد الصفقات اليومي: {Config.MAX_TRADES_PER_DAY}\n"
                 f"• حد الخسائر اليومي: {Config.MAX_LOSSES_PER_DAY}\n"
-                f"• ADX: M15≥{Config.ADX_MIN_M15} و H1≥{Config.ADX_MIN_H1}\n"
+                f"• قرب المستوى المطلوب: {Config.LEVEL_PROXIMITY_ATR} ATR\n"
                 f"• مراقبات محفوظة من سابق التشغيلات: {len(self.watch_levels)}\n\n"
                 f"⚠️ لا توجد نسبة نجاح مضمونة.\n"
                 f"🎯 الهدف: انتقائية صارمة وجودة عالية."
