@@ -3,27 +3,22 @@
 
 """
 =====================================================================
-🚀 غيث البروتوكول المزدوج — نسخة GitHub Actions النهائية (v5)
+🚀 غيث البروتوكول المزدوج — نسخة GitHub Actions النهائية (v6)
 Ghaith Dual Protocol - GitHub Actions Final Edition
 
-هذه النسخة = المستوى 1 (زيادة طفيفة آمنة) + إصلاح حفظ الحالة:
+هذه النسخة = المستوى 1 + حفظ الحالة + إصلاح فترات البيانات:
 
 ✅ تعديلات المستوى 1:
 1) MIN_SIGNAL_SCORE = 2 (بدلاً من 3) → 2-5 إشارات يومياً
 2) ADX_MIN_M15 = 18.0 (بدلاً من 20.0)
 3) ADX_MIN_H1 = 20.0 (بدلاً من 22.0)
 
-✅ إصلاح حفظ الحالة (جديد v5):
-4) مستويات المراقبة (Watch Levels) تُحفظ الآن في ghaith_state.json
-   ولا تضيع بين تشغيلات GitHub Actions (مثل memory.json في الكود القديم).
+✅ إصلاح حفظ الحالة (v5):
+4) مستويات المراقبة تُحفظ في ghaith_state.json ولا تضيع بين التشغيلات
 
-الإصلاحات السابقة المُبقاة:
-- LEVEL مربوطة بمستوى صالح، REJECTION تُحسب بعد تأكيد القناص فقط
-- ADX على H1 + قفل المراقبات + BROKEN sentinel
-- تبريد تنبيه التجهيز + مساحة الحركة في السكان والقناص
-
-⚠️ وضع التشغيل: GitHub Actions — الحلقة محدودة بـ 200 ثانية ثم تخرج،
-ويُعاد تشغيلها بالجدولة. الحالة تُسترجع عبر actions/cache في الـ Workflow.
+✅ إصلاح فترات البيانات (v6) — يحل خطأ 'EMA_35':
+5) جلب H1 لمدة 30 يوم بدلاً من 7 أيام (حتى تتوفر 200+ شمعة للمؤشرات)
+6) جلب M15 للقناص لمدة 7 أيام بدلاً من يومين (حتى يتوفر RSI)
 
 تنويه: لا توجد نسبة نجاح مضمونة. الهدف هو الانتقائية الصارمة.
 =====================================================================
@@ -1347,8 +1342,7 @@ class GhaithBot:
         self.scanner.notifier = self.notifier
         self.sniper.notifier = self.notifier
 
-        # ✅ جديد v5: تحميل المراقبات المحفوظة من التشغيلات السابقة
-        # (بدونه، GitHub Actions ينسى كل المراقبات بين كل تشغيله!)
+        # ✅ تحميل المراقبات المحفوظة من التشغيلات السابقة
         self.watch_levels: Dict[str, Dict[str, Any]] = self.state.get("watch_levels", {}) or {}
         self._watch_lock = threading.Lock()
 
@@ -1376,7 +1370,7 @@ class GhaithBot:
                 # ثم السكان (قد يُنشئ مراقبات جديدة)
                 self._run_scanner()
 
-                # ✅ جديد v5: حفظ المراقبات حتى لا تضيع بين التشغيلات
+                # ✅ حفظ المراقبات حتى لا تضيع بين التشغيلات
                 self._save_watches()
 
             except Exception as exc:
@@ -1387,7 +1381,7 @@ class GhaithBot:
         self.logger.info("انتهى وقت التشغيل المخصص لهذه الدورة (GH Actions). الحالة محفوظة.")
 
     def _save_watches(self) -> None:
-        """✅ جديد v5: حفظ مستويات المراقبة في ملف الحالة."""
+        """✅ حفظ مستويات المراقبة في ملف الحالة."""
         with self._watch_lock:
             self.state.set("watch_levels", self.watch_levels)
         self.state.save()
@@ -1418,7 +1412,8 @@ class GhaithBot:
         for symbol in Config.SYMBOLS:
             try:
                 df15 = self.data.fetch(symbol, Config.SCAN_TIMEFRAME, "7d")
-                df60 = self.data.fetch(symbol, Config.TREND_TIMEFRAME, "7d")
+                # ✅ إصلاح v6: جلب H1 لمدة 30 يوم (كانت 7 أيام = شموع غير كافية)
+                df60 = self.data.fetch(symbol, Config.TREND_TIMEFRAME, "30d")
                 if df15.empty or df60.empty:
                     continue
 
@@ -1450,7 +1445,8 @@ class GhaithBot:
             try:
                 symbol = watch["symbol"]
                 df5 = self.data.fetch(symbol, Config.SNIPER_TIMEFRAME, "2d")
-                df15 = self.data.fetch(symbol, Config.SCAN_TIMEFRAME, "2d")
+                # ✅ إصلاح v6: جلب M15 للقناص لمدة 7 أيام (كانت يومين = RSI غير متوفر)
+                df15 = self.data.fetch(symbol, Config.SCAN_TIMEFRAME, "7d")
                 if df5.empty or df15.empty:
                     continue
 
