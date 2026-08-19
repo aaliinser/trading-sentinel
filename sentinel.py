@@ -3,24 +3,20 @@
 
 """
 =====================================================================
-🚀 غيث البروتوكول المزدوج — نسخة v10 (تنبيهات قريبة جداً)
-Ghaith Dual Protocol - Ultra-Close Alerts Edition
+🚀 غيث البروتوكول المزدوج — نسخة v11 (تدقيق الكود والاستراتيجية)
+Ghaith Dual Protocol - Audited Edition
 
-✅ جديد v10:
-1) التنبيه ما يننشأ إلا إذا السعر قريب جداً من المستوى
-   (داخل 0.5 ATR = نصف مدى شمعة M15) — بدل النسب الواسعة القديمة
-2) رسالة التجهيز صارت تعرض: السعر الحي الآن + البعد عن المستوى بالنقاط
-   فتعرف فوراً إذا السعر قريب أو بعيد بدون ما تفتح الشارت
+✅ إصلاحات v11:
+1) بوابة المخاطر معطّلة افتراضياً (RISK_GATE_ENABLED=False) لأن المستخدم
+   يدير المخاطر يدوياً — البوت يرسل كل إشارة ذهبية والمستخدم يقرر.
+   (وما عاد يرمي المراقبة إذا الإشارة ما انرسلت)
+2) فحص الانحراف ومنطقة الدخول يستخدمان السعر الحي (1m) بدل إغلاق M5 القديم
+3) فلتر جلسات: الإطلاق فقط بين TRADE_HOUR_START و TRADE_HOUR_END (UTC)
 
-⚠️ سطر واحد فقط تعدّله: CHANNEL_LINK ← ضع رابط قناتك الحقيقي
+مؤجل لاختبار لاحق (حتى ما نغيّر كثير أشياء مرة وحدة):
+4) تأكيد المتابعة (follow-through)
 
-المحتويات السابقة المُبقاة كاملة:
-- v9: تقارير كل 4 ساعات + الرسالة الترويجية + العدّاد الدائم
-- v8: حذف فلتر 3 شموع + MAX_DEV=0.0010
-- v7: منطقة الدخول الذهبية + تعليمات الدخول
-- المستوى 1 + حفظ الحالة + إصلاح فترات البيانات
-
-تنويه: لا توجد نسبة نجاح مضمونة. الهدف هو الانتقائية الصارمة.
+المحتويات السابقة: v10 (قرب المستوى + السعر الحي بالتنبيه) + v9 + v8 + v7
 =====================================================================
 """
 
@@ -100,7 +96,6 @@ class Config:
     TELEGRAM_BOT_TOKEN = os.getenv("TG_TOKEN", "").strip()
     TELEGRAM_CHAT_ID = os.getenv("TG_CHAT", "").strip()
 
-    # ✅ رابط قناتك العامة — ⚠️ عدّل هذا السطر فقط وضع رابطك
     CHANNEL_LINK = os.getenv("CHANNEL_LINK", "https://t.me/YOUR_CHANNEL_USERNAME")
 
     STAKE = env_float("STAKE", 6.0)
@@ -123,20 +118,25 @@ class Config:
     SNIPER_TIMEFRAME = "5m"
     TREND_TIMEFRAME = "1h"
 
-    # إدارة المخاطر
+    # إدارة المخاطر (تُستخدم فقط إذا فعّلت البوابة)
     MAX_TRADES_PER_DAY = max(env_int("MAX_TRADES_PER_DAY", 3), 0)
     MAX_LOSSES_PER_DAY = max(env_int("MAX_LOSSES_PER_DAY", 3), 0)
     DAILY_PROFIT_TARGET = env_float("DAILY_PROFIT_TARGET", 999999.0)
     COOLDOWN_AFTER_LOSSES = max(env_int("COOLDOWN_AFTER_LOSSES", 2), 1)
     COOLDOWN_MINUTES = max(env_int("COOLDOWN_MINUTES", 120), 0)
 
-    # المستوى 1
+    # ✅ v11: بوابة المخاطر معطّلة افتراضياً (المستخدم يدير المخاطر يدوياً)
+    RISK_GATE_ENABLED = env_bool("RISK_GATE_ENABLED", False)
+
+    # ✅ v11: فلتر الجلسات (بتوقيت UTC) — الإطلاق فقط بهالنافذة
+    TRADE_HOUR_START = env_int("TRADE_HOUR_START", 7)
+    TRADE_HOUR_END = env_int("TRADE_HOUR_END", 21)
+
     MIN_SIGNAL_SCORE = min(max(env_int("MIN_SIGNAL_SCORE", 2), 1), 4)
     SCANNER_MAX_SCORE = 4
 
     NOTIFY_RESULTS = env_bool("NOTIFY_RESULTS", True)
 
-    # المؤشرات
     EMA_FAST = 35
     EMA_SLOW = 50
     RSI_PERIOD = 14
@@ -154,9 +154,6 @@ class Config:
     MAX_DISTANCE_FROM_EMA_ATR = 2.0
     MIN_SPACE_TO_MOVE_ATR = 0.3
 
-    # ✅ جديد v10: أقصى بُعد مسموح عن المستوى لإنشاء التنبيه
-    # (0.5 = نصف مدى شمعة M15 — قريب جداً)
-    # إذا حسيت التنبيهات قلت كثير، ارفعه إلى 0.8
     LEVEL_PROXIMITY_ATR = env_float("LEVEL_PROXIMITY_ATR", 0.5)
 
     RSI_CALL_MIN = 40.0
@@ -164,22 +161,18 @@ class Config:
     RSI_PUT_MIN = 42.0
     RSI_PUT_MAX = 60.0
 
-    # منطق القناص (v8)
     MAX_DEV = env_float("MAX_DEV", 0.0010)
     MAX_AHEAD = env_float("MAX_AHEAD", 0.0004)
     TOUCH_TOLERANCE = 0.00025
     REJECTION_BODY_RATIO = 0.4
     LEVEL_EXPIRY_HOURS = env_int("LEVEL_EXPIRY_HOURS", 3)
 
-    # تبريد تنبيه التجهيز
     WATCH_ALERT_COOLDOWN_SEC = env_int("WATCH_ALERT_COOLDOWN_SEC", 3600)
     WATCH_ALERT_LEVEL_TOLERANCE_ATR = 0.5
 
-    # الأرقام المستديرة
     ROUND_NUMBER_STEP_LARGE = 0.5
     ROUND_NUMBER_STEP_SMALL = 0.005
 
-    # التشغيل
     SCAN_INTERVAL_SECONDS = env_int("SCAN_INTERVAL_SECONDS", 60)
     SNIPER_INTERVAL_SECONDS = env_int("SNIPER_INTERVAL_SECONDS", 30)
     REQUEST_TIMEOUT = env_int("REQUEST_TIMEOUT", 15)
@@ -566,7 +559,6 @@ class Scanner:
                 self.last_scan_candle[symbol] = last_candle_time
                 return None
 
-        # ✅ جديد v10: حساب البعد الحالي عن المستوى بالنقاط
         close_now = float(last["Close"])
         pip = 0.01 if close_now > 50 else 0.0001
         distance_pips = round(abs(close_now - level) / pip, 1)
@@ -581,8 +573,8 @@ class Scanner:
             "max_score": Config.SCANNER_MAX_SCORE,
             "scores": scores,
             "entry_price": close_now,
-            "live_price": close_now,          # ✅ جديد v10
-            "distance_pips": distance_pips,   # ✅ جديد v10
+            "live_price": close_now,
+            "distance_pips": distance_pips,
             "candle_time": last_candle_time,
             "created_at": time.time(),
         }
@@ -624,7 +616,6 @@ class Scanner:
     ) -> Dict[str, int]:
         scores = {"TREND": 0, "MOMENTUM": 0, "LEVEL": 0, "QUALITY": 0}
 
-        # 1) TREND
         if self._valid(last["EMA_35"], last["EMA_50"], prev["EMA_35"],
                         h1_last["EMA_35"], h1_last["EMA_50"], last["Close"], h1_last["Close"]):
             h1_bull = h1_last["Close"] > h1_last["EMA_35"] > h1_last["EMA_50"]
@@ -634,7 +625,6 @@ class Scanner:
             if (h1_bull and m15_bull) or (h1_bear and m15_bear):
                 scores["TREND"] = 1
 
-        # 2) MOMENTUM
         if self._valid(last["RSI"], prev["RSI"], last["MACD_HIST"], prev["MACD_HIST"]):
             rsi = float(last["RSI"])
             prev_rsi = float(prev["RSI"])
@@ -650,10 +640,8 @@ class Scanner:
             if bull_momentum or bear_momentum:
                 scores["MOMENTUM"] = 1
 
-        # 3) LEVEL مربوطة بمستوى صالح
         scores["LEVEL"] = 1 if level is not None else 0
 
-        # 4) QUALITY: ADX على M15 وH1 معاً
         if self._valid(last["ADX"], last["ATR_PERCENTILE"], h1_last.get("ADX")):
             adx_m15 = float(last["ADX"])
             adx_h1 = float(h1_last["ADX"])
@@ -678,10 +666,6 @@ class Scanner:
         return None
 
     def _find_key_level(self, last: pd.Series, direction: str) -> Tuple[Optional[float], str]:
-        """
-        ✅ جديد v10: المستوى لازم يكون قريب جداً من السعر
-        (داخل LEVEL_PROXIMITY_ATR × ATR) حتى يننشأ التنبيه.
-        """
         if not self._valid(last["Close"]):
             return None, ""
         close = float(last["Close"])
@@ -755,7 +739,8 @@ class Sniper:
         self.last_sniper_candle: Dict[str, pd.Timestamp] = {}
 
     def check_watches(
-        self, watch: Dict[str, Any], df5: pd.DataFrame, df15_for_rsi: pd.DataFrame
+        self, watch: Dict[str, Any], df5: pd.DataFrame, df15_for_rsi: pd.DataFrame,
+        live_price: Optional[float] = None
     ) -> Tuple[str, Optional[Dict[str, Any]]]:
         if df5 is None or df5.empty or len(df5) < 20:
             return SniperResult.WAITING, None
@@ -795,11 +780,12 @@ class Sniper:
             self.last_sniper_candle[watch_key] = last_candle_time
             return SniperResult.WAITING, None
 
-        live_price = close
+        # ✅ v11: استخدم السعر الحي إن توفر (أدق من إغلاق M5 القديم)
+        effective_live = live_price if live_price else close
 
-        deviation_check, deviation_reason = self._check_deviation(level, live_price, close, direction)
+        deviation_check, deviation_reason = self._check_deviation(level, effective_live, close, direction)
         if not deviation_check:
-            self._send_deviation_alert(watch, level, live_price, deviation_reason)
+            self._send_deviation_alert(watch, level, effective_live, deviation_reason)
             self.last_sniper_candle[watch_key] = last_candle_time
             return SniperResult.BROKEN, None
 
@@ -808,7 +794,12 @@ class Sniper:
             self.last_sniper_candle[watch_key] = last_candle_time
             return SniperResult.WAITING, None
 
-        # ✅ v7: حساب منطقة الدخول الذهبية
+        # ✅ v11: فلتر الجلسات — الإطلاق فقط ضمن النافذة النشطة
+        hour = datetime.now(timezone.utc).hour
+        if not (Config.TRADE_HOUR_START <= hour < Config.TRADE_HOUR_END):
+            self.last_sniper_candle[watch_key] = last_candle_time
+            return SniperResult.WAITING, None
+
         zone_low, zone_high = self._entry_zone(level, direction)
 
         signal = {
@@ -818,7 +809,7 @@ class Sniper:
             "direction": direction,
             "level": level,
             "level_type": watch.get("level_type", "UNKNOWN"),
-            "entry_price": live_price,
+            "entry_price": effective_live,
             "entry_zone_low": zone_low,
             "entry_zone_high": zone_high,
             "signal_score": watch["signal_score"] + 1,
@@ -832,7 +823,6 @@ class Sniper:
         return SniperResult.SIGNAL, signal
 
     def _entry_zone(self, level: float, direction: str) -> Tuple[float, float]:
-        """منطقة الدخول الذهبية حول المستوى."""
         dev = Config.MAX_DEV * level
         ahead = Config.MAX_AHEAD * level
         if direction == "CALL":
@@ -949,6 +939,10 @@ class RiskManager:
         self.state = state
 
     def can_trade(self, signal_score: int) -> Tuple[bool, str]:
+        # ✅ v11: إذا البوابة معطّلة (المستخدم يدير المخاطر يدوياً) → اسمح دائماً
+        if not Config.RISK_GATE_ENABLED:
+            return True, "OK"
+
         self.state.reset_day_if_new()
         day = self.state.get_day_stats()
 
@@ -985,7 +979,6 @@ class RiskManager:
         day = self.state.get_day_stats()
         month = self.state.get_month_stats()
 
-        # ✅ v9: العدّاد الدائم
         alltime = self.state.get("alltime", {"wins": 0, "losses": 0})
 
         if win:
@@ -1134,7 +1127,6 @@ class TelegramNotifier:
 
     @staticmethod
     def _fmt(value: float) -> str:
-        """تنسيق السعر حسب حجمه."""
         return f"{value:.3f}" if value > 50 else f"{value:.5f}"
 
     def send_message(self, text: str, reply_to: Optional[int] = None) -> Optional[int]:
@@ -1166,7 +1158,6 @@ class TelegramNotifier:
         return None
 
     def send_watch_alert(self, watch: Dict[str, Any]) -> None:
-        """✅ v10: التنبيه صار يعرض السعر الحي والبعد عن المستوى بالنقاط."""
         level_txt = self._fmt(watch['level'])
         live_txt = self._fmt(watch.get('live_price', watch['entry_price']))
         distance = watch.get('distance_pips', 0)
@@ -1185,7 +1176,6 @@ class TelegramNotifier:
         self.send_message(msg)
 
     def send_signal(self, signal: Dict[str, Any]) -> Optional[int]:
-        """التوصية الذهبية مع منطقة الدخول الذهبية وتعليمات الدخول."""
         direction = "صعود 🟢 (CALL)" if signal["direction"] == "CALL" else "هبوط 🔴 (PUT)"
         level_txt = self._fmt(signal['level'])
         price_txt = self._fmt(signal['entry_price'])
@@ -1202,7 +1192,7 @@ class TelegramNotifier:
             f"🚫 لا تدخل إذا خرج السعر خارج المنطقة\n"
             f"• مدة الصفقة: {signal['expiry_minutes']} دقيقة\n"
             f"• جودة الإشارة: {signal['signal_score']}/{signal['max_score']}\n"
-            f"• البروتوكول: غيث المزدوج (v10)\n"
+            f"• البروتوكول: غيث المزدوج (v11)\n"
             f"• {self.risk.status_text()}\n\n"
             f"📝 بعد الصفقة رد بـ: ربحت / خسرت (استخدم خاصية Reply)"
         )
@@ -1314,7 +1304,6 @@ class Reporter:
             self.state.save()
 
     def _send_4h_report(self) -> None:
-        """v9: رسالة النتائج + الرسالة الترويجية."""
         alltime = self.state.get("alltime", {"wins": 0, "losses": 0})
         wins = alltime.get("wins", 0)
         losses = alltime.get("losses", 0)
@@ -1403,12 +1392,10 @@ class GhaithBot:
         self.scanner.notifier = self.notifier
         self.sniper.notifier = self.notifier
 
-        # تحميل المراقبات المحفوظة من التشغيلات السابقة
         self.watch_levels: Dict[str, Dict[str, Any]] = self.state.get("watch_levels", {}) or {}
         self._watch_lock = threading.Lock()
 
     def run(self) -> None:
-        """متوافق مع GitHub Actions: حلقة 200 ثانية + حفظ/استرجاع الحالة."""
         self._send_startup_message()
 
         run_budget = env_int("RUN_BUDGET_SECONDS", 200)
@@ -1434,7 +1421,6 @@ class GhaithBot:
         self.logger.info("انتهى وقت التشغيل المخصص لهذه الدورة (GH Actions). الحالة محفوظة.")
 
     def _save_watches(self) -> None:
-        """حفظ مستويات المراقبة في ملف الحالة."""
         with self._watch_lock:
             self.state.set("watch_levels", self.watch_levels)
         self.state.save()
@@ -1445,16 +1431,15 @@ class GhaithBot:
             self.state.set("boot_date", today)
             self.state.save()
             msg = (
-                f"🚀 غيث البروتوكول المزدوج (v10) بدأ التشغيل\n\n"
+                f"🚀 غيث البروتوكول المزدوج (v11) بدأ التشغيل\n\n"
                 f"• الرموز: {len(Config.SYMBOLS)} زوج\n"
                 f"• فريم الماسح: {Config.SCAN_TIMEFRAME}\n"
                 f"• فريم القناص: {Config.SNIPER_TIMEFRAME}\n"
                 f"• وضع التشغيل: GitHub Actions (دورة {env_int('RUN_BUDGET_SECONDS', 200)}ث)\n"
                 f"• مدة الصفقة: {Config.EXPIRY_MINUTES} دقيقة\n"
                 f"• الحد الأدنى للجودة: {Config.MIN_SIGNAL_SCORE}/{Config.SCANNER_MAX_SCORE}\n"
-                f"• حد الصفقات اليومي: {Config.MAX_TRADES_PER_DAY}\n"
-                f"• حد الخسائر اليومي: {Config.MAX_LOSSES_PER_DAY}\n"
-                f"• قرب المستوى المطلوب: {Config.LEVEL_PROXIMITY_ATR} ATR\n"
+                f"• بوابة المخاطر: {'مفعّلة' if Config.RISK_GATE_ENABLED else 'معطّلة (إدارة يدوية)'}\n"
+                f"• نافذة الجلسات: {Config.TRADE_HOUR_START}:00 - {Config.TRADE_HOUR_END}:00 UTC\n"
                 f"• مراقبات محفوظة من سابق التشغيلات: {len(self.watch_levels)}\n\n"
                 f"⚠️ لا توجد نسبة نجاح مضمونة.\n"
                 f"🎯 الهدف: انتقائية صارمة وجودة عالية."
@@ -1504,7 +1489,10 @@ class GhaithBot:
                 df5_ind = self.engine.add_indicators(df5)
                 df15_ind = self.engine.add_indicators(df15)
 
-                result, payload = self.sniper.check_watches(watch, df5_ind, df15_ind)
+                # ✅ v11: جلب السعر الحي لدقة فحص الانحراف ومنطقة الدخول
+                live = self.data.get_live_price(symbol)
+
+                result, payload = self.sniper.check_watches(watch, df5_ind, df15_ind, live)
 
                 if result == SniperResult.BROKEN:
                     with self._watch_lock:
@@ -1562,6 +1550,4 @@ if __name__ == "__main__":
         bot.run()
     except KeyboardInterrupt:
         print("تم إيقاف البوت يدوياً.")
-    except Exception as ex:
-        logging.getLogger("GhaithDual").exception(f"خطأ فادح: {ex}")
-        raise
+    except Exception as ex
