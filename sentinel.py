@@ -476,7 +476,28 @@ class TelegramNotifier:
         self.send_message(f"👀 تنبيه تجهيز{Config.MODE_LABEL}\n\n• الزوج: {w['name']}\n• المستوى: {self._fmt(w['level'])} ({w['level_type']})\n• الاتجاه المتوقع: {d}\n📍 السعر الحي الآن: {self._fmt(w.get('live_price',w['entry_price']))}\n📏 يبعد عن المستوى: {w.get('distance_pips',0)} نقطة\n• جودة الإشارة: {w['signal_score']}/{w['max_score']}\n• الخطة: انتظر اللمس والرفض على فريم 5 دقائق\n• الصلاحية: {Config.LEVEL_EXPIRY_HOURS} ساعات")
     def send_signal(self,s):
         d="صعود 🟢 (CALL)" if s["direction"]=="CALL" else "هبوط 🔴 (PUT)"
-        self.send_message(f"🟢 توصية ذهبية 🚀{Config.MODE_LABEL}\n\n• الزوج: {s['name']}\n• المستوى: {self._fmt(s['level'])} ({s['level_type']})\n• الاتجاه: {d}\n🎯 منطقة الدخول الذهبية: من {self._fmt(s.get('entry_zone_low',s['level']))} إلى {self._fmt(s.get('entry_zone_high',s['level']))}\n💰 ادخل الآن من السعر الحي: {self._fmt(s['entry_price'])}\n🚫 لا تدخل إذا خرج السعر خارج المنطقة\n• مدة الصفقة: {s['expiry_minutes']} دقيقة\n• جودة الإشارة: {s['signal_score']}/{s['max_score']}\n• البروتوكول: غيث المزدوج (v11)\n• {self.risk.status_text()}\n\n📝 بعد الصفقة رد بـ: ربحت / خسرت")
+        zone_low=s.get('entry_zone_low',s['level'])
+        zone_high=s.get('entry_zone_high',s['level'])
+        # ✅ التعديل الوحيد: توجيه الدخول المثالي
+        if s["direction"]=="CALL":
+            ideal_line=f"🎯 الدخول المثالي: انتظر السعر يقترب من {self._fmt(zone_low)} (قاع المنطقة) ثم ادخل CALL\n"
+        else:
+            ideal_line=f"🎯 الدخول المثالي: انتظر السعر يقترب من {self._fmt(zone_high)} (قمة المنطقة) ثم ادخل PUT\n"
+        self.send_message(
+            f"🟢 توصية ذهبية 🚀{Config.MODE_LABEL}\n\n"
+            f"• الزوج: {s['name']}\n"
+            f"• المستوى: {self._fmt(s['level'])} ({s['level_type']})\n"
+            f"• الاتجاه: {d}\n"
+            f"🎯 منطقة الدخول الذهبية: من {self._fmt(zone_low)} إلى {self._fmt(zone_high)}\n"
+            f"{ideal_line}"
+            f"💰 السعر الحي الآن: {self._fmt(s['entry_price'])}\n"
+            f"🚫 لا تدخل إذا خرج السعر خارج المنطقة\n"
+            f"• مدة الصفقة: {s['expiry_minutes']} دقيقة\n"
+            f"• جودة الإشارة: {s['signal_score']}/{s['max_score']}\n"
+            f"• البروتوكول: غيث المزدوج (v11)\n"
+            f"• {self.risk.status_text()}\n\n"
+            f"📝 بعد الصفقة رد بـ: ربحت / خسرت"
+        )
     def listen_replies(self):
         if not self.enabled: return
         try:
