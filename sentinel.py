@@ -199,7 +199,6 @@ class Scan:
             pl,pts=la
             if abs(lv-pl)<=Config.WATCH_TOL*atr and (time.time()-pts)<Config.WATCH_CD: s.ls[sym]=lct; return None
         cn=float(last["Close"]); pip=0.01 if cn>50 else 0.0001
-        # ✅ v13: حساب المنطقة للتنبيه
         lvl=float(lv)
         if dr=="CALL": zl,zh=lvl-Config.MAX_AHEAD*lvl, lvl+Config.MAX_DEV*lvl
         else: zl,zh=lvl-Config.MAX_DEV*lvl, lvl+Config.MAX_AHEAD*lvl
@@ -282,7 +281,6 @@ class Sniper:
         if time.time()-w.get("created_at",0)>Config.LVL_EXP*3600: return SnR.BROKEN,None
         lct=d5.index[-1]; wk=f"{w['symbol']}|{w['level']}"
         if s.last.get(wk)==lct: return SnR.WAITING,None
-        # ✅ v12: تأكيد المتابعة — 3 شموع: تأكيد ([-1])، رفض ([-2])، السابق ([-3])
         conf,rej,prev=d5.iloc[-1],d5.iloc[-2],d5.iloc[-3]
         lv=float(w["level"]); dr=w["direction"]; close=float(conf["Close"])
         if not s._sp(d5,dr,close): s.last[wk]=lct; return SnR.WAITING,None
@@ -290,9 +288,10 @@ class Sniper:
         if dr=="PUT" and close>lv+0.0015*close: s.last[wk]=lct; return SnR.BROKEN,None
         if not s._touch(rej,lv,dr,float(rej["Close"])): return SnR.WAITING,None
         if not s._rej(rej,prev,lv,dr): s.last[wk]=lct; return SnR.WAITING,None
-        # ✅ v12: تأكيد المتابعة
-        if dr=="CALL" and not close>float(rej["High"]): s.last[wk]=lct; return SnR.WAITING,None
-        if dr=="PUT" and not close<float(rej["Low"]): s.last[wk]=lct; return SnR.WAITING,None
+        # ✅ v14: تأكيد معتدل — الإغلاق فوق إغلاق الرفض (مو القمة القاسي)
+        rej_close=float(rej["Close"])
+        if dr=="CALL" and close<rej_close: s.last[wk]=lct; return SnR.WAITING,None
+        if dr=="PUT" and close>rej_close: s.last[wk]=lct; return SnR.WAITING,None
         eff=live if live else close
         ok,reason=s._dev(lv,eff,close,dr)
         if not ok: s._alert(w,lv,eff,reason); s.last[wk]=lct; return SnR.BROKEN,None
@@ -448,7 +447,7 @@ class TG:
         zh=s._fmt(sg.get('entry_zone_high',sg['level']))
         if sg["direction"]=="CALL": ideal=f"🎯 الدخول المثالي: انتظر السعر يقترب من {zl} (قاع المنطقة) ثم ادخل CALL\n"
         else: ideal=f"🎯 الدخول المثالي: انتظر السعر يقترب من {zh} (قمة المنطقة) ثم ادخل PUT\n"
-        s.send(f"🟢 توصية ذهبية 🚀{Config.MODE_LABEL}\n\n• الزوج: {sg['name']}\n• المستوى: {s._fmt(sg['level'])} ({sg['level_type']})\n• الاتجاه: {d}\n🎯 منطقة الدخول الذهبية: من {zl} إلى {zh}\n{ideal}💰 السعر الحي الآن: {s._fmt(sg['entry_price'])}\n🚫 لا تدخل إذا خرج السعر خارج المنطقة\n• مدة الصفقة: {sg['expiry_minutes']} دقيقة\n• جودة الإشارة: {sg['signal_score']}/{sg['max_score']}\n• البروتوكول: غيث المزدوج (v13)\n• {s.risk.txt()}\n\n📝 بعد الصفقة رد بـ: ربحت / خسرت")
+        s.send(f"🟢 توصية ذهبية 🚀{Config.MODE_LABEL}\n\n• الزوج: {sg['name']}\n• المستوى: {s._fmt(sg['level'])} ({sg['level_type']})\n• الاتجاه: {d}\n🎯 منطقة الدخول الذهبية: من {zl} إلى {zh}\n{ideal}💰 السعر الحي الآن: {s._fmt(sg['entry_price'])}\n🚫 لا تدخل إذا خرج السعر خارج المنطقة\n• مدة الصفقة: {sg['expiry_minutes']} دقيقة\n• جودة الإشارة: {sg['signal_score']}/{sg['max_score']}\n• البروتوكول: غيث المزدوج (v14)\n• {s.risk.txt()}\n\n📝 بعد الصفقة رد بـ: ربحت / خسرت")
     def listen(s):
         if not s.en: return
         try:
@@ -531,7 +530,7 @@ class Bot:
         today=datetime.now(timezone.utc).strftime("%Y-%m-%d")
         if s.st.get("boot_date")!=today:
             s.st.set("boot_date",today); s.st.save()
-            s.tg.send(f"🚀 غيث المزدوج (v13){Config.MODE_LABEL} بدأ\n\n• الرموز: {len(Config.SYMBOLS)}\n• الماسح: {Config.SCAN_TF} | القناص: {Config.SNIPER_TF} | الترند: {Config.TREND_TF}\n• مدة الصفقة: {Config.EXPIRY_MIN} دقيقة\n• الجودة: {Config.MIN_SCORE}/{Config.MAX_SC}\n• نافذة الجلسات: {Config.HR_START}-{Config.HR_END} UTC\n• مراقبات محفوظة: {len(s.watch)}")
+            s.tg.send(f"🚀 غيث المزدوج (v14){Config.MODE_LABEL} بدأ\n\n• الرموز: {len(Config.SYMBOLS)}\n• الماسح: {Config.SCAN_TF} | القناص: {Config.SNIPER_TF} | الترند: {Config.TREND_TF}\n• مدة الصفقة: {Config.EXPIRY_MIN} دقيقة\n• الجودة: {Config.MIN_SCORE}/{Config.MAX_SC}\n• نافذة الجلسات: {Config.HR_START}-{Config.HR_END} UTC\n• مراقبات محفوظة: {len(s.watch)}")
     def _scan(s):
         for sym in Config.SYMBOLS:
             try:
