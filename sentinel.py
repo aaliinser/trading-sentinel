@@ -205,7 +205,7 @@ class Scan:
         w={"symbol":sym,"name":s._n(sym),"direction":dr,"level":lvl,"level_type":lt,
            "signal_score":tot,"max_score":Config.MAX_SC,"scores":sc,"entry_price":cn,
            "live_price":cn,"distance_pips":round(abs(cn-lvl)/pip,1),
-           "entry_zone_low":zl,"entry_zone_high":zh,"candle_time":lct,"created_at":time.time()}
+           "entry_zone_low":zl,"entry_zone_high":zh,"candle_time":lct,"created_at":time.time(),"flips":0}
         s.ls[sym]=lct; s.la[sym]=(lvl,time.time())
         return w
     def _dist(s,last):
@@ -288,7 +288,6 @@ class Sniper:
         if dr=="PUT" and close>lv+0.0015*close: s.last[wk]=lct; return SnR.BROKEN,None
         if not s._touch(rej,lv,dr,float(rej["Close"])): return SnR.WAITING,None
         if not s._rej(rej,prev,lv,dr): s.last[wk]=lct; return SnR.WAITING,None
-        # ✅ v14: تأكيد معتدل — الإغلاق فوق إغلاق الرفض (مو القمة القاسي)
         rej_close=float(rej["Close"])
         if dr=="CALL" and close<rej_close: s.last[wk]=lct; return SnR.WAITING,None
         if dr=="PUT" and close>rej_close: s.last[wk]=lct; return SnR.WAITING,None
@@ -440,14 +439,15 @@ class TG:
         zl=s._fmt(w.get('entry_zone_low',w['level']))
         zh=s._fmt(w.get('entry_zone_high',w['level']))
         ideal="انتظر السعر يقترب من قاع المنطقة ثم ادخل CALL" if w["direction"]=="CALL" else "انتظر السعر يقترب من قمة المنطقة ثم ادخل PUT"
-        s.send(f"👀 تنبيه تجهيز{Config.MODE_LABEL}\n\n• الزوج: {w['name']}\n• المستوى: {s._fmt(w['level'])} ({w['level_type']})\n• الاتجاه المتوقع: {d}\n🎯 منطقة الدخول: من {zl} إلى {zh}\n🎯 {ideal}\n📍 السعر الحي الآن: {s._fmt(w.get('live_price',w['entry_price']))}\n📏 يبعد عن المستوى: {w.get('distance_pips',0)} نقطة\n• جودة الإشارة: {w['signal_score']}/{w['max_score']}\n• الخطة: انتظر اللمس والرفض والتأكيد\n• الصلاحية: {Config.LVL_EXP} ساعات")
+        flip=" 🔄 (انقلاب)" if w.get("flips",0)>0 else ""
+        s.send(f"👀 تنبيه تجهيز{Config.MODE_LABEL}{flip}\n\n• الزوج: {w['name']}\n• المستوى: {s._fmt(w['level'])} ({w['level_type']})\n• الاتجاه المتوقع: {d}\n🎯 منطقة الدخول: من {zl} إلى {zh}\n🎯 {ideal}\n📍 السعر الحي الآن: {s._fmt(w.get('live_price',w['entry_price']))}\n📏 يبعد عن المستوى: {w.get('distance_pips',0)} نقطة\n• جودة الإشارة: {w['signal_score']}/{w['max_score']}\n• الخطة: انتظر اللمس والرفض والتأكيد\n• الصلاحية: {Config.LVL_EXP} ساعات")
     def signal(s,sg):
         d="صعود 🟢 (CALL)" if sg["direction"]=="CALL" else "هبوط 🔴 (PUT)"
         zl=s._fmt(sg.get('entry_zone_low',sg['level']))
         zh=s._fmt(sg.get('entry_zone_high',sg['level']))
         if sg["direction"]=="CALL": ideal=f"🎯 الدخول المثالي: انتظر السعر يقترب من {zl} (قاع المنطقة) ثم ادخل CALL\n"
         else: ideal=f"🎯 الدخول المثالي: انتظر السعر يقترب من {zh} (قمة المنطقة) ثم ادخل PUT\n"
-        s.send(f"🟢 توصية ذهبية 🚀{Config.MODE_LABEL}\n\n• الزوج: {sg['name']}\n• المستوى: {s._fmt(sg['level'])} ({sg['level_type']})\n• الاتجاه: {d}\n🎯 منطقة الدخول الذهبية: من {zl} إلى {zh}\n{ideal}💰 السعر الحي الآن: {s._fmt(sg['entry_price'])}\n🚫 لا تدخل إذا خرج السعر خارج المنطقة\n• مدة الصفقة: {sg['expiry_minutes']} دقيقة\n• جودة الإشارة: {sg['signal_score']}/{sg['max_score']}\n• البروتوكول: غيث المزدوج (v14)\n• {s.risk.txt()}\n\n📝 بعد الصفقة رد بـ: ربحت / خسرت")
+        s.send(f"🟢 توصية ذهبية 🚀{Config.MODE_LABEL}\n\n• الزوج: {sg['name']}\n• المستوى: {s._fmt(sg['level'])} ({sg['level_type']})\n• الاتجاه: {d}\n🎯 منطقة الدخول الذهبية: من {zl} إلى {zh}\n{ideal}💰 السعر الحي الآن: {s._fmt(sg['entry_price'])}\n🚫 لا تدخل إذا خرج السعر خارج المنطقة\n• مدة الصفقة: {sg['expiry_minutes']} دقيقة\n• جودة الإشارة: {sg['signal_score']}/{sg['max_score']}\n• البروتوكول: غيث المزدوج (v15)\n• {s.risk.txt()}\n\n📝 بعد الصفقة رد بـ: ربحت / خسرت")
     def listen(s):
         if not s.en: return
         try:
@@ -530,7 +530,7 @@ class Bot:
         today=datetime.now(timezone.utc).strftime("%Y-%m-%d")
         if s.st.get("boot_date")!=today:
             s.st.set("boot_date",today); s.st.save()
-            s.tg.send(f"🚀 غيث المزدوج (v14){Config.MODE_LABEL} بدأ\n\n• الرموز: {len(Config.SYMBOLS)}\n• الماسح: {Config.SCAN_TF} | القناص: {Config.SNIPER_TF} | الترند: {Config.TREND_TF}\n• مدة الصفقة: {Config.EXPIRY_MIN} دقيقة\n• الجودة: {Config.MIN_SCORE}/{Config.MAX_SC}\n• نافذة الجلسات: {Config.HR_START}-{Config.HR_END} UTC\n• مراقبات محفوظة: {len(s.watch)}")
+            s.tg.send(f"🚀 غيث المزدوج (v15){Config.MODE_LABEL} بدأ\n\n• الرموز: {len(Config.SYMBOLS)}\n• الماسح: {Config.SCAN_TF} | القناص: {Config.SNIPER_TF} | الترند: {Config.TREND_TF}\n• مدة الصفقة: {Config.EXPIRY_MIN} دقيقة\n• الجودة: {Config.MIN_SCORE}/{Config.MAX_SC}\n• نافذة الجلسات: {Config.HR_START}-{Config.HR_END} UTC\n• ميزة جديدة: الانقلاب الآمن 🔄\n• مراقبات محفوظة: {len(s.watch)}")
     def _scan(s):
         for sym in Config.SYMBOLS:
             try:
@@ -557,8 +557,24 @@ class Bot:
                 i5=s.ind.add(d5); i15=s.ind.add(d15)
                 live=s.data.live(sym)
                 res,pay=s.snip.check(w,i5,i15,live)
+                # ✅ v15: الانقلاب الآمن — بدل الحذف، نعكس الاتجاه
                 if res==SnR.BROKEN:
-                    with s._wl: s.watch.pop(k,None)
+                    with s._wl:
+                        cur=s.watch.get(k)
+                        if cur is not None and cur.get("flips",0)<1:
+                            nd="CALL" if cur["direction"]=="PUT" else "PUT"
+                            lv=cur["level"]
+                            lt=cur.get("level_type") if cur.get("level_type")=="ROUND_NUMBER" else ("SUPPORT" if nd=="CALL" else "RESISTANCE")
+                            if nd=="CALL": zl,zh=lv-Config.MAX_AHEAD*lv, lv+Config.MAX_DEV*lv
+                            else: zl,zh=lv-Config.MAX_DEV*lv, lv+Config.MAX_AHEAD*lv
+                            cur["direction"]=nd; cur["level_type"]=lt
+                            cur["entry_zone_low"]=zl; cur["entry_zone_high"]=zh
+                            cur["created_at"]=time.time(); cur["flips"]=cur.get("flips",0)+1
+                            s.snip.last.pop(f"{cur['symbol']}|{lv}",None)
+                            flipped=cur
+                        else:
+                            s.watch.pop(k,None); flipped=None
+                    if flipped is not None: s.tg.watch(flipped)
                     continue
                 if res==SnR.SIGNAL and pay:
                     ok,reason=s.risk.can(pay["signal_score"])
