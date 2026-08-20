@@ -1,0 +1,53 @@
+name: Scan5
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: ghaith-scan-5m
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests numpy pandas yfinance
+      - name: Restore bot state
+        uses: actions/cache/restore@v4
+        with:
+          path: ghaith_state_5m.json
+          key: ghaith5-${{ github.run_id }}
+          restore-keys: |
+            ghaith5-
+      - name: Run strategy
+        run: python sentinel.py
+        env:
+          TG_TOKEN: ${{ secrets.TG_TOKEN }}
+          TG_CHAT: ${{ secrets.TG_CHAT }}
+          SCAN_TIMEFRAME: "5m"
+          SNIPER_TIMEFRAME: "1m"
+          TREND_TIMEFRAME: "15m"
+          EXPIRY_MINUTES: "5"
+          STATE_FILE: "ghaith_state_5m.json"
+          LOG_FILE: "ghaith_bot_5m.log"
+          MODE_LABEL: " ⚡ 5m"
+          MIN_SIGNAL_SCORE: "3"
+          MAX_DEV: "0.0006"
+      - name: Save bot state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ghaith_state_5m.json
+          key: ghaith5-${{ github.run_id }}
