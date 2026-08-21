@@ -42,13 +42,9 @@ class Config:
     MIN_SCORE=min(max(env_int("MIN_SIGNAL_SCORE",2),1),4); MAX_SC=4
     EMA_F=35; EMA_S=50; RSI_P=14; ADX_P=14; ATR_P=14; ADX_M15=18.0; ADX_H1=20.0; LVL_LB=60
     MAX_DIST_EMA=2.0; MIN_SPACE=0.3
-    # ✅ v16:LEVEL_PROXIMITY ارتخى من 0.5 إلى 0.8
     LVL_PROX=env_float("LEVEL_PROXIMITY_ATR",0.8)
-    # ✅ v16: RSI توسع (CALL 35-65 / PUT 35-65)
     RSI_C_MIN=35.0; RSI_C_MAX=65.0; RSI_P_MIN=35.0; RSI_P_MAX=65.0
-    # ✅ v16: MAX_DEV و MAX_AHEAD ارتخيا
     MAX_DEV=env_float("MAX_DEV",0.0015); MAX_AHEAD=env_float("MAX_AHEAD",0.0006)
-    # ✅ v16: TOUCH_TOL و REJ_BODY ارتخيا
     TOUCH_TOL=0.0005; REJ_BODY=0.3
     LVL_EXP=env_int("LEVEL_EXPIRY_HOURS",3)
     WATCH_CD=env_int("WATCH_ALERT_COOLDOWN_SEC",3600); WATCH_TOL=0.5
@@ -440,6 +436,8 @@ class TG:
                 except Exception as e: s.lg.warning(f"TG {a}: {e}")
                 time.sleep(2*a)
         return None
+    # ✅ v17: إصلاح الكراش — send_message صار اسم مستعار لـ send
+    def send_message(s,text,reply_to=None): return s.send(text,reply_to)
     def watch(s,w):
         d="صعود 🟢" if w["direction"]=="CALL" else "هبوط 🔴"
         zl=s._fmt(w.get('entry_zone_low',w['level']))
@@ -453,7 +451,7 @@ class TG:
         zh=s._fmt(sg.get('entry_zone_high',sg['level']))
         if sg["direction"]=="CALL": ideal=f"🎯 الدخول المثالي: انتظر السعر يقترب من {zl} (قاع المنطقة) ثم ادخل CALL\n"
         else: ideal=f"🎯 الدخول المثالي: انتظر السعر يقترب من {zh} (قمة المنطقة) ثم ادخل PUT\n"
-        s.send(f"🟢 توصية ذهبية 🚀{Config.MODE_LABEL}\n\n• الزوج: {sg['name']}\n• المستوى: {s._fmt(sg['level'])} ({sg['level_type']})\n• الاتجاه: {d}\n🎯 منطقة الدخول الذهبية: من {zl} إلى {zh}\n{ideal}💰 السعر الحي الآن: {s._fmt(sg['entry_price'])}\n🚫 لا تدخل إذا خرج السعر خارج المنطقة\n• مدة الصفقة: {sg['expiry_minutes']} دقيقة\n• جودة الإشارة: {sg['signal_score']}/{sg['max_score']}\n• البروتوكول: غيث المزدوج (v16)\n• {s.risk.txt()}\n\n📝 بعد الصفقة رد بـ: ربحت / خسرت")
+        s.send(f"🟢 توصية ذهبية 🚀{Config.MODE_LABEL}\n\n• الزوج: {sg['name']}\n• المستوى: {s._fmt(sg['level'])} ({sg['level_type']})\n• الاتجاه: {d}\n🎯 منطقة الدخول الذهبية: من {zl} إلى {zh}\n{ideal}💰 السعر الحي الآن: {s._fmt(sg['entry_price'])}\n🚫 لا تدخل إذا خرج السعر خارج المنطقة\n• مدة الصفقة: {sg['expiry_minutes']} دقيقة\n• جودة الإشارة: {sg['signal_score']}/{sg['max_score']}\n• البروتوكول: غيث المزدوج (v17)\n• {s.risk.txt()}\n\n📝 بعد الصفقة رد بـ: ربحت / خسرت")
     def listen(s):
         if not s.en: return
         try:
@@ -536,7 +534,7 @@ class Bot:
         today=datetime.now(timezone.utc).strftime("%Y-%m-%d")
         if s.st.get("boot_date")!=today:
             s.st.set("boot_date",today); s.st.save()
-            s.tg.send(f"🚀 غيث المزدوج (v16){Config.MODE_LABEL} بدأ\n\n• الرموز: {len(Config.SYMBOLS)}\n• الماسح: {Config.SCAN_TF} | القناص: {Config.SNIPER_TF} | الترند: {Config.TREND_TF}\n• مدة الصفقة: {Config.EXPIRY_MIN} دقيقة\n• الجودة: {Config.MIN_SCORE}/{Config.MAX_SC}\n• نافذة الجلسات: {Config.HR_START}-{Config.HR_END} UTC\n• ميزة: براغي مرخية 🟢 + انقلاب آمن 🔄\n• مراقبات محفوظة: {len(s.watch)}")
+            s.tg.send(f"🚀 غيث المزدوج (v17){Config.MODE_LABEL} بدأ\n\n• الرموز: {len(Config.SYMBOLS)}\n• الماسح: {Config.SCAN_TF} | القناص: {Config.SNIPER_TF} | الترند: {Config.TREND_TF}\n• مدة الصفقة: {Config.EXPIRY_MIN} دقيقة\n• الجودة: {Config.MIN_SCORE}/{Config.MAX_SC}\n• نافذة الجلسات: {Config.HR_START}-{Config.HR_END} UTC\n• إصلاح: كراش send_message 🔧 + براغي مرخية 🟢\n• مراقبات محفوظة: {len(s.watch)}")
     def _scan(s):
         for sym in Config.SYMBOLS:
             try:
