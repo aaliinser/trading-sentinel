@@ -274,13 +274,15 @@ class Scan:
             except: return False
         return True
 
-class SnR: WAITING="W"; BROKEN="B"; SIGNAL="S"
+# ✅ v18: إضافة EXPIRED و DEVIATED للتمييز بين أنواع الكسر
+class SnR: WAITING="W"; BROKEN="B"; SIGNAL="S"; EXPIRED="E"; DEVIATED="D"
 
 class Sniper:
     def __init__(s,lg,nt,st): s.lg=lg; s.nt=nt; s.st=st; s.last={}
     def check(s,w,d5,d15r,live=None):
         if d5 is None or d5.empty or len(d5)<20: return SnR.WAITING,None
-        if time.time()-w.get("created_at",0)>Config.LVL_EXP*3600: return SnR.BROKEN,None
+        # ✅ v18: انتهاء الصلاحية يرجع EXPIRED (مو BROKEN)
+        if time.time()-w.get("created_at",0)>Config.LVL_EXP*3600: return SnR.EXPIRED,None
         lct=d5.index[-1]; wk=f"{w['symbol']}|{w['level']}"
         if s.last.get(wk)==lct: return SnR.WAITING,None
         conf,rej,prev=d5.iloc[-1],d5.iloc[-2],d5.iloc[-3]
@@ -295,7 +297,8 @@ class Sniper:
         if dr=="PUT" and close>rej_close: s.last[wk]=lct; return SnR.WAITING,None
         eff=live if live else close
         ok,reason=s._dev(lv,eff,close,dr)
-        if not ok: s._alert(w,lv,eff,reason); s.last[wk]=lct; return SnR.BROKEN,None
+        # ✅ v18: الانحراف يرجع DEVIATED (مو BROKEN)
+        if not ok: s._alert(w,lv,eff,reason); s.last[wk]=lct; return SnR.DEVIATED,None
         if not s._rsi(d15r,dr): s.last[wk]=lct; return SnR.WAITING,None
         h=datetime.now(timezone.utc).hour
         if not (Config.HR_START<=h<Config.HR_END): s.last[wk]=lct; return SnR.WAITING,None
@@ -436,7 +439,6 @@ class TG:
                 except Exception as e: s.lg.warning(f"TG {a}: {e}")
                 time.sleep(2*a)
         return None
-    # ✅ v17: إصلاح الكراش — send_message صار اسم مستعار لـ send
     def send_message(s,text,reply_to=None): return s.send(text,reply_to)
     def watch(s,w):
         d="صعود 🟢" if w["direction"]=="CALL" else "هبوط 🔴"
@@ -451,7 +453,7 @@ class TG:
         zh=s._fmt(sg.get('entry_zone_high',sg['level']))
         if sg["direction"]=="CALL": ideal=f"🎯 الدخول المثالي: انتظر السعر يقترب من {zl} (قاع المنطقة) ثم ادخل CALL\n"
         else: ideal=f"🎯 الدخول المثالي: انتظر السعر يقترب من {zh} (قمة المنطقة) ثم ادخل PUT\n"
-        s.send(f"🟢 توصية ذهبية 🚀{Config.MODE_LABEL}\n\n• الزوج: {sg['name']}\n• المستوى: {s._fmt(sg['level'])} ({sg['level_type']})\n• الاتجاه: {d}\n🎯 منطقة الدخول الذهبية: من {zl} إلى {zh}\n{ideal}💰 السعر الحي الآن: {s._fmt(sg['entry_price'])}\n🚫 لا تدخل إذا خرج السعر خارج المنطقة\n• مدة الصفقة: {sg['expiry_minutes']} دقيقة\n• جودة الإشارة: {sg['signal_score']}/{sg['max_score']}\n• البروتوكول: غيث المزدوج (v17)\n• {s.risk.txt()}\n\n📝 بعد الصفقة رد بـ: ربحت / خسرت")
+        s.send(f"🟢 توصية ذهبية 🚀{Config.MODE_LABEL}\n\n• الزوج: {sg['name']}\n• المستوى: {s._fmt(sg['level'])} ({sg['level_type']})\n• الاتجاه: {d}\n🎯 منطقة الدخول الذهبية: من {zl} إلى {zh}\n{ideal}💰 السعر الحي الآن: {s._fmt(sg['entry_price'])}\n🚫 لا تدخل إذا خرج السعر خارج المنطقة\n• مدة الصفقة: {sg['expiry_minutes']} دقيقة\n• جودة الإشارة: {sg['signal_score']}/{sg['max_score']}\n• البروتوكول: غيث المزدوج (v18)\n• {s.risk.txt()}\n\n📝 بعد الصفقة رد بـ: ربحت / خسرت")
     def listen(s):
         if not s.en: return
         try:
@@ -534,7 +536,7 @@ class Bot:
         today=datetime.now(timezone.utc).strftime("%Y-%m-%d")
         if s.st.get("boot_date")!=today:
             s.st.set("boot_date",today); s.st.save()
-            s.tg.send(f"🚀 غيث المزدوج (v17){Config.MODE_LABEL} بدأ\n\n• الرموز: {len(Config.SYMBOLS)}\n• الماسح: {Config.SCAN_TF} | القناص: {Config.SNIPER_TF} | الترند: {Config.TREND_TF}\n• مدة الصفقة: {Config.EXPIRY_MIN} دقيقة\n• الجودة: {Config.MIN_SCORE}/{Config.MAX_SC}\n• نافذة الجلسات: {Config.HR_START}-{Config.HR_END} UTC\n• إصلاح: كراش send_message 🔧 + براغي مرخية 🟢\n• مراقبات محفوظة: {len(s.watch)}")
+            s.tg.send(f"🚀 غيث المزدوج (v18){Config.MODE_LABEL} بدأ\n\n• الرموز: {len(Config.SYMBOLS)}\n• الماسح: {Config.SCAN_TF} | القناص: {Config.SNIPER_TF} | الترند: {Config.TREND_TF}\n• مدة الصفقة: {Config.EXPIRY_MIN} دقيقة\n• الجودة: {Config.MIN_SCORE}/{Config.MAX_SC}\n• نافذة الجلسات: {Config.HR_START}-{Config.HR_END} UTC\n• إصلاح: انقلاب على الكسر الفعلي فقط 🔧\n• مراقبات محفوظة: {len(s.watch)}")
     def _scan(s):
         for sym in Config.SYMBOLS:
             try:
@@ -561,6 +563,12 @@ class Bot:
                 i5=s.ind.add(d5); i15=s.ind.add(d15)
                 live=s.data.live(sym)
                 res,pay=s.snip.check(w,i5,i15,live)
+                # ✅ v18: EXPIRED و DEVIATED = حذف فقط بدون انقلاب
+                if res==SnR.EXPIRED or res==SnR.DEVIATED:
+                    with s._wl: s.watch.pop(k,None)
+                    s.lg.info(f"مراقبة أُلغيت ({res}): {k}")
+                    continue
+                # ✅ v18: BROKEN فقط (كسر فعلي) = انقلاب مسموح
                 if res==SnR.BROKEN:
                     with s._wl:
                         cur=s.watch.get(k)
@@ -570,8 +578,13 @@ class Bot:
                             lt=cur.get("level_type") if cur.get("level_type")=="ROUND_NUMBER" else ("SUPPORT" if nd=="CALL" else "RESISTANCE")
                             if nd=="CALL": zl,zh=lv-Config.MAX_AHEAD*lv, lv+Config.MAX_DEV*lv
                             else: zl,zh=lv-Config.MAX_DEV*lv, lv+Config.MAX_AHEAD*lv
+                            # ✅ v18: تحديث البيانات عند الانقلاب
+                            cur_price=live if live else float(d5.iloc[-1]["Close"])
+                            pip=0.01 if cur_price>50 else 0.0001
                             cur["direction"]=nd; cur["level_type"]=lt
                             cur["entry_zone_low"]=zl; cur["entry_zone_high"]=zh
+                            cur["entry_price"]=cur_price; cur["live_price"]=cur_price
+                            cur["distance_pips"]=round(abs(cur_price-lv)/pip,1)
                             cur["created_at"]=time.time(); cur["flips"]=cur.get("flips",0)+1
                             s.snip.last.pop(f"{cur['symbol']}|{lv}",None)
                             flipped=cur
