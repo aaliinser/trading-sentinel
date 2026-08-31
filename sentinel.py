@@ -27,6 +27,9 @@ def env_list(k,d):
     v=os.getenv(k); return d if not v else [x.strip() for x in v.split(",") if x.strip()]
 def period_for(i):
     return {"1m":"1d","5m":"2d","15m":"7d","30m":"7d","1h":"30d","4h":"60d"}.get(i,"7d")
+def big_round(lv):
+    if lv>50: return abs(lv-round(lv))<1e-9
+    return abs(lv-round(lv,2))<1e-9
 
 class Config:
     TG_TOKEN=os.getenv("TG_TOKEN","").strip(); TG_CHAT=os.getenv("TG_CHAT","").strip()
@@ -42,10 +45,10 @@ class Config:
     MIN_SCORE=min(max(env_int("MIN_SIGNAL_SCORE",2),1),4); MAX_SC=4
     EMA_F=35; EMA_S=50; RSI_P=14; ADX_P=14; ATR_P=14; ADX_M15=18.0; ADX_H1=20.0; LVL_LB=60
     MAX_DIST_EMA=2.0; MIN_SPACE=0.3
-    LVL_PROX=env_float("LEVEL_PROXIMITY_ATR",0.8)
-    RSI_C_MIN=35.0; RSI_C_MAX=65.0; RSI_P_MIN=35.0; RSI_P_MAX=65.0
-    MAX_DEV=env_float("MAX_DEV",0.0015); MAX_AHEAD=env_float("MAX_AHEAD",0.0006)
-    TOUCH_TOL=0.0005; REJ_BODY=0.3
+    LVL_PROX=env_float("LEVEL_PROXIMITY_ATR",0.6)
+    RSI_C_MIN=38.0; RSI_C_MAX=62.0; RSI_P_MIN=38.0; RSI_P_MAX=62.0
+    MAX_DEV=env_float("MAX_DEV",0.0010); MAX_AHEAD=env_float("MAX_AHEAD",0.0004)
+    TOUCH_TOL=0.0003; REJ_BODY=0.35
     LVL_EXP=env_int("LEVEL_EXPIRY_HOURS",3)
     WATCH_CD=env_int("WATCH_ALERT_COOLDOWN_SEC",3600); WATCH_TOL=0.5
     RN_LARGE=0.5; RN_SMALL=0.005; SCAN_INT=env_int("SCAN_INTERVAL_SECONDS",60)
@@ -207,7 +210,7 @@ class Scan:
         w={"symbol":sym,"name":s._n(sym),"direction":dr,"level":lvl,"level_type":lt,
            "signal_score":tot,"max_score":Config.MAX_SC,"scores":sc,"entry_price":cn,
            "live_price":cn,"distance_pips":round(abs(cn-lvl)/pip,1),
-           "entry_zone_low":zl,"entry_zone_high":zh,"candle_time":lct,"created_at":time.time(),"flips":0}
+           "entry_zone_low":zl,"entry_zone_high":zh,"candle_time":lct,"created_at":time.time(),"flips":0,"star":big_round(lvl)}
         s.ls[sym]=lct; s.la[sym]=(lvl,time.time())
         return w
     def _dist(s,last):
@@ -281,7 +284,6 @@ class Sniper:
     def __init__(s,lg,nt,st): s.lg=lg; s.nt=nt; s.st=st; s.last={}
     def check(s,w,d5,d15r,live=None):
         if d5 is None or d5.empty or len(d5)<20: return SnR.WAITING,None
-        # ✅ v18: انتهاء الصلاحية يرجع EXPIRED (مو BROKEN)
         if time.time()-w.get("created_at",0)>Config.LVL_EXP*3600: return SnR.EXPIRED,None
         lct=d5.index[-1]; wk=f"{w['symbol']}|{w['level']}"
         if s.last.get(wk)==lct: return SnR.WAITING,None
@@ -297,13 +299,13 @@ class Sniper:
         if dr=="PUT" and close>rej_close: s.last[wk]=lct; return SnR.WAITING,None
         eff=live if live else close
         ok,reason=s._dev(lv,eff,close,dr)
-        # ✅ v18: الانحراف يرجع DEVIATED (مو BROKEN)
         if not ok: s._alert(w,lv,eff,reason); s.last[wk]=lct; return SnR.DEVIATED,None
         if not s._rsi(d15r,dr): s.last[wk]=lct; return SnR.WAITING,None
         h=datetime.now(timezone.utc).hour
         if not (Config.HR_START<=h<Config.HR_END): s.last[wk]=lct; return SnR.WAITING,None
         zl,zh=s._zone(lv,dr)
-        sig={"id":f"{w['symbol']}|{lct.isoformat()}|{dr}","symbol":w["symbol"],"name":w["name"],
+        star=w.get("star",False) and s._top_conf(d5,dr,rej)
+        sig={"id":f"{w['symbol']}|{lct.isoformat()}|{dr}","symbol":w["symbol"],"name":w["name"],"star":star,
              "direction":dr,"level":lv,"level_type":w.get("level_type","UNKNOWN"),"entry_price":eff,
              "entry_zone_low":zl,"entry_zone_high":zh,"signal_score":w["signal_score"]+1,
              "max_score":w["max_score"]+1,"candle_time":lct,"expiry_minutes":Config.EXPIRY_MIN,
@@ -312,6 +314,10 @@ class Sniper:
     def _zone(s,lv,dr):
         d=Config.MAX_DEV*lv; a=Config.MAX_AHEAD*lv
         return (lv-a,lv+d) if dr=="CALL" else (lv-d,lv+a)
+    def _top_conf(s,d5,dr,rej):
+        n=12
+        if dr=="PUT": return float(rej["High"])>=float(d5["High"].iloc[-n:].max())*0.9999
+        return float(rej["Low"])<=float(d5["Low"].iloc[-n:].min())*1.0001
     def _sp(s,df5,dr,close):
         if df5.empty or len(df5)<20: return True
         last=df5.iloc[-1]; a=float(last["ATR"]) if pd.notna(last.get("ATR")) else 0
@@ -353,9 +359,7 @@ class Sniper:
         return r<=Config.RSI_C_MAX+5 if dr=="CALL" else r>=Config.RSI_P_MIN-5
     def _alert(s,w,lv,live,reason):
         lt=f"{lv:.3f}" if lv>50 else f"{lv:.5f}"; pt=f"{live:.3f}" if live>50 else f"{live:.5f}"
-        s.nt.send_message(f"🛡️ حماية الانحراف\n\n• الزوج: {w['name']}\n• المستوى: {lt}\n• السعر الحي: {pt}\n• السبب: {reason}\n• الحالة: تم إلغاء الإشارة 🛡️")
-
-class Risk:
+        s.nt.send_message(f"🛡️ حماية الانحراف\n\n• الزوج: {w['name']}\n• المستوى: {lt}\n• السعر الحي: {pt}\n• السبب: {reason}\n• الحالة: تم إلغاء الإشارة 🛡️")class Risk:
     def __init__(s,lg,st): s.lg=lg; s.st=st
     def can(s,score):
         if not Config.RISK_GATE: return True,"OK"
@@ -446,14 +450,16 @@ class TG:
         zh=s._fmt(w.get('entry_zone_high',w['level']))
         ideal="انتظر السعر يقترب من قاع المنطقة ثم ادخل CALL" if w["direction"]=="CALL" else "انتظر السعر يقترب من قمة المنطقة ثم ادخل PUT"
         flip=" 🔄 (انقلاب)" if w.get("flips",0)>0 else ""
-        s.send(f"👀 تنبيه تجهيز{Config.MODE_LABEL}{flip}\n\n• الزوج: {w['name']}\n• المستوى: {s._fmt(w['level'])} ({w['level_type']})\n• الاتجاه المتوقع: {d}\n🎯 منطقة الدخول: من {zl} إلى {zh}\n🎯 {ideal}\n📍 السعر الحي الآن: {s._fmt(w.get('live_price',w['entry_price']))}\n📏 يبعد عن المستوى: {w.get('distance_pips',0)} نقطة\n• جودة الإشارة: {w['signal_score']}/{w['max_score']}\n• الخطة: انتظر اللمس والرفض والتأكيد\n• الصلاحية: {Config.LVL_EXP} ساعات")
+        star=" ⭐" if w.get("star") else ""
+        s.send(f"👀 تنبيه تجهيز{Config.MODE_LABEL}{flip}{star}\n\n• الزوج: {w['name']}\n• المستوى: {s._fmt(w['level'])} ({w['level_type']})\n• الاتجاه المتوقع: {d}\n🎯 منطقة الدخول: من {zl} إلى {zh}\n🎯 {ideal}\n📍 السعر الحي الآن: {s._fmt(w.get('live_price',w['entry_price']))}\n📏 يبعد عن المستوى: {w.get('distance_pips',0)} نقطة\n• جودة الإشارة: {w['signal_score']}/{w['max_score']}\n• الخطة: انتظر اللمس والرفض والتأكيد\n• الصلاحية: {Config.LVL_EXP} ساعات")
     def signal(s,sg):
         d="صعود 🟢 (CALL)" if sg["direction"]=="CALL" else "هبوط 🔴 (PUT)"
         zl=s._fmt(sg.get('entry_zone_low',sg['level']))
         zh=s._fmt(sg.get('entry_zone_high',sg['level']))
         if sg["direction"]=="CALL": ideal=f"🎯 الدخول المثالي: انتظر السعر يقترب من {zl} (قاع المنطقة) ثم ادخل CALL\n"
         else: ideal=f"🎯 الدخول المثالي: انتظر السعر يقترب من {zh} (قمة المنطقة) ثم ادخل PUT\n"
-        s.send(f"🟢 توصية ذهبية 🚀{Config.MODE_LABEL}\n\n• الزوج: {sg['name']}\n• المستوى: {s._fmt(sg['level'])} ({sg['level_type']})\n• الاتجاه: {d}\n🎯 منطقة الدخول الذهبية: من {zl} إلى {zh}\n{ideal}💰 السعر الحي الآن: {s._fmt(sg['entry_price'])}\n🚫 لا تدخل إذا خرج السعر خارج المنطقة\n• مدة الصفقة: {sg['expiry_minutes']} دقيقة\n• جودة الإشارة: {sg['signal_score']}/{sg['max_score']}\n• البروتوكول: غيث المزدوج (v18)\n• {s.risk.txt()}\n\n📝 بعد الصفقة رد بـ: ربحت / خسرت")
+        star="⭐ إشارة مميزة — رقم 000 قوي وما انكسر\n" if sg.get("star") else ""
+        s.send(f"🟢 توصية ذهبية 🚀{Config.MODE_LABEL}\n\n{star}• الزوج: {sg['name']}\n• المستوى: {s._fmt(sg['level'])} ({sg['level_type']})\n• الاتجاه: {d}\n🎯 منطقة الدخول الذهبية: من {zl} إلى {zh}\n{ideal}💰 السعر الحي الآن: {s._fmt(sg['entry_price'])}\n🚫 لا تدخل إذا خرج السعر خارج المنطقة\n• مدة الصفقة: {sg['expiry_minutes']} دقيقة\n• جودة الإشارة: {sg['signal_score']}/{sg['max_score']}\n• البروتوكول: غيث المزدوج (v20)\n• {s.risk.txt()}\n\n📝 بعد الصفقة رد بـ: ربحت / خسرت")
     def listen(s):
         if not s.en: return
         try:
@@ -536,7 +542,7 @@ class Bot:
         today=datetime.now(timezone.utc).strftime("%Y-%m-%d")
         if s.st.get("boot_date")!=today:
             s.st.set("boot_date",today); s.st.save()
-            s.tg.send(f"🚀 غيث المزدوج (v18){Config.MODE_LABEL} بدأ\n\n• الرموز: {len(Config.SYMBOLS)}\n• الماسح: {Config.SCAN_TF} | القناص: {Config.SNIPER_TF} | الترند: {Config.TREND_TF}\n• مدة الصفقة: {Config.EXPIRY_MIN} دقيقة\n• الجودة: {Config.MIN_SCORE}/{Config.MAX_SC}\n• نافذة الجلسات: {Config.HR_START}-{Config.HR_END} UTC\n• إصلاح: انقلاب على الكسر الفعلي فقط 🔧\n• مراقبات محفوظة: {len(s.watch)}")
+            s.tg.send(f"🚀 غيث المزدوج (v20){Config.MODE_LABEL} بدأ\n\n• الرموز: {len(Config.SYMBOLS)}\n• الماسح: {Config.SCAN_TF} | القناص: {Config.SNIPER_TF} | الترند: {Config.TREND_TF}\n• مدة الصفقة: {Config.EXPIRY_MIN} دقيقة\n• الجودة: {Config.MIN_SCORE}/{Config.MAX_SC}\n• نافذة الجلسات: {Config.HR_START}-{Config.HR_END} UTC\n• الحبال مشدودة + فلتر 000 ⭐\n• مراقبات محفوظة: {len(s.watch)}")
     def _scan(s):
         for sym in Config.SYMBOLS:
             try:
@@ -563,12 +569,10 @@ class Bot:
                 i5=s.ind.add(d5); i15=s.ind.add(d15)
                 live=s.data.live(sym)
                 res,pay=s.snip.check(w,i5,i15,live)
-                # ✅ v18: EXPIRED و DEVIATED = حذف فقط بدون انقلاب
                 if res==SnR.EXPIRED or res==SnR.DEVIATED:
                     with s._wl: s.watch.pop(k,None)
                     s.lg.info(f"مراقبة أُلغيت ({res}): {k}")
                     continue
-                # ✅ v18: BROKEN فقط (كسر فعلي) = انقلاب مسموح
                 if res==SnR.BROKEN:
                     with s._wl:
                         cur=s.watch.get(k)
@@ -578,7 +582,6 @@ class Bot:
                             lt=cur.get("level_type") if cur.get("level_type")=="ROUND_NUMBER" else ("SUPPORT" if nd=="CALL" else "RESISTANCE")
                             if nd=="CALL": zl,zh=lv-Config.MAX_AHEAD*lv, lv+Config.MAX_DEV*lv
                             else: zl,zh=lv-Config.MAX_DEV*lv, lv+Config.MAX_AHEAD*lv
-                            # ✅ v18: تحديث البيانات عند الانقلاب
                             cur_price=live if live else float(d5.iloc[-1]["Close"])
                             pip=0.01 if cur_price>50 else 0.0001
                             cur["direction"]=nd; cur["level_type"]=lt
