@@ -110,9 +110,17 @@ class Data:
                 return df.copy()
             except Exception as e: last=e; time.sleep(min(45,(2**a)+random.uniform(0,1.5)))
         raise RuntimeError(f"fetch fail {sym}: {last}")
-    def live(s,sym):
+        def live(s,sym):
         try:
-            df=s.fetch(sym,"1m","1d"); return float(df.iloc[-1]["Close"]) if not df.empty else None
+            df=yf.Ticker(sym).history(period="1d",interval="1m",auto_adjust=False,actions=False,timeout=Config.REQ_TO)
+            if df is None or df.empty: return None
+            df=df.copy()
+            if isinstance(df.columns,pd.MultiIndex): df.columns=df.columns.get_level_values(0)
+            if "Close" not in df.columns: return None
+            df.index=pd.to_datetime(df.index,utc=True)
+            df=df[~df.index.duplicated(keep="last")].sort_index().dropna(subset=["Close"])
+            df=df[df.index<=pd.Timestamp.now(tz="UTC")]
+            return float(df.iloc[-1]["Close"]) if not df.empty else None
         except: return None
     def _clean(s,df,iv):
         df=df.copy()
