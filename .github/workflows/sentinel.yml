@@ -42,7 +42,7 @@ jobs:
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
           TG_CHAT: ${{ secrets.TG_CHAT }}
           MIN_SIGNAL_SCORE: "2"
-          MAX_DEV: "0.0015"
+          MAX_DEV: "0.0010"
 
       - name: Save bot state
         if: always()
