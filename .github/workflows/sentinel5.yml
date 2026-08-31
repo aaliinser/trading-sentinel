@@ -44,7 +44,7 @@ jobs:
           LOG_FILE: "ghaith_bot_5m.log"
           MODE_LABEL: " ⚡ 5m"
           MIN_SIGNAL_SCORE: "2"
-          MAX_DEV: "0.0015"
+          MAX_DEV: "0.0010"
       - name: Save bot state
         if: always()
         uses: actions/cache/save@v4
