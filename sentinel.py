@@ -277,7 +277,6 @@ class Scan:
             except: return False
         return True
 
-# ✅ v18: إضافة EXPIRED و DEVIATED للتمييز بين أنواع الكسر
 class SnR: WAITING="W"; BROKEN="B"; SIGNAL="S"; EXPIRED="E"; DEVIATED="D"
 
 class Sniper:
@@ -359,7 +358,7 @@ class Sniper:
         return r<=Config.RSI_C_MAX+5 if dr=="CALL" else r>=Config.RSI_P_MIN-5
     def _alert(s,w,lv,live,reason):
         lt=f"{lv:.3f}" if lv>50 else f"{lv:.5f}"; pt=f"{live:.3f}" if live>50 else f"{live:.5f}"
-                s.nt.send_message(f"🛡️ حماية الانحراف\n\n• الزوج: {w['name']}\n• المستوى: {lt}\n• السعر الحي: {pt}\n• السبب: {reason}\n• الحالة: تم إلغاء الإشارة 🛡️")
+        s.nt.send_message(f"🛡️ حماية الانحراف\n\n• الزوج: {w['name']}\n• المستوى: {lt}\n• السعر الحي: {pt}\n• السبب: {reason}\n• الحالة: تم إلغاء الإشارة 🛡️")
 
 class Risk:
     def __init__(s,lg,st): s.lg=lg; s.st=st
