@@ -109,8 +109,8 @@ class Data:
                 with s._l: s.c[key]={"ts":time.time(),"df":df.copy()}
                 return df.copy()
             except Exception as e: last=e; time.sleep(min(45,(2**a)+random.uniform(0,1.5)))
-        raise RuntimeError(f"fetch fail {sym}: {last}")
-        def live(s,sym):
+                raise RuntimeError(f"fetch fail {sym}: {last}")
+    def live(s,sym):
         try:
             df=yf.Ticker(sym).history(period="1d",interval="1m",auto_adjust=False,actions=False,timeout=Config.REQ_TO)
             if df is None or df.empty: return None
