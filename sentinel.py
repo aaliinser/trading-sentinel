@@ -55,6 +55,8 @@ class Config:
     REQ_TO=env_int("REQUEST_TIMEOUT",15); MAX_RET=env_int("MAX_RETRIES",4)
     CACHE_TTL=env_int("CACHE_TTL_SECONDS",45)
     STATE=os.getenv("STATE_FILE","ghaith_state.json"); LOG=os.getenv("LOG_FILE","ghaith_bot.log"); MIN_R=200
+    # الأزواج الرئيسية فقط (التي ستستخدم Twelve Data)
+    MAJOR_PAIRS = ["EURUSD=X", "GBPUSD=X", "USDJPY=X", "AUDUSD=X", "USDCAD=X", "USDCHF=X"]
 
 def setup_logger():
     lg=logging.getLogger("GhaithDual"); lg.setLevel(logging.INFO)
@@ -110,7 +112,30 @@ class Data:
                 return df.copy()
             except Exception as e: last=e; time.sleep(min(45,(2**a)+random.uniform(0,1.5)))
         raise RuntimeError(f"fetch fail {sym}: {last}")
+    
     def live(s,sym):
+        # استخدام Twelve Data للأزواج الرئيسية فقط
+        if sym in Config.MAJOR_PAIRS:
+            api_key = os.getenv("TWELVE_DATA_API_KEY", "").strip()
+            if api_key:
+                symbol = sym.replace("=X", "")
+                if len(symbol) == 6:
+                    symbol = f"{symbol[:3]}/{symbol[3:]}"
+                
+                try:
+                    time.sleep(random.uniform(0.5, 1.5))  # تأخير لتجنب الحظر
+                    url = "https://api.twelvedata.com/price"
+                    params = {"symbol": symbol, "apikey": api_key}
+                    r = requests.get(url, params=params, timeout=10)
+                    
+                    if r.status_code == 200:
+                        data = r.json()
+                        if "price" in data and data["price"]:
+                            return float(data["price"])
+                except Exception as e:
+                    s.lg.warning(f"Twelve Data fallback for {sym}: {e}")
+
+        # للأزواج غير الرئيسية أو في حال الفشل، استخدم yfinance
         try:
             df=yf.Ticker(sym).history(period="1d",interval="1m",auto_adjust=False,actions=False,timeout=Config.REQ_TO)
             if df is None or df.empty: return None
@@ -122,6 +147,7 @@ class Data:
             df=df[df.index<=pd.Timestamp.now(tz="UTC")]
             return float(df.iloc[-1]["Close"]) if not df.empty else None
         except: return None
+    
     def _clean(s,df,iv):
         df=df.copy()
         if isinstance(df.columns,pd.MultiIndex): df.columns=df.columns.get_level_values(0)
@@ -454,7 +480,7 @@ class TG:
         return None
     def send_message(s,text,reply_to=None): return s.send(text,reply_to)
     def watch(s,w):
-        d="صعود 🟢" if w["direction"]=="CALL" else "هبوط 🔴"
+        d="صعود " if w["direction"]=="CALL" else "هبوط 🔴"
         zl=s._fmt(w.get('entry_zone_low',w['level']))
         zh=s._fmt(w.get('entry_zone_high',w['level']))
         ideal="انتظر السعر يقترب من قاع المنطقة ثم ادخل CALL" if w["direction"]=="CALL" else "انتظر السعر يقترب من قمة المنطقة ثم ادخل PUT"
@@ -513,7 +539,7 @@ class Rep:
         at=s.st.get("alltime",{"wins":0,"losses":0}); w,l=at.get("wins",0),at.get("losses",0); tot=w+l
         rate=round(100*w/tot) if tot else 0
         tz=datetime.now(timezone.utc)+timedelta(hours=Config.TZ_OFFSET)
-        s.nt.send(f"🔶 نتائج إلى الآن 🔶\n\n📅 {tz.strftime('%d/%m/%Y')}\n✅ {w} ربح ❌ {l} خسارة\n📊 المعدل التقريبي: {rate}%")
+        s.nt.send(f"🔶 نتائج إلى الآن 🔶\n\n📅 {tz.strftime('%d/%m/%Y')}\n✅ {w} ربح ❌ {l} خسارة\n المعدل التقريبي: {rate}%")
         g="صباح الخير" if 5<=tz.hour<17 else "مساء الخير"
         s.nt.send(f"{g} جميعاً ❤️\n\nبتمنى من الكل يتفاعل على منشورات القناة العامة:\n👉 {Config.CHANNEL_LINK}\n\nحتى تبقى إشارات البوت متاحة للجميع بشكل مجاني وعام 🤝\n\nشكراً لكم ودعمكم نستمر 🔥")
     def _daily(s,date):
