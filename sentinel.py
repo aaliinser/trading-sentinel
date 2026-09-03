@@ -323,8 +323,9 @@ class Sniper:
         conf,rej,prev=d5.iloc[-1],d5.iloc[-2],d5.iloc[-3]
         lv=float(w["level"]); dr=w["direction"]; close=float(conf["Close"])
         if not s._sp(d5,dr,close): s.last[wk]=lct; return SnR.WAITING,None
-        if dr=="CALL" and close<lv-0.0015*close: s.last[wk]=lct; return SnR.BROKEN,None
-        if dr=="PUT" and close>lv+0.0015*close: s.last[wk]=lct; return SnR.BROKEN,None
+        brk=live if live else close
+        if dr=="CALL" and brk<lv-0.0015*brk: s.last[wk]=lct; return SnR.BROKEN,None
+        if dr=="PUT" and brk>lv+0.0015*brk: s.last[wk]=lct; return SnR.BROKEN,None
         if not s._touch(rej,lv,dr,float(rej["Close"])): return SnR.WAITING,None
         if not s._rej(rej,prev,lv,dr): s.last[wk]=lct; return SnR.WAITING,None
         rej_close=float(rej["Close"])
