@@ -42,7 +42,7 @@ class Config:
     DAILY_TGT=env_float("DAILY_PROFIT_TARGET",999999.0); CD_LOS=max(env_int("COOLDOWN_AFTER_LOSSES",2),1)
     CD_MIN=max(env_int("COOLDOWN_MINUTES",120),0); RISK_GATE=env_bool("RISK_GATE_ENABLED",False)
     HR_START=env_int("TRADE_HOUR_START",7); HR_END=env_int("TRADE_HOUR_END",21)
-    MIN_SCORE=min(max(env_int("MIN_SIGNAL_SCORE",2),1),4); MAX_SC=4
+    MIN_SCORE=min(max(env_int("MIN_SIGNAL_SCORE",3),1),4); MAX_SC=4
     EMA_F=35; EMA_S=50; RSI_P=14; ADX_P=14; ATR_P=14; ADX_M15=18.0; ADX_H1=20.0; LVL_LB=60
     MAX_DIST_EMA=2.0; MIN_SPACE=0.3
     LVL_PROX=env_float("LEVEL_PROXIMITY_ATR",0.6)
@@ -55,8 +55,11 @@ class Config:
     REQ_TO=env_int("REQUEST_TIMEOUT",15); MAX_RET=env_int("MAX_RETRIES",4)
     CACHE_TTL=env_int("CACHE_TTL_SECONDS",45)
     STATE=os.getenv("STATE_FILE","ghaith_state.json"); LOG=os.getenv("LOG_FILE","ghaith_bot.log"); MIN_R=200
-    # الأزواج الرئيسية فقط (التي ستستخدم Twelve Data)
     MAJOR_PAIRS = ["EURUSD=X", "GBPUSD=X", "USDJPY=X", "AUDUSD=X", "USDCAD=X", "USDCHF=X"]
+    ADX_MIN=env_float("ADX_MIN",25.0)
+    RSI_CALL_MAX=env_float("RSI_CALL_MAX",45.0)
+    RSI_PUT_MIN=env_float("RSI_PUT_MIN",55.0)
+    WICK_BODY=env_float("WICK_BODY_RATIO",2.0)
 
 def setup_logger():
     lg=logging.getLogger("GhaithDual"); lg.setLevel(logging.INFO)
@@ -112,30 +115,24 @@ class Data:
                 return df.copy()
             except Exception as e: last=e; time.sleep(min(45,(2**a)+random.uniform(0,1.5)))
         raise RuntimeError(f"fetch fail {sym}: {last}")
-    
     def live(s,sym):
-        # استخدام Twelve Data للأزواج الرئيسية فقط
         if sym in Config.MAJOR_PAIRS:
             api_key = os.getenv("TWELVE_DATA_API_KEY", "").strip()
             if api_key:
                 symbol = sym.replace("=X", "")
                 if len(symbol) == 6:
                     symbol = f"{symbol[:3]}/{symbol[3:]}"
-                
                 try:
-                    time.sleep(random.uniform(0.5, 1.5))  # تأخير لتجنب الحظر
+                    time.sleep(random.uniform(0.5, 1.5))
                     url = "https://api.twelvedata.com/price"
                     params = {"symbol": symbol, "apikey": api_key}
                     r = requests.get(url, params=params, timeout=10)
-                    
                     if r.status_code == 200:
                         data = r.json()
                         if "price" in data and data["price"]:
                             return float(data["price"])
                 except Exception as e:
                     s.lg.warning(f"Twelve Data fallback for {sym}: {e}")
-
-        # للأزواج غير الرئيسية أو في حال الفشل، استخدم yfinance
         try:
             df=yf.Ticker(sym).history(period="1d",interval="1m",auto_adjust=False,actions=False,timeout=Config.REQ_TO)
             if df is None or df.empty: return None
@@ -147,7 +144,6 @@ class Data:
             df=df[df.index<=pd.Timestamp.now(tz="UTC")]
             return float(df.iloc[-1]["Close"]) if not df.empty else None
         except: return None
-    
     def _clean(s,df,iv):
         df=df.copy()
         if isinstance(df.columns,pd.MultiIndex): df.columns=df.columns.get_level_values(0)
@@ -232,7 +228,7 @@ class Scan:
         if not s._sp(last,dr): s.ls[sym]=lct; return None
         lv,lt=s._lvl(last,dr)
         sc=s._sc(last,prev,h1,lv); tot=sum(sc.values())
-        if lv is None or tot<Config.MIN_SCORE: s.ls[sym]=lct; return None
+        if lv is None or tot<max(Config.MIN_SCORE,3): s.ls[sym]=lct; return None
         la=s.la.get(sym); atr=float(last["ATR"]) if pd.notna(last.get("ATR")) else None
         if la is not None and atr:
             pl,pts=la
@@ -293,10 +289,6 @@ class Scan:
         if dr=="PUT" and pd.notna(last.get("RR")):
             r=float(last["RR"])
             if abs(c-r)<=md: cand.append((r,"RESISTANCE"))
-        step=Config.RN_LARGE if c>50 else Config.RN_SMALL
-        if step>0:
-            nr=round(c/step)*step
-            if abs(c-nr)<=md: cand.append((nr,"ROUND_NUMBER"))
         if not cand: return None,""
         cand.sort(key=lambda x:abs(c-x[0])); return cand[0]
     @staticmethod
@@ -320,6 +312,7 @@ class Sniper:
         if time.time()-w.get("created_at",0)>Config.LVL_EXP*3600: return SnR.EXPIRED,None
         lct=d5.index[-1]; wk=f"{w['symbol']}|{w['level']}"
         if s.last.get(wk)==lct: return SnR.WAITING,None
+        if w.get("scores",{}).get("T",0)!=1: s.last[wk]=lct; return SnR.WAITING,None
         conf,rej,prev=d5.iloc[-1],d5.iloc[-2],d5.iloc[-3]
         lv=float(w["level"]); dr=w["direction"]; close=float(conf["Close"])
         if not s._sp(d5,dr,close): s.last[wk]=lct; return SnR.WAITING,None
@@ -331,6 +324,7 @@ class Sniper:
         rej_close=float(rej["Close"])
         if dr=="CALL" and close<rej_close: s.last[wk]=lct; return SnR.WAITING,None
         if dr=="PUT" and close>rej_close: s.last[wk]=lct; return SnR.WAITING,None
+        if not s._adx(d15r): s.last[wk]=lct; return SnR.WAITING,None
         eff=live if live else close
         ok,reason=s._dev(lv,eff,close,dr)
         if not ok: s._alert(w,lv,eff,reason); s.last[wk]=lct; return SnR.DEVIATED,None
@@ -345,6 +339,11 @@ class Sniper:
              "max_score":w["max_score"]+1,"candle_time":lct,"expiry_minutes":Config.EXPIRY_MIN,
              "rsi":float(d15r.iloc[-1]["RSI"]) if pd.notna(d15r.iloc[-1]["RSI"]) else None}
         s.last[wk]=lct; return SnR.SIGNAL,sig
+    def _adx(s,df15):
+        if df15 is None or df15.empty: return True
+        last=df15.iloc[-1]
+        if not pd.notna(last.get("ADX")): return True
+        return float(last["ADX"])>=Config.ADX_MIN
     def _zone(s,lv,dr):
         d=Config.MAX_DEV*lv; a=Config.MAX_AHEAD*lv
         return (lv-a,lv+d) if dr=="CALL" else (lv-d,lv+a)
@@ -365,17 +364,16 @@ class Sniper:
         return float(last["Low"])<=lv+t if dr=="CALL" else float(last["High"])>=lv-t
     def _rej(s,last,prev,lv,dr):
         close=float(last["Close"]); body=float(abs(last["Close"]-last["Open"])); fr=float(last["High"]-last["Low"])
-        if fr<=0: return False
-        br=body/fr; brej=br>=Config.REJ_BODY
+        if fr<=0 or body<=0: return False
         if dr=="CALL":
             lw=float(last.get("LWICK",0)) if pd.notna(last.get("LWICK")) else 0
-            pin=lw>=0.6*fr and br<=0.4
+            pin=lw>=Config.WICK_BODY*body
             eng=last["Close"]>last["Open"] and prev["Close"]<prev["Open"] and last["Close"]>=prev["Open"] and last["Open"]<=prev["Close"]
-            return (brej or pin or eng) and close>lv
+            return (pin or eng) and close>lv
         uw=float(last.get("UWICK",0)) if pd.notna(last.get("UWICK")) else 0
-        pin=uw>=0.6*fr and br<=0.4
+        pin=uw>=Config.WICK_BODY*body
         eng=last["Close"]<last["Open"] and prev["Close"]>prev["Open"] and last["Close"]<=prev["Open"] and last["Open"]>=prev["Close"]
-        return (brej or pin or eng) and close<lv
+        return (pin or eng) and close<lv
     def _dev(s,lv,live,close,dr):
         dn=(lv-live)/close; up=(live-lv)/close
         if dr=="PUT":
@@ -390,7 +388,7 @@ class Sniper:
         last=df15.iloc[-1]
         if not pd.notna(last.get("RSI")): return True
         r=float(last["RSI"])
-        return r<=Config.RSI_C_MAX+5 if dr=="CALL" else r>=Config.RSI_P_MIN-5
+        return r<=Config.RSI_CALL_MAX if dr=="CALL" else r>=Config.RSI_PUT_MIN
     def _alert(s,w,lv,live,reason):
         lt=f"{lv:.3f}" if lv>50 else f"{lv:.5f}"; pt=f"{live:.3f}" if live>50 else f"{live:.5f}"
         s.nt.send_message(f"🛡️ حماية الانحراف\n\n• الزوج: {w['name']}\n• المستوى: {lt}\n• السعر الحي: {pt}\n• السبب: {reason}\n• الحالة: تم إلغاء الإشارة 🛡️")
@@ -495,7 +493,7 @@ class TG:
         if sg["direction"]=="CALL": ideal=f"🎯 الدخول المثالي: انتظر السعر يقترب من {zl} (قاع المنطقة) ثم ادخل CALL\n"
         else: ideal=f"🎯 الدخول المثالي: انتظر السعر يقترب من {zh} (قمة المنطقة) ثم ادخل PUT\n"
         star="⭐ إشارة مميزة — رقم 000 قوي وما انكسر\n" if sg.get("star") else ""
-        s.send(f"🟢 توصية ذهبية 🚀{Config.MODE_LABEL}\n\n{star}• الزوج: {sg['name']}\n• المستوى: {s._fmt(sg['level'])} ({sg['level_type']})\n• الاتجاه: {d}\n🎯 منطقة الدخول الذهبية: من {zl} إلى {zh}\n{ideal}💰 السعر الحي الآن: {s._fmt(sg['entry_price'])}\n🚫 لا تدخل إذا خرج السعر خارج المنطقة\n• مدة الصفقة: {sg['expiry_minutes']} دقيقة\n• جودة الإشارة: {sg['signal_score']}/{sg['max_score']}\n• البروتوكول: غيث المزدوج (v20)\n• {s.risk.txt()}\n\n📝 بعد الصفقة رد بـ: ربحت / خسرت")
+        s.send(f"🟢 توصية ذهبية 🚀{Config.MODE_LABEL}\n\n{star}• الزوج: {sg['name']}\n• المستوى: {s._fmt(sg['level'])} ({sg['level_type']})\n• الاتجاه: {d}\n🎯 منطقة الدخول الذهبية: من {zl} إلى {zh}\n{ideal}💰 السعر الحي الآن: {s._fmt(sg['entry_price'])}\n🚫 لا تدخل إذا خرج السعر خارج المنطقة\n• مدة الصفقة: {sg['expiry_minutes']} دقيقة\n• جودة الإشارة: {sg['signal_score']}/{sg['max_score']}\n• البروتوكول: غيث المزدوج (v21-معجزة)\n• {s.risk.txt()}\n\n📝 بعد الصفقة رد بـ: ربحت / خسرت")
     def listen(s):
         if not s.en: return
         try:
@@ -578,7 +576,7 @@ class Bot:
         today=datetime.now(timezone.utc).strftime("%Y-%m-%d")
         if s.st.get("boot_date")!=today:
             s.st.set("boot_date",today); s.st.save()
-            s.tg.send(f"🚀 غيث المزدوج (v20){Config.MODE_LABEL} بدأ\n\n• الرموز: {len(Config.SYMBOLS)}\n• الماسح: {Config.SCAN_TF} | القناص: {Config.SNIPER_TF} | الترند: {Config.TREND_TF}\n• مدة الصفقة: {Config.EXPIRY_MIN} دقيقة\n• الجودة: {Config.MIN_SCORE}/{Config.MAX_SC}\n• نافذة الجلسات: {Config.HR_START}-{Config.HR_END} UTC\n• الحبال مشدودة + فلتر 000 ⭐\n• مراقبات محفوظة: {len(s.watch)}")
+            s.tg.send(f"🚀 غيث المزدوج (v21-معجزة){Config.MODE_LABEL} بدأ\n\n• الرموز: {len(Config.SYMBOLS)}\n• الماسح: {Config.SCAN_TF} | القناص: {Config.SNIPER_TF} | الترند: {Config.TREND_TF}\n• مدة الصفقة: {Config.EXPIRY_MIN} دقيقة\n• الجودة: {Config.MIN_SCORE}/{Config.MAX_SC}\n• نافذة الجلسات: {Config.HR_START}-{Config.HR_END} UTC\n• مستويات حقيقية فقط + رفض صارم + فلتر طقس\n• مراقبات محفوظة: {len(s.watch)}")
     def _scan(s):
         for sym in Config.SYMBOLS:
             try:
