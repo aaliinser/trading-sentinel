@@ -1,4 +1,4 @@
-name: Scan
+name: Scan15
 
 on:
   schedule:
@@ -6,14 +6,13 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ghaith-scan
+  group: ghaith-scan-15m
   cancel-in-progress: false
 
 jobs:
   scan:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -23,31 +22,53 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ runner.os }}-v1
+          restore-keys: |
+            pip-${{ runner.os }}-
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install requests numpy pandas yfinance
+          pip install requests numpy pandas yfinance ntplib python-dotenv
+          pip install pandas-ta || echo "pandas-ta غير متوفر - سيستخدم البوت المؤشرات البديلة المدمجة"
 
       - name: Restore bot state
         uses: actions/cache/restore@v4
         with:
-          path: ghaith_state.json
-          key: ghaith-state-${{ github.run_id }}
+          path: ghaith_state_15m.json
+          key: ghaith15-${{ github.run_id }}
           restore-keys: |
-            ghaith-state-
+            ghaith15-
 
       - name: Run strategy
         run: python sentinel.py
         env:
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
           TG_CHAT: ${{ secrets.TG_CHAT }}
-          MIN_SIGNAL_SCORE: "2"
+          TWELVE_DATA_API_KEY: ${{ secrets.TWELVE_DATA_API_KEY }}
+          SCAN_TIMEFRAME: "15m"
+          SNIPER_TIMEFRAME: "5m"
+          TREND_TIMEFRAME: "1h"
+          EXPIRY_MINUTES: "15"
+          STATE_FILE: "ghaith_state_15m.json"
+          LOG_FILE: "ghaith_bot_15m.log"
+          MODE_LABEL: " ⏱️ 15m"
+          MIN_SIGNAL_SCORE: "3"
           MAX_DEV: "0.0010"
-          MAX_AHEAD: "0.0004"
+          RUN_BUDGET_SECONDS: "240"
+          SCAN_INTERVAL_SECONDS: "45"
+          SYMBOLS: "EURUSD=X,GBPUSD=X,USDJPY=X,AUDUSD=X,USDCAD=X,USDCHF=X"
+          RISK_GATE_ENABLED: "true"
+          MAX_TRADES_PER_DAY: "3"
+          MAX_LOSSES_PER_DAY: "3"
 
       - name: Save bot state
         if: always()
         uses: actions/cache/save@v4
         with:
-          path: ghaith_state.json
-          key: ghaith-state-${{ github.run_id }}
+          path: ghaith_state_15m.json
+          key: ghaith15-${{ github.run_id }}
