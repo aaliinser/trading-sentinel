@@ -1,4 +1,4 @@
-name: Scan15
+name: Scan30
 
 on:
   schedule:
@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ghaith-scan-15m
+  group: ghaith-scan-30m
   cancel-in-progress: false
 
 jobs:
@@ -39,10 +39,10 @@ jobs:
       - name: Restore bot state
         uses: actions/cache/restore@v4
         with:
-          path: ghaith_state_15m.json
-          key: ghaith15-${{ github.run_id }}
+          path: ghaith_state_30m.json
+          key: ghaith30-${{ github.run_id }}
           restore-keys: |
-            ghaith15-
+            ghaith30-
 
       - name: Run strategy
         run: python sentinel.py
@@ -50,18 +50,18 @@ jobs:
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
           TG_CHAT: ${{ secrets.TG_CHAT }}
           TWELVE_DATA_API_KEY: ${{ secrets.TWELVE_DATA_API_KEY }}
-          SCAN_TIMEFRAME: "15m"
-          SNIPER_TIMEFRAME: "5m"
-          TREND_TIMEFRAME: "1h"
-          EXPIRY_MINUTES: "15"
-          STATE_FILE: "ghaith_state_15m.json"
-          LOG_FILE: "ghaith_bot_15m.log"
-          MODE_LABEL: " ⏱️ 15m"
+          SCAN_TIMEFRAME: "30m"
+          SNIPER_TIMEFRAME: "15m"
+          TREND_TIMEFRAME: "4h"
+          EXPIRY_MINUTES: "30"
+          STATE_FILE: "ghaith_state_30m.json"
+          LOG_FILE: "ghaith_bot_30m.log"
+          MODE_LABEL: " ⏱️ 30m"
           MIN_SIGNAL_SCORE: "3"
           MAX_DEV: "0.0010"
           RUN_BUDGET_SECONDS: "240"
           SCAN_INTERVAL_SECONDS: "45"
-          SYMBOLS: "EURUSD=X,GBPUSD=X,USDJPY=X,AUDUSD=X,USDCAD=X,USDCHF=X"
+          SYMBOLS: "USDJPY=X,AUDJPY=X,EURJPY=X,EURUSD=X,GBPUSD=X,EURGBP=X,CADJPY=X,EURCAD=X,GBPCAD=X,AUDCHF=X,AUDUSD=X,USDCHF=X,CHFJPY=X,AUDCAD=X,USDCAD=X,EURAUD=X,EURCHF=X,GBPJPY=X,GBPCHF=X,GBPAUD=X"
           RISK_GATE_ENABLED: "true"
           MAX_TRADES_PER_DAY: "3"
           MAX_LOSSES_PER_DAY: "3"
@@ -70,5 +70,5 @@ jobs:
         if: always()
         uses: actions/cache/save@v4
         with:
-          path: ghaith_state_15m.json
-          key: ghaith15-${{ github.run_id }}
+          path: ghaith_state_30m.json
+          key: ghaith30-${{ github.run_id }}
