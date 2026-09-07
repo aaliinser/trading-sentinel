@@ -1,19 +1,57 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+"""
+=====================================================================
+غيث المزدوج — v25 (المعجزة المخففة + نتائج يدوية 100%)
+=====================================================================
+"""
 import os, sys, time, json, random, logging, threading
 from logging.handlers import RotatingFileHandler
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import numpy as np, pandas as pd, requests
+
+try:
+    import ntplib
+    HAS_NTP = True
+except ImportError:
+    HAS_NTP = False
+
 try:
     import yfinance as yf
 except ImportError: print("pip install yfinance"); sys.exit(1)
+
 try:
     import pandas_ta as ta; HAS_TA=True
 except ImportError: HAS_TA=False
+
 try:
     from dotenv import load_dotenv; load_dotenv()
 except ImportError: pass
+
+_NTP_OFFSET = None
+_NTP_LAST_CHECK = 0
+
+def get_ntp_offset():
+    global _NTP_OFFSET, _NTP_LAST_CHECK
+    if not HAS_NTP:
+        return 0.0
+    if _NTP_OFFSET is not None and time.time() - _NTP_LAST_CHECK < 600:
+        return _NTP_OFFSET
+    try:
+        client = ntplib.NTPClient()
+        response = client.request('pool.ntp.org', version=3, timeout=3)
+        _NTP_OFFSET = response.offset
+        _NTP_LAST_CHECK = time.time()
+        return _NTP_OFFSET
+    except Exception:
+        return _NTP_OFFSET if _NTP_OFFSET is not None else 0.0
+
+def ntp_now():
+    return datetime.now(timezone.utc) + timedelta(seconds=get_ntp_offset())
+
+def is_real_market_symbol(sym):
+    return "OTC" not in str(sym).upper()
 
 def env_bool(k,d=False):
     v=os.getenv(k); return d if v is None else v.strip().lower() in {"1","true","yes","y","on","نعم"}
@@ -56,9 +94,9 @@ class Config:
     CACHE_TTL=env_int("CACHE_TTL_SECONDS",45)
     STATE=os.getenv("STATE_FILE","ghaith_state.json"); LOG=os.getenv("LOG_FILE","ghaith_bot.log"); MIN_R=200
     MAJOR_PAIRS = ["EURUSD=X", "GBPUSD=X", "USDJPY=X", "AUDUSD=X", "USDCAD=X", "USDCHF=X"]
-    ADX_MIN=env_float("ADX_MIN",25.0)
-    RSI_CALL_MAX=env_float("RSI_CALL_MAX",45.0)
-    RSI_PUT_MIN=env_float("RSI_PUT_MIN",55.0)
+    ADX_MIN=env_float("ADX_MIN",22.0)
+    RSI_CALL_MAX=env_float("RSI_CALL_MAX",48.0)
+    RSI_PUT_MIN=env_float("RSI_PUT_MIN",52.0)
     WICK_BODY=env_float("WICK_BODY_RATIO",2.0)
 
 def setup_logger():
@@ -99,7 +137,17 @@ class State:
 class Data:
     ITD={"1m":pd.Timedelta(minutes=1),"5m":pd.Timedelta(minutes=5),"15m":pd.Timedelta(minutes=15),"30m":pd.Timedelta(minutes=30),"1h":pd.Timedelta(hours=1),"1d":pd.Timedelta(days=1)}
     def __init__(s,lg): s.lg=lg; s.c={}; s._l=threading.Lock()
+    def _candle_guard(s, df, iv):
+        if df is None or df.empty: return df
+        td = s.ITD.get(iv)
+        if td is None: return df
+        now = ntp_now()
+        last_ts = df.index[-1]
+        if last_ts + td > now + timedelta(seconds=5):
+            df = df.iloc[:-1]
+        return df
     def fetch(s,sym,iv,pd_="7d",force=False):
+        if not is_real_market_symbol(sym): return None
         key=f"{sym}|{iv}|{pd_}"; now=time.time()
         with s._l:
             cc=s.c.get(key)
@@ -110,12 +158,14 @@ class Data:
                 df=yf.Ticker(sym).history(period=pd_,interval=iv,auto_adjust=False,actions=False,timeout=Config.REQ_TO)
                 if df is None or df.empty: raise ValueError("empty")
                 df=s._clean(df,iv)
-                if df.empty: raise ValueError("no rows")
+                df=s._candle_guard(df,iv)
+                if df.empty: raise ValueError("no rows after guard")
                 with s._l: s.c[key]={"ts":time.time(),"df":df.copy()}
                 return df.copy()
             except Exception as e: last=e; time.sleep(min(45,(2**a)+random.uniform(0,1.5)))
         raise RuntimeError(f"fetch fail {sym}: {last}")
     def live(s,sym):
+        if not is_real_market_symbol(sym): return None
         if sym in Config.MAJOR_PAIRS:
             api_key = os.getenv("TWELVE_DATA_API_KEY", "").strip()
             if api_key:
@@ -123,7 +173,6 @@ class Data:
                 if len(symbol) == 6:
                     symbol = f"{symbol[:3]}/{symbol[3:]}"
                 try:
-                    time.sleep(random.uniform(0.5, 1.5))
                     url = "https://api.twelvedata.com/price"
                     params = {"symbol": symbol, "apikey": api_key}
                     r = requests.get(url, params=params, timeout=10)
@@ -141,7 +190,7 @@ class Data:
             if "Close" not in df.columns: return None
             df.index=pd.to_datetime(df.index,utc=True)
             df=df[~df.index.duplicated(keep="last")].sort_index().dropna(subset=["Close"])
-            df=df[df.index<=pd.Timestamp.now(tz="UTC")]
+            df=df[df.index<=ntp_now()]
             return float(df.iloc[-1]["Close"]) if not df.empty else None
         except: return None
     def _clean(s,df,iv):
@@ -152,7 +201,7 @@ class Data:
         df=df[["Open","High","Low","Close","Volume"]]
         df.index=pd.to_datetime(df.index,utc=True); df=df[~df.index.duplicated(keep="last")].sort_index()
         df.dropna(subset=["Open","High","Low","Close"],inplace=True); df["Volume"]=df["Volume"].fillna(0)
-        now=pd.Timestamp.now(tz="UTC"); df=df[df.index<=now]
+        now=ntp_now(); df=df[df.index<=now]
         td=s.ITD.get(iv)
         if td is not None and not df.empty and df.index[-1]+td>now: df=df.iloc[:-1]
         return df[(df["High"]>=df["Low"])&(df["Open"]>0)&(df["Close"]>0)]
@@ -289,6 +338,10 @@ class Scan:
         if dr=="PUT" and pd.notna(last.get("RR")):
             r=float(last["RR"])
             if abs(c-r)<=md: cand.append((r,"RESISTANCE"))
+        step=Config.RN_LARGE if c>50 else Config.RN_SMALL
+        if step>0:
+            nr=round(c/step)*step
+            if abs(c-nr)<=md: cand.append((nr,"ROUND_NUMBER"))
         if not cand: return None,""
         cand.sort(key=lambda x:abs(c-x[0])); return cand[0]
     @staticmethod
@@ -329,7 +382,7 @@ class Sniper:
         ok,reason=s._dev(lv,eff,close,dr)
         if not ok: s._alert(w,lv,eff,reason); s.last[wk]=lct; return SnR.DEVIATED,None
         if not s._rsi(d15r,dr): s.last[wk]=lct; return SnR.WAITING,None
-        h=datetime.now(timezone.utc).hour
+        h=ntp_now().hour
         if not (Config.HR_START<=h<Config.HR_END): s.last[wk]=lct; return SnR.WAITING,None
         zl,zh=s._zone(lv,dr)
         star=w.get("star",False) and s._top_conf(d5,dr,rej)
@@ -365,15 +418,17 @@ class Sniper:
     def _rej(s,last,prev,lv,dr):
         close=float(last["Close"]); body=float(abs(last["Close"]-last["Open"])); fr=float(last["High"]-last["Low"])
         if fr<=0 or body<=0: return False
+        br=body/fr
+        brej=br>=Config.REJ_BODY
         if dr=="CALL":
             lw=float(last.get("LWICK",0)) if pd.notna(last.get("LWICK")) else 0
             pin=lw>=Config.WICK_BODY*body
             eng=last["Close"]>last["Open"] and prev["Close"]<prev["Open"] and last["Close"]>=prev["Open"] and last["Open"]<=prev["Close"]
-            return (pin or eng) and close>lv
+            return (brej or pin or eng) and close>lv
         uw=float(last.get("UWICK",0)) if pd.notna(last.get("UWICK")) else 0
         pin=uw>=Config.WICK_BODY*body
         eng=last["Close"]<last["Open"] and prev["Close"]>prev["Open"] and last["Close"]<=prev["Open"] and last["Open"]>=prev["Close"]
-        return (pin or eng) and close<lv
+        return (brej or pin or eng) and close<lv
     def _dev(s,lv,live,close,dr):
         dn=(lv-live)/close; up=(live-lv)/close
         if dr=="PUT":
@@ -437,18 +492,6 @@ class Tracker:
         t[sig["id"]]={"symbol":sig["symbol"],"name":sig["name"],"direction":sig["direction"],"entry_price":sig["entry_price"],
                      "created_at":time.time(),"expiry":time.time()+sig["expiry_minutes"]*60,"done":False}
         s.st.set("open_trades",t); s.st.save()
-    def eval(s,dm):
-        t=s.st.get("open_trades",{}); now=time.time()
-        for tid,tr in list(t.items()):
-            if tr.get("done") or now<tr["expiry"]: continue
-            cp=dm.live(tr["symbol"])
-            if cp is None: continue
-            e,d=tr["entry_price"],tr["direction"]
-            win = cp>e if d=="CALL" else (cp<e if d=="PUT" else False)
-            s.risk.reg_res(win,manual=False)
-            pl=f"+{Config.STAKE*Config.PAYOUT:.2f}$" if win else f"-{Config.STAKE:.2f}$"
-            s.nt.send_message(f"{'✅' if win else '❌'} نتيجة الصفقة الآلية\n\n• الزوج: {tr['name']}\n• الاتجاه: {d}\n• الدخول: {e:.5f}\n• الخروج: {cp:.5f}\n• النتيجة: {pl}\n• {s.risk.txt()}")
-            t[tid]["done"]=True; s.st.save()
     def clean(s):
         t=s.st.get("open_trades",{}); now=time.time()
         rm=[i for i,tr in t.items() if tr.get("done") or now-tr.get("created_at",now)>86400]
@@ -479,7 +522,7 @@ class TG:
         return None
     def send_message(s,text,reply_to=None): return s.send(text,reply_to)
     def watch(s,w):
-        d="صعود " if w["direction"]=="CALL" else "هبوط 🔴"
+        d="صعود 🟢" if w["direction"]=="CALL" else "هبوط 🔴"
         zl=s._fmt(w.get('entry_zone_low',w['level']))
         zh=s._fmt(w.get('entry_zone_high',w['level']))
         ideal="انتظر السعر يقترب من قاع المنطقة ثم ادخل CALL" if w["direction"]=="CALL" else "انتظر السعر يقترب من قمة المنطقة ثم ادخل PUT"
@@ -492,8 +535,8 @@ class TG:
         zh=s._fmt(sg.get('entry_zone_high',sg['level']))
         if sg["direction"]=="CALL": ideal=f"🎯 الدخول المثالي: انتظر السعر يقترب من {zl} (قاع المنطقة) ثم ادخل CALL\n"
         else: ideal=f"🎯 الدخول المثالي: انتظر السعر يقترب من {zh} (قمة المنطقة) ثم ادخل PUT\n"
-        star="⭐ إشارة مميزة — رقم 000 قوي وما انكسر\n" if sg.get("star") else ""
-        s.send(f"🟢 توصية ذهبية 🚀{Config.MODE_LABEL}\n\n{star}• الزوج: {sg['name']}\n• المستوى: {s._fmt(sg['level'])} ({sg['level_type']})\n• الاتجاه: {d}\n🎯 منطقة الدخول الذهبية: من {zl} إلى {zh}\n{ideal}💰 السعر الحي الآن: {s._fmt(sg['entry_price'])}\n🚫 لا تدخل إذا خرج السعر خارج المنطقة\n• مدة الصفقة: {sg['expiry_minutes']} دقيقة\n• جودة الإشارة: {sg['signal_score']}/{sg['max_score']}\n• البروتوكول: غيث المزدوج (v21-معجزة)\n• {s.risk.txt()}\n\n📝 بعد الصفقة رد بـ: ربحت / خسرت")
+        star="⭐ إشارة مميزة — مستوى 000 قوي وما انكسر\n" if sg.get("star") else ""
+        s.send(f"🟢 توصية ذهبية 🚀{Config.MODE_LABEL}\n\n{star}• الزوج: {sg['name']}\n• المستوى: {s._fmt(sg['level'])} ({sg['level_type']})\n• الاتجاه: {d}\n🎯 منطقة الدخول الذهبية: من {zl} إلى {zh}\n{ideal}💰 السعر الحي الآن: {s._fmt(sg['entry_price'])}\n🚫 لا تدخل إذا خرج السعر خارج المنطقة\n• مدة الصفقة: {sg['expiry_minutes']} دقيقة\n• جودة الإشارة: {sg['signal_score']}/{sg['max_score']}\n• البروتوكول: غيث المزدوج (v25)\n• {s.risk.txt()}\n\n📝 بعد الصفقة رد بـ: ربحت / خسرت")
     def listen(s):
         if not s.en: return
         try:
@@ -520,43 +563,12 @@ class TG:
             s.st.set("tg_offset",s.off); s.st.save()
         except Exception as e: s.lg.warning(f"ردود: {e}")
 
-class Rep:
-    def __init__(s,lg,st,nt): s.lg=lg; s.st=st; s.nt=nt
-    def check(s):
-        now=datetime.now(timezone.utc); tz=now+timedelta(hours=Config.TZ_OFFSET)
-        today=tz.strftime("%Y-%m-%d"); hour=tz.hour
-        ld=s.st.get("last_daily_report")
-        if ld!=today:
-            if ld: s._daily(ld)
-            s.st.set("last_daily_report",today); s.st.save()
-        if hour in (4,8,12,16,20):
-            slot=f"{today}-{hour}"
-            if s.st.get("last_4h_report")!=slot: s._4h(); s.st.set("last_4h_report",slot); s.st.save()
-        ym=now.strftime("%Y-%m"); lm=s.st.get("last_monthly_report")
-        if lm and lm!=ym: s._monthly(lm); s.st.set("last_monthly_report",ym); s.st.save()
-    def _4h(s):
-        at=s.st.get("alltime",{"wins":0,"losses":0}); w,l=at.get("wins",0),at.get("losses",0); tot=w+l
-        rate=round(100*w/tot) if tot else 0
-        tz=datetime.now(timezone.utc)+timedelta(hours=Config.TZ_OFFSET)
-        s.nt.send(f"🔶 نتائج إلى الآن 🔶\n\n📅 {tz.strftime('%d/%m/%Y')}\n✅ {w} ربح ❌ {l} خسارة\n المعدل التقريبي: {rate}%")
-        g="صباح الخير" if 5<=tz.hour<17 else "مساء الخير"
-        s.nt.send(f"{g} جميعاً ❤️\n\nبتمنى من الكل يتفاعل على منشورات القناة العامة:\n👉 {Config.CHANNEL_LINK}\n\nحتى تبقى إشارات البوت متاحة للجميع بشكل مجاني وعام 🤝\n\nشكراً لكم ودعمكم نستمر 🔥")
-    def _daily(s,date):
-        d=s.st.get("day",{}); w=d.get("wins",0)+d.get("mw",0); l=d.get("losses",0)+d.get("ml",0); tot=w+l
-        rate=round(100*w/tot) if tot else 0
-        s.nt.send(f"📊 جرد اليوم\n\n• التاريخ: {date}\n• الإجمالي: {tot} | نسبة الفوز: {rate}%\n• صافي اليوم: {d.get('pnl',0):.2f}$")
-    def _monthly(s,ym):
-        m=s.st.get("month",{}); w=m.get("wins",0)+m.get("mw",0); l=m.get("losses",0)+m.get("ml",0); tot=w+l
-        rate=round(100*w/tot) if tot else 0
-        s.nt.send(f"🗓️ جرد الشهر\n\n• الشهر: {ym}\n• الإجمالي: {tot} | نسبة الفوز: {rate}%\n• صافي الشهر: {m.get('pnl',0):.2f}$")
-
 class Bot:
     def __init__(s):
         s.lg=setup_logger(); s.st=State(s.lg); s.data=Data(s.lg)
         s.ind=Ind(s.lg); s.scan=Scan(s.lg,None)
         s.snip=Sniper(s.lg,None,s.st); s.risk=Risk(s.lg,s.st)
         s.tg=TG(s.lg,s.st,s.risk); s.trk=Tracker(s.lg,s.st,s.risk,s.tg)
-        s.rep=Rep(s.lg,s.st,s.tg)
         s.scan.nt=s.tg; s.snip.nt=s.tg
         s.watch=s.st.get("watch_levels",{}) or {}; s._wl=threading.Lock()
     def run(s):
@@ -564,8 +576,8 @@ class Bot:
         budget=env_int("RUN_BUDGET_SECONDS",200); start=time.time()
         while time.time()<start+budget:
             try:
-                s.tg.listen(); s.trk.eval(s.data); s.trk.clean()
-                s.rep.check(); s._snipe(); s._exp(); s._scan(); s._save()
+                s.tg.listen(); s.trk.clean()
+                s._snipe(); s._exp(); s._scan(); s._save()
             except Exception as e: s.lg.exception(f"loop: {e}")
             time.sleep(Config.SCAN_INT)
         s.lg.info("done")
@@ -576,13 +588,17 @@ class Bot:
         today=datetime.now(timezone.utc).strftime("%Y-%m-%d")
         if s.st.get("boot_date")!=today:
             s.st.set("boot_date",today); s.st.save()
-            s.tg.send(f"🚀 غيث المزدوج (v21-معجزة){Config.MODE_LABEL} بدأ\n\n• الرموز: {len(Config.SYMBOLS)}\n• الماسح: {Config.SCAN_TF} | القناص: {Config.SNIPER_TF} | الترند: {Config.TREND_TF}\n• مدة الصفقة: {Config.EXPIRY_MIN} دقيقة\n• الجودة: {Config.MIN_SCORE}/{Config.MAX_SC}\n• نافذة الجلسات: {Config.HR_START}-{Config.HR_END} UTC\n• مستويات حقيقية فقط + رفض صارم + فلتر طقس\n• مراقبات محفوظة: {len(s.watch)}")
+            offset=get_ntp_offset()
+            ntp_status=f"✅ {offset:+.3f}s" if HAS_NTP and offset!=0 else ("⚠️ غير متاح" if not HAS_NTP else "✅ متزامن")
+            risk_warn = "\n\n🔴🔴 تحذير: RISK_GATE_ENABLED غير مفعّل — إدارة المخاطر معطّلة! فعّلها للتداول الآمن." if not Config.RISK_GATE else ""
+            s.tg.send(f"🚀 غيث المزدوج (v25){Config.MODE_LABEL} بدأ\n\n• الرموز: {len(Config.SYMBOLS)} (حقيقية فقط)\n• الماسح: {Config.SCAN_TF} | القناص: {Config.SNIPER_TF} | الترند: {Config.TREND_TF}\n• مدة الصفقة: {Config.EXPIRY_MIN} دقيقة\n• الجودة: {Config.MIN_SCORE}/{Config.MAX_SC}\n• نافذة الجلسات: {Config.HR_START}-{Config.HR_END} UTC\n• 🕐 NTP: {ntp_status}\n• 🛡️ حارس الشموع: مفعّل\n• 🎯 مستويات: دعم/مقاومة + 000\n• 📊 ADX≥22 | RSI≤48/≥52 | رفض 3 مسارات\n• 📝 النتائج: يدوية 100%\n• مراقبات محفوظة: {len(s.watch)}{risk_warn}")
     def _scan(s):
         for sym in Config.SYMBOLS:
+            if not is_real_market_symbol(sym): continue
             try:
                 d15=s.data.fetch(sym,Config.SCAN_TF,period_for(Config.SCAN_TF))
                 d60=s.data.fetch(sym,Config.TREND_TF,period_for(Config.TREND_TF))
-                if d15.empty or d60.empty: continue
+                if d15 is None or d60 is None or d15.empty or d60.empty: continue
                 i15=s.ind.add(d15); i60=s.ind.add(d60)
                 with s._wl: act={w["symbol"] for w in s.watch.values()}
                 w=s.scan.scan(sym,i15,i60,act)
@@ -597,9 +613,10 @@ class Bot:
         for k,w in items:
             try:
                 sym=w["symbol"]
+                if not is_real_market_symbol(sym): continue
                 d5=s.data.fetch(sym,Config.SNIPER_TF,period_for(Config.SNIPER_TF))
                 d15=s.data.fetch(sym,Config.SCAN_TF,period_for(Config.SCAN_TF))
-                if d5.empty or d15.empty: continue
+                if d5 is None or d15 is None or d5.empty or d15.empty: continue
                 i5=s.ind.add(d5); i15=s.ind.add(d15)
                 live=s.data.live(sym)
                 res,pay=s.snip.check(w,i5,i15,live)
