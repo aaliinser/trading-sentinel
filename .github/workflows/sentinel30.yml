@@ -65,6 +65,8 @@ jobs:
           RISK_GATE_ENABLED: "true"
           MAX_TRADES_PER_DAY: "3"
           MAX_LOSSES_PER_DAY: "3"
+          TRADE_HOUR_START: "0"
+          TRADE_HOUR_END: "22"
 
       - name: Save bot state
         if: always()
