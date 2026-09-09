@@ -2,12 +2,12 @@
 # -*- coding: utf-8 -*-
 """
 =====================================================================
-غيث المزدوج — v27 (الروند نمبر مؤكّد ⭐ فقط + حارس الاندفاع)
+غيث المزدوج — v27.1 (إعادة 000 كمرشح + كل حراس v27)
 =====================================================================
-منطق v27:
-- المستوى المستقل = دعم/مقاومة 60 شمعة فقط (لا 000 يتيم)
-- إذا توافق مستوى السوينغ مع رقم 000 قريب => نجمة ⭐ (إشارة أقوى)
-- حارس الاندفاع: لا يدخل عكس اندفاع قوي (آخر 3 شموع > 1×ATR)
+منطق v27.1:
+- المستويات المرشحة: دعم/مقاومة 60 شمعة + أرقام 000 (باتجاه الترند)
+- كل حراس v27 محفوظة: الاندفاع، الانحراف، RSI، ADX، لمس/رفض/تأكيد
+- النجمة ⭐ = توافق سوينغ + 000 (إشارة أقوى)
 =====================================================================
 """
 import os, sys, time, json, random, logging, threading
@@ -346,6 +346,10 @@ class Scan:
         if dr=="PUT" and pd.notna(last.get("RR")):
             r=float(last["RR"])
             if abs(c-r)<=md: cand.append((r,"RESISTANCE"))
+        step=Config.RN_LARGE if c>50 else Config.RN_SMALL
+        if step>0:
+            nr=round(c/step)*step
+            if abs(c-nr)<=md: cand.append((nr,"ROUND_NUMBER"))
         if not cand: return None,""
         cand.sort(key=lambda x:abs(c-x[0])); return cand[0]
     def _confl(s,last,lv):
@@ -558,7 +562,7 @@ class TG:
         if sg["direction"]=="CALL": ideal=f"🎯 الدخول المثالي: انتظر السعر يقترب من {zl} (قاع المنطقة) ثم ادخل CALL\n"
         else: ideal=f"🎯 الدخول المثالي: انتظر السعر يقترب من {zh} (قمة المنطقة) ثم ادخل PUT\n"
         star="⭐ إشارة مميزة — توافق مستوى سوينغ مع رقم 000\n" if sg.get("star") else ""
-        s.send(f"🟢 توصية ذهبية 🚀{Config.MODE_LABEL}\n\n{star}• الزوج: {sg['name']}\n• المستوى: {s._fmt(sg['level'])} ({sg['level_type']})\n• الاتجاه: {d}\n🎯 منطقة الدخول الذهبية: من {zl} إلى {zh}\n{ideal}💰 السعر الحي الآن: {s._fmt(sg['entry_price'])}\n🚫 لا تدخل إذا خرج السعر خارج المنطقة\n• مدة الصفقة: {sg['expiry_minutes']} دقيقة\n• جودة الإشارة: {sg['signal_score']}/{sg['max_score']}\n• البروتوكول: غيث المزدوج (v27)\n• {s.risk.txt()}\n\n📝 بعد الصفقة رد بـ: ربحت / خسرت")
+        s.send(f"🟢 توصية ذهبية 🚀{Config.MODE_LABEL}\n\n{star}• الزوج: {sg['name']}\n• المستوى: {s._fmt(sg['level'])} ({sg['level_type']})\n• الاتجاه: {d}\n🎯 منطقة الدخول الذهبية: من {zl} إلى {zh}\n{ideal}💰 السعر الحي الآن: {s._fmt(sg['entry_price'])}\n🚫 لا تدخل إذا خرج السعر خارج المنطقة\n• مدة الصفقة: {sg['expiry_minutes']} دقيقة\n• جودة الإشارة: {sg['signal_score']}/{sg['max_score']}\n• البروتوكول: غيث المزدوج (v27.1)\n• {s.risk.txt()}\n\n📝 بعد الصفقة رد بـ: ربحت / خسرت")
     def listen(s):
         if not s.en: return
         try:
@@ -613,7 +617,7 @@ class Bot:
             offset=get_ntp_offset()
             ntp_status=f"✅ {offset:+.3f}s" if HAS_NTP and offset!=0 else ("⚠️ غير متاح" if not HAS_NTP else "✅ متزامن")
             risk_warn = "\n\n🔴🔴 تحذير: RISK_GATE_ENABLED غير مفعّل — إدارة المخاطر معطّلة! فعّلها للتداول الآمن." if not Config.RISK_GATE else ""
-            s.tg.send(f"🚀 غيث المزدوج (v27){Config.MODE_LABEL} بدأ\n\n• الرموز: {len(Config.SYMBOLS)} (حقيقية فقط)\n• الماسح: {Config.SCAN_TF} | القناص: {Config.SNIPER_TF} | الترند: {Config.TREND_TF}\n• مدة الصفقة: {Config.EXPIRY_MIN} دقيقة\n• الجودة: {Config.MIN_SCORE}/{Config.MAX_SC}\n• نافذة الجلسات: {Config.HR_START}-{Config.HR_END} UTC\n• 🕐 NTP: {ntp_status}\n• 🛡️ حارس الشموع: مفعّل\n• 🎯 مستويات: دعم/مقاومة 60 شمعة\n• ⭐ 000 كمؤكّد توافق فقط\n• 🛡️ حارس الاندفاع: مفعّل\n• 📊 ADX≥22 | RSI≤48/≥52 | رفض 3 مسارات\n• 📝 النتائج: يدوية 100%\n• مراقبات محفوظة: {len(s.watch)}{risk_warn}")
+            s.tg.send(f"🚀 غيث المزدوج (v27.1){Config.MODE_LABEL} بدأ\n\n• الرموز: {len(Config.SYMBOLS)} (حقيقية فقط)\n• الماسح: {Config.SCAN_TF} | القناص: {Config.SNIPER_TF} | الترند: {Config.TREND_TF}\n• مدة الصفقة: {Config.EXPIRY_MIN} دقيقة\n• الجودة: {Config.MIN_SCORE}/{Config.MAX_SC}\n• نافذة الجلسات: {Config.HR_START}-{Config.HR_END} UTC\n• 🕐 NTP: {ntp_status}\n• 🛡️ حارس الشموع: مفعّل\n• 🎯 مستويات: سوينغ + 000 باتجاه الترند\n• ⭐ توافق سوينغ+000 = إشارة أقوى\n• 🛡️ حارس الاندفاع: مفعّل\n• 📊 ADX≥22 | RSI≤55/≥45 | رفض 3 مسارات\n• 📝 النتائج: يدوية 100%\n• مراقبات محفوظة: {len(s.watch)}{risk_warn}")
     def _scan(s):
         for sym in Config.SYMBOLS:
             if not is_real_market_symbol(sym): continue
