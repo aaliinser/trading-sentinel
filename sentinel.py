@@ -2,12 +2,13 @@
 # -*- coding: utf-8 -*-
 """
 =====================================================================
-غيث المزدوج — v27.1 (إعادة 000 كمرشح + كل حراس v27)
+غيث المزدوج — v27.2 (سعر حي حقيقي في تنبيهات التجهيز)
 =====================================================================
-منطق v27.1:
+منطق v27.2:
 - المستويات المرشحة: دعم/مقاومة 60 شمعة + أرقام 000 (باتجاه الترند)
 - كل حراس v27 محفوظة: الاندفاع، الانحراف، RSI، ADX، لمس/رفض/تأكيد
 - النجمة ⭐ = توافق سوينغ + 000 (إشارة أقوى)
+- جديد: 👀 تعرض السعر الحي اللحظي الحقيقي (لا إغلاق الشمعة)
 =====================================================================
 """
 import os, sys, time, json, random, logging, threading
@@ -562,7 +563,7 @@ class TG:
         if sg["direction"]=="CALL": ideal=f"🎯 الدخول المثالي: انتظر السعر يقترب من {zl} (قاع المنطقة) ثم ادخل CALL\n"
         else: ideal=f"🎯 الدخول المثالي: انتظر السعر يقترب من {zh} (قمة المنطقة) ثم ادخل PUT\n"
         star="⭐ إشارة مميزة — توافق مستوى سوينغ مع رقم 000\n" if sg.get("star") else ""
-        s.send(f"🟢 توصية ذهبية 🚀{Config.MODE_LABEL}\n\n{star}• الزوج: {sg['name']}\n• المستوى: {s._fmt(sg['level'])} ({sg['level_type']})\n• الاتجاه: {d}\n🎯 منطقة الدخول الذهبية: من {zl} إلى {zh}\n{ideal}💰 السعر الحي الآن: {s._fmt(sg['entry_price'])}\n🚫 لا تدخل إذا خرج السعر خارج المنطقة\n• مدة الصفقة: {sg['expiry_minutes']} دقيقة\n• جودة الإشارة: {sg['signal_score']}/{sg['max_score']}\n• البروتوكول: غيث المزدوج (v27.1)\n• {s.risk.txt()}\n\n📝 بعد الصفقة رد بـ: ربحت / خسرت")
+        s.send(f"🟢 توصية ذهبية 🚀{Config.MODE_LABEL}\n\n{star}• الزوج: {sg['name']}\n• المستوى: {s._fmt(sg['level'])} ({sg['level_type']})\n• الاتجاه: {d}\n🎯 منطقة الدخول الذهبية: من {zl} إلى {zh}\n{ideal}💰 السعر الحي الآن: {s._fmt(sg['entry_price'])}\n🚫 لا تدخل إذا خرج السعر خارج المنطقة\n• مدة الصفقة: {sg['expiry_minutes']} دقيقة\n• جودة الإشارة: {sg['signal_score']}/{sg['max_score']}\n• البروتوكول: غيث المزدوج (v27.2)\n• {s.risk.txt()}\n\n📝 بعد الصفقة رد بـ: ربحت / خسرت")
     def listen(s):
         if not s.en: return
         try:
@@ -617,7 +618,7 @@ class Bot:
             offset=get_ntp_offset()
             ntp_status=f"✅ {offset:+.3f}s" if HAS_NTP and offset!=0 else ("⚠️ غير متاح" if not HAS_NTP else "✅ متزامن")
             risk_warn = "\n\n🔴🔴 تحذير: RISK_GATE_ENABLED غير مفعّل — إدارة المخاطر معطّلة! فعّلها للتداول الآمن." if not Config.RISK_GATE else ""
-            s.tg.send(f"🚀 غيث المزدوج (v27.1){Config.MODE_LABEL} بدأ\n\n• الرموز: {len(Config.SYMBOLS)} (حقيقية فقط)\n• الماسح: {Config.SCAN_TF} | القناص: {Config.SNIPER_TF} | الترند: {Config.TREND_TF}\n• مدة الصفقة: {Config.EXPIRY_MIN} دقيقة\n• الجودة: {Config.MIN_SCORE}/{Config.MAX_SC}\n• نافذة الجلسات: {Config.HR_START}-{Config.HR_END} UTC\n• 🕐 NTP: {ntp_status}\n• 🛡️ حارس الشموع: مفعّل\n• 🎯 مستويات: سوينغ + 000 باتجاه الترند\n• ⭐ توافق سوينغ+000 = إشارة أقوى\n• 🛡️ حارس الاندفاع: مفعّل\n• 📊 ADX≥22 | RSI≤55/≥45 | رفض 3 مسارات\n• 📝 النتائج: يدوية 100%\n• مراقبات محفوظة: {len(s.watch)}{risk_warn}")
+            s.tg.send(f"🚀 غيث المزدوج (v27.2){Config.MODE_LABEL} بدأ\n\n• الرموز: {len(Config.SYMBOLS)} (حقيقية فقط)\n• الماسح: {Config.SCAN_TF} | القناص: {Config.SNIPER_TF} | الترند: {Config.TREND_TF}\n• مدة الصفقة: {Config.EXPIRY_MIN} دقيقة\n• الجودة: {Config.MIN_SCORE}/{Config.MAX_SC}\n• نافذة الجلسات: {Config.HR_START}-{Config.HR_END} UTC\n• 🕐 NTP: {ntp_status}\n• 🛡️ حارس الشموع: مفعّل\n• 🎯 مستويات: سوينغ + 000 باتجاه الترند\n• ⭐ توافق سوينغ+000 = إشارة أقوى\n• 🛡️ حارس الاندفاع: مفعّل\n• 📊 ADX≥22 | RSI≤55/≥45 | رفض 3 مسارات\n• 📝 النتائج: يدوية 100%\n• مراقبات محفوظة: {len(s.watch)}{risk_warn}")
     def _scan(s):
         for sym in Config.SYMBOLS:
             if not is_real_market_symbol(sym): continue
@@ -629,6 +630,11 @@ class Bot:
                 with s._wl: act={w["symbol"] for w in s.watch.values()}
                 w=s.scan.scan(sym,i15,i60,act)
                 if w:
+                    lv_live=s.data.live(sym)
+                    if lv_live:
+                        w["live_price"]=lv_live
+                        pip=0.01 if lv_live>50 else 0.0001
+                        w["distance_pips"]=round(abs(lv_live-w["level"])/pip,1)
                     k=f"{sym}|{w['level']}"
                     with s._wl: s.watch[k]=w
                     s.tg.watch(w)
