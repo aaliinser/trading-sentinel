@@ -58,7 +58,7 @@ jobs:
           LOG_FILE: "ghaith_bot_30m.log"
           MODE_LABEL: " ⏱️ 30m"
           MIN_SIGNAL_SCORE: "3"
-          MAX_DEV: "0.0010"
+          MAX_DEV: "0.0015"
           RUN_BUDGET_SECONDS: "240"
           SCAN_INTERVAL_SECONDS: "45"
           SYMBOLS: "USDJPY=X,AUDJPY=X,EURJPY=X,EURUSD=X,GBPUSD=X,EURGBP=X,CADJPY=X,EURCAD=X,GBPCAD=X,AUDCHF=X,AUDUSD=X,USDCHF=X,CHFJPY=X,AUDCAD=X,USDCAD=X,EURAUD=X,EURCHF=X,GBPJPY=X,GBPCHF=X,GBPAUD=X"
@@ -67,6 +67,9 @@ jobs:
           MAX_LOSSES_PER_DAY: "3"
           TRADE_HOUR_START: "0"
           TRADE_HOUR_END: "22"
+          RSI_CALL_MAX: "55"
+          RSI_PUT_MIN: "45"
+          IMPULSE_GUARD_ATR: "1.5"
 
       - name: Save bot state
         if: always()
