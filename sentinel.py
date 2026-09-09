@@ -2,7 +2,12 @@
 # -*- coding: utf-8 -*-
 """
 =====================================================================
-غيث المزدوج — v25 (المعجزة المخففة + نتائج يدوية 100%)
+غيث المزدوج — v27 (الروند نمبر مؤكّد ⭐ فقط + حارس الاندفاع)
+=====================================================================
+منطق v27:
+- المستوى المستقل = دعم/مقاومة 60 شمعة فقط (لا 000 يتيم)
+- إذا توافق مستوى السوينغ مع رقم 000 قريب => نجمة ⭐ (إشارة أقوى)
+- حارس الاندفاع: لا يدخل عكس اندفاع قوي (آخر 3 شموع > 1×ATR)
 =====================================================================
 """
 import os, sys, time, json, random, logging, threading
@@ -98,6 +103,8 @@ class Config:
     RSI_CALL_MAX=env_float("RSI_CALL_MAX",48.0)
     RSI_PUT_MIN=env_float("RSI_PUT_MIN",52.0)
     WICK_BODY=env_float("WICK_BODY_RATIO",2.0)
+    IMPULSE_ATR=env_float("IMPULSE_GUARD_ATR",1.0)
+    CONFL_ATR=env_float("CONFLUENCE_ATR",0.3)
 
 def setup_logger():
     lg=logging.getLogger("GhaithDual"); lg.setLevel(logging.INFO)
@@ -284,12 +291,13 @@ class Scan:
             if abs(lv-pl)<=Config.WATCH_TOL*atr and (time.time()-pts)<Config.WATCH_CD: s.ls[sym]=lct; return None
         cn=float(last["Close"]); pip=0.01 if cn>50 else 0.0001
         lvl=float(lv)
+        star=s._confl(last,lvl)
         if dr=="CALL": zl,zh=lvl-Config.MAX_AHEAD*lvl, lvl+Config.MAX_DEV*lvl
         else: zl,zh=lvl-Config.MAX_DEV*lvl, lvl+Config.MAX_AHEAD*lvl
         w={"symbol":sym,"name":s._n(sym),"direction":dr,"level":lvl,"level_type":lt,
            "signal_score":tot,"max_score":Config.MAX_SC,"scores":sc,"entry_price":cn,
            "live_price":cn,"distance_pips":round(abs(cn-lvl)/pip,1),
-           "entry_zone_low":zl,"entry_zone_high":zh,"candle_time":lct,"created_at":time.time(),"flips":0,"star":big_round(lvl)}
+           "entry_zone_low":zl,"entry_zone_high":zh,"candle_time":lct,"created_at":time.time(),"flips":0,"star":star}
         s.ls[sym]=lct; s.la[sym]=(lvl,time.time())
         return w
     def _dist(s,last):
@@ -338,12 +346,16 @@ class Scan:
         if dr=="PUT" and pd.notna(last.get("RR")):
             r=float(last["RR"])
             if abs(c-r)<=md: cand.append((r,"RESISTANCE"))
-        step=Config.RN_LARGE if c>50 else Config.RN_SMALL
-        if step>0:
-            nr=round(c/step)*step
-            if abs(c-nr)<=md: cand.append((nr,"ROUND_NUMBER"))
         if not cand: return None,""
         cand.sort(key=lambda x:abs(c-x[0])); return cand[0]
+    def _confl(s,last,lv):
+        if not s._v(last["Close"],lv): return False
+        c=float(last["Close"]); a=float(last["ATR"]) if pd.notna(last.get("ATR")) else 0
+        if a<=0: return False
+        step=Config.RN_LARGE if c>50 else Config.RN_SMALL
+        if step<=0: return False
+        nr=round(float(lv)/step)*step
+        return abs(nr-float(lv))<=Config.CONFL_ATR*a
     @staticmethod
     def _n(s):
         b=s.replace("=X",""); return f"{b[:3]}/{b[3:]}" if len(b)==6 else s
@@ -378,6 +390,7 @@ class Sniper:
         if dr=="CALL" and close<rej_close: s.last[wk]=lct; return SnR.WAITING,None
         if dr=="PUT" and close>rej_close: s.last[wk]=lct; return SnR.WAITING,None
         if not s._adx(d15r): s.last[wk]=lct; return SnR.WAITING,None
+        if not s._impulse(d5,dr): s.last[wk]=lct; return SnR.WAITING,None
         eff=live if live else close
         ok,reason=s._dev(lv,eff,close,dr)
         if not ok: s._alert(w,lv,eff,reason); s.last[wk]=lct; return SnR.DEVIATED,None
@@ -397,6 +410,15 @@ class Sniper:
         last=df15.iloc[-1]
         if not pd.notna(last.get("ADX")): return True
         return float(last["ADX"])>=Config.ADX_MIN
+    def _impulse(s,d5,dr):
+        if d5 is None or len(d5)<5: return True
+        last3=d5.iloc[-4:-1]
+        net=float((last3["Close"]-last3["Open"]).sum())
+        atr=float(d5.iloc[-1]["ATR"]) if pd.notna(d5.iloc[-1].get("ATR")) else 0
+        if atr<=0: return True
+        if dr=="PUT" and net>Config.IMPULSE_ATR*atr: return False
+        if dr=="CALL" and net<-Config.IMPULSE_ATR*atr: return False
+        return True
     def _zone(s,lv,dr):
         d=Config.MAX_DEV*lv; a=Config.MAX_AHEAD*lv
         return (lv-a,lv+d) if dr=="CALL" else (lv-d,lv+a)
@@ -535,8 +557,8 @@ class TG:
         zh=s._fmt(sg.get('entry_zone_high',sg['level']))
         if sg["direction"]=="CALL": ideal=f"🎯 الدخول المثالي: انتظر السعر يقترب من {zl} (قاع المنطقة) ثم ادخل CALL\n"
         else: ideal=f"🎯 الدخول المثالي: انتظر السعر يقترب من {zh} (قمة المنطقة) ثم ادخل PUT\n"
-        star="⭐ إشارة مميزة — مستوى 000 قوي وما انكسر\n" if sg.get("star") else ""
-        s.send(f"🟢 توصية ذهبية 🚀{Config.MODE_LABEL}\n\n{star}• الزوج: {sg['name']}\n• المستوى: {s._fmt(sg['level'])} ({sg['level_type']})\n• الاتجاه: {d}\n🎯 منطقة الدخول الذهبية: من {zl} إلى {zh}\n{ideal}💰 السعر الحي الآن: {s._fmt(sg['entry_price'])}\n🚫 لا تدخل إذا خرج السعر خارج المنطقة\n• مدة الصفقة: {sg['expiry_minutes']} دقيقة\n• جودة الإشارة: {sg['signal_score']}/{sg['max_score']}\n• البروتوكول: غيث المزدوج (v25)\n• {s.risk.txt()}\n\n📝 بعد الصفقة رد بـ: ربحت / خسرت")
+        star="⭐ إشارة مميزة — توافق مستوى سوينغ مع رقم 000\n" if sg.get("star") else ""
+        s.send(f"🟢 توصية ذهبية 🚀{Config.MODE_LABEL}\n\n{star}• الزوج: {sg['name']}\n• المستوى: {s._fmt(sg['level'])} ({sg['level_type']})\n• الاتجاه: {d}\n🎯 منطقة الدخول الذهبية: من {zl} إلى {zh}\n{ideal}💰 السعر الحي الآن: {s._fmt(sg['entry_price'])}\n🚫 لا تدخل إذا خرج السعر خارج المنطقة\n• مدة الصفقة: {sg['expiry_minutes']} دقيقة\n• جودة الإشارة: {sg['signal_score']}/{sg['max_score']}\n• البروتوكول: غيث المزدوج (v27)\n• {s.risk.txt()}\n\n📝 بعد الصفقة رد بـ: ربحت / خسرت")
     def listen(s):
         if not s.en: return
         try:
@@ -591,7 +613,7 @@ class Bot:
             offset=get_ntp_offset()
             ntp_status=f"✅ {offset:+.3f}s" if HAS_NTP and offset!=0 else ("⚠️ غير متاح" if not HAS_NTP else "✅ متزامن")
             risk_warn = "\n\n🔴🔴 تحذير: RISK_GATE_ENABLED غير مفعّل — إدارة المخاطر معطّلة! فعّلها للتداول الآمن." if not Config.RISK_GATE else ""
-            s.tg.send(f"🚀 غيث المزدوج (v25){Config.MODE_LABEL} بدأ\n\n• الرموز: {len(Config.SYMBOLS)} (حقيقية فقط)\n• الماسح: {Config.SCAN_TF} | القناص: {Config.SNIPER_TF} | الترند: {Config.TREND_TF}\n• مدة الصفقة: {Config.EXPIRY_MIN} دقيقة\n• الجودة: {Config.MIN_SCORE}/{Config.MAX_SC}\n• نافذة الجلسات: {Config.HR_START}-{Config.HR_END} UTC\n• 🕐 NTP: {ntp_status}\n• 🛡️ حارس الشموع: مفعّل\n• 🎯 مستويات: دعم/مقاومة + 000\n• 📊 ADX≥22 | RSI≤48/≥52 | رفض 3 مسارات\n• 📝 النتائج: يدوية 100%\n• مراقبات محفوظة: {len(s.watch)}{risk_warn}")
+            s.tg.send(f"🚀 غيث المزدوج (v27){Config.MODE_LABEL} بدأ\n\n• الرموز: {len(Config.SYMBOLS)} (حقيقية فقط)\n• الماسح: {Config.SCAN_TF} | القناص: {Config.SNIPER_TF} | الترند: {Config.TREND_TF}\n• مدة الصفقة: {Config.EXPIRY_MIN} دقيقة\n• الجودة: {Config.MIN_SCORE}/{Config.MAX_SC}\n• نافذة الجلسات: {Config.HR_START}-{Config.HR_END} UTC\n• 🕐 NTP: {ntp_status}\n• 🛡️ حارس الشموع: مفعّل\n• 🎯 مستويات: دعم/مقاومة 60 شمعة\n• ⭐ 000 كمؤكّد توافق فقط\n• 🛡️ حارس الاندفاع: مفعّل\n• 📊 ADX≥22 | RSI≤48/≥52 | رفض 3 مسارات\n• 📝 النتائج: يدوية 100%\n• مراقبات محفوظة: {len(s.watch)}{risk_warn}")
     def _scan(s):
         for sym in Config.SYMBOLS:
             if not is_real_market_symbol(sym): continue
@@ -630,9 +652,11 @@ class Bot:
                         if cur is not None and cur.get("flips",0)<1:
                             nd="CALL" if cur["direction"]=="PUT" else "PUT"
                             lv=cur["level"]
-                            lt=cur.get("level_type") if cur.get("level_type")=="ROUND_NUMBER" else ("SUPPORT" if nd=="CALL" else "RESISTANCE")
-                            if nd=="CALL": zl,zh=lv-Config.MAX_AHEAD*lv, lv+Config.MAX_DEV*lv
-                            else: zl,zh=lv-Config.MAX_DEV*lv, lv+Config.MAX_AHEAD*lv
+                            lt="SUPPORT" if nd=="CALL" else "RESISTANCE"
+                            if nd=="CALL":
+                                zl,zh=lv-Config.MAX_AHEAD*lv, lv+Config.MAX_DEV*lv
+                            else:
+                                zl,zh=lv-Config.MAX_DEV*lv, lv+Config.MAX_AHEAD*lv
                             cur_price=live if live else float(d5.iloc[-1]["Close"])
                             pip=0.01 if cur_price>50 else 0.0001
                             cur["direction"]=nd; cur["level_type"]=lt
