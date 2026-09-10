@@ -1,301 +1,231 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-غيث — فرضيات ثنائية جديدة (VERSION: 1=نطاق، 2=تشبع، 3=ترند طويل)
+غيث H2 — بوت إشارات حي: تشبع RSI + بولينجر (5m) — انتهاء 15 دقيقة
 """
-import os, sys, time, logging
+import os, sys, time, json, logging
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 import numpy as np, pandas as pd
+import requests
 
 try:
     import yfinance as yf
 except ImportError:
     print("pip install yfinance"); sys.exit(1)
 
-try:
-    from dotenv import load_dotenv
-    load_dotenv()
-except ImportError:
-    pass
-
-import requests
-
-VERSION = int(os.getenv("VERSION", "1"))
-
-SYMBOLS = [
-    "USDJPY=X","AUDJPY=X","EURJPY=X","EURUSD=X","GBPUSD=X",
-    "EURGBP=X","CADJPY=X","EURCAD=X","GBPCAD=X","AUDCHF=X",
-    "AUDUSD=X","USDCHF=X","CHFJPY=X","AUDCAD=X","USDCAD=X",
-    "EURAUD=X","EURCHF=X","GBPJPY=X","GBPCHF=X","GBPAUD=X"
-]
-
-STAKE = 6.0
-PAYOUT = 0.90
-BREAKEVEN = 52.63
+SYMBOLS = os.getenv("SYMBOLS_H2", "USDJPY=X,EURAUD=X,USDCHF=X,EURCAD=X,CADJPY=X").split(",")
+RSI_P = 14
+BB_P = 20
+BB_K = 2.0
+RSI_HI = 75.0
+RSI_LO = 25.0
+EXPIRY_MIN = 15
+MAX_ALERTS_DAY = int(os.getenv("MAX_ALERTS_DAY", "8"))
+MAX_TRADES_DAY = int(os.getenv("MAX_TRADES_DAY", "5"))
+STOP_AFTER_LOSSES = 3
+STOP_HOURS = 4
+STATE_FILE = "state_h2.json"
 
 TG_TOKEN = os.getenv("TG_TOKEN","").strip()
 TG_CHAT = os.getenv("TG_CHAT","").strip()
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)-8s | %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-    handlers=[logging.StreamHandler(sys.stdout)]
-)
-log = logging.getLogger("BinaryHyp")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)-8s | %(message)s", handlers=[logging.StreamHandler(sys.stdout)])
+log = logging.getLogger("H2")
 
-def fetch(sym, iv, period):
-    for attempt in range(1, 4):
+def load_state():
+    p = Path(STATE_FILE)
+    if p.exists():
         try:
-            df = yf.Ticker(sym).history(period=period, interval=iv, auto_adjust=False, actions=False, timeout=20)
+            with open(p, encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+def save_state(st):
+    try:
+        with open(STATE_FILE, "w", encoding="utf-8") as f:
+            json.dump(st, f, ensure_ascii=False, default=str)
+    except Exception as e:
+        log.error(f"save: {e}")
+
+def day_obj(st):
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    d = st.get("day", {})
+    if d.get("date") != today:
+        d = {"date": today, "alerts": 0, "trades": 0, "wins": 0, "losses": 0, "cl": 0}
+        st["day"] = d
+    return d
+
+def tg_send(text, reply_to=None):
+    if not TG_TOKEN or not TG_CHAT:
+        log.info("TG disabled")
+        return None
+    url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
+    p = {"chat_id": TG_CHAT, "text": text, "parse_mode": "Markdown", "disable_web_page_preview": True}
+    if reply_to:
+        p["reply_to_message_id"] = reply_to
+    for a in range(3):
+        try:
+            r = requests.post(url, json=p, timeout=15)
+            if r.status_code == 200:
+                return r.json().get("result", {}).get("message_id")
+            time.sleep(2*a+1)
+        except Exception as e:
+            log.warning(f"tg {a}: {e}")
+    return None
+
+def fetch5m(sym):
+    for a in range(3):
+        try:
+            df = yf.Ticker(sym).history(period="7d", interval="5m", auto_adjust=False, actions=False, timeout=20)
             if df is None or df.empty:
                 raise ValueError("empty")
             df = df.copy()
             if isinstance(df.columns, pd.MultiIndex):
                 df.columns = df.columns.get_level_values(0)
-            for c in ["Open","High","Low","Close"]:
-                if c not in df.columns:
-                    df[c] = np.nan
             df = df[["Open","High","Low","Close"]]
             df.index = pd.to_datetime(df.index, utc=True)
-            df = df[~df.index.duplicated(keep="last")].sort_index()
-            df.dropna(inplace=True)
-            df = df[(df["High"]>=df["Low"]) & (df["Open"]>0) & (df["Close"]>0)]
+            df = df[~df.index.duplicated(keep="last")].sort_index().dropna()
+            now = pd.Timestamp.now(tz="UTC")
+            df = df[df.index <= now]
+            if not df.empty and df.index[-1] + pd.Timedelta(minutes=5) > now:
+                df = df.iloc[:-1]
             return df
         except Exception as e:
-            log.warning(f"{sym} {iv} attempt {attempt}: {e}")
-            time.sleep(2 * attempt)
+            log.warning(f"{sym} fetch {a}: {e}")
+            time.sleep(2*a+1)
     return None
 
-def add_ind(df):
-    if df is None or len(df) < 120:
-        return None
-    df = df.copy()
+def indicators(df):
     c = df["Close"]
-    df["EMA35"] = c.ewm(span=35, adjust=False).mean()
-    df["EMA50"] = c.ewm(span=50, adjust=False).mean()
     d = c.diff()
     g = d.clip(lower=0)
     l = -d.clip(upper=0)
-    ag = g.ewm(alpha=1/14, min_periods=14).mean()
-    al = l.ewm(alpha=1/14, min_periods=14).mean()
-    df["RSI"] = (100 - (100 / (1 + ag / al.replace(0, np.nan)))).fillna(50)
-    pc = c.shift(1)
-    tr = pd.concat([df["High"]-df["Low"], (df["High"]-pc).abs(), (df["Low"]-pc).abs()], axis=1).max(axis=1)
-    df["ATR"] = tr.ewm(alpha=1/14, min_periods=14).mean()
-    um = df["High"].diff()
-    dm = -df["Low"].diff()
-    pdm = pd.Series(np.where((um>dm)&(um>0), um, 0.0), index=df.index)
-    mdm = pd.Series(np.where((dm>um)&(dm>0), dm, 0.0), index=df.index)
-    pdi = 100*pdm.ewm(alpha=1/14).mean()/df["ATR"].replace(0, np.nan)
-    mdi = 100*mdm.ewm(alpha=1/14).mean()/df["ATR"].replace(0, np.nan)
-    dx = 100*(pdi-mdi).abs()/(pdi+mdi).replace(0, np.nan)
-    df["ADX"] = dx.ewm(alpha=1/14).mean()
-    mid = c.rolling(20).mean()
-    sd = c.rolling(20).std()
-    df["BBU"] = mid + 2*sd
-    df["BBL"] = mid - 2*sd
-    df["RT"] = df["High"].rolling(48).max().shift(1)
-    df["RB"] = df["Low"].rolling(48).min().shift(1)
-    df["UW"] = df["High"] - df[["Open","Close"]].max(axis=1)
-    df["LW"] = df[["Open","Close"]].min(axis=1) - df["Low"]
-    return df
-
-def collect_v1(df):
-    """ارتداد أطراف النطاق في سوق عرضي (15m، انتهاء 45د)"""
-    trades = []
-    for i in range(60, len(df)-4):
-        r = df.iloc[i]
-        adx = r.get("ADX")
-        atr = r.get("ATR")
-        rt = r.get("RT")
-        rb = r.get("RB")
-        if pd.isna(adx) or pd.isna(atr) or pd.isna(rt) or pd.isna(rb):
-            continue
-        if float(adx) >= 20.0:
-            continue
-        body = abs(float(r["Close"]) - float(r["Open"]))
-        if body <= 0:
-            continue
-        if float(r["High"]) >= float(rt) - 0.2*float(atr):
-            if float(r["Close"]) < float(r["Open"]) and float(r["UW"]) >= body:
-                ex = float(df.iloc[i+3]["Close"])
-                en = float(r["Close"])
-                trades.append({"time": df.index[i], "dr": "PUT", "entry": en, "exit": ex})
-        if float(r["Low"]) <= float(rb) + 0.2*float(atr):
-            if float(r["Close"]) > float(r["Open"]) and float(r["LW"]) >= body:
-                ex = float(df.iloc[i+3]["Close"])
-                en = float(r["Close"])
-                trades.append({"time": df.index[i], "dr": "CALL", "entry": en, "exit": ex})
-    return trades
-
-def collect_v2(df):
-    """تطرف RSI + بولينجر (5m، انتهاء 15د)"""
-    trades = []
-    for i in range(60, len(df)-4):
-        r = df.iloc[i]
-        rsi = r.get("RSI")
-        bbu = r.get("BBU")
-        bbl = r.get("BBL")
-        if pd.isna(rsi) or pd.isna(bbu) or pd.isna(bbl):
-            continue
-        en = float(r["Close"])
-        if float(rsi) >= 75.0 and en >= float(bbu):
-            ex = float(df.iloc[i+3]["Close"])
-            trades.append({"time": df.index[i], "dr": "PUT", "entry": en, "exit": ex})
-        if float(rsi) <= 25.0 and en <= float(bbl):
-            ex = float(df.iloc[i+3]["Close"])
-            trades.append({"time": df.index[i], "dr": "CALL", "entry": en, "exit": ex})
-    return trades
-
-def collect_v3(df):
-    """ترند ساعة + انتهاء 4 ساعات"""
-    trades = []
-    for i in range(80, len(df)-5):
-        r = df.iloc[i]
-        e35 = r.get("EMA35")
-        e50 = r.get("EMA50")
-        if pd.isna(e35) or pd.isna(e50):
-            continue
-        en = float(r["Close"])
-        if float(e35) > float(e50) and en > float(e35):
-            if float(r["Low"]) <= float(e50) and float(r["Close"]) > float(r["Open"]):
-                ex = float(df.iloc[i+4]["Close"])
-                trades.append({"time": df.index[i], "dr": "CALL", "entry": en, "exit": ex})
-        if float(e35) < float(e50) and en < float(e35):
-            if float(r["High"]) >= float(e50) and float(r["Close"]) < float(r["Open"]):
-                ex = float(df.iloc[i+4]["Close"])
-                trades.append({"time": df.index[i], "dr": "PUT", "entry": en, "exit": ex})
-    return trades
-
-def stats(trades):
-    if not trades:
-        return None
-    wins = 0
-    for t in trades:
-        if t["dr"] == "CALL":
-            if t["exit"] > t["entry"]:
-                wins += 1
-        else:
-            if t["exit"] < t["entry"]:
-                wins += 1
-    total = len(trades)
-    wr = round(100 * wins / total, 2)
-    pnl = round(wins * STAKE * PAYOUT - (total - wins) * STAKE, 2)
-    return {"total": total, "wins": wins, "wr": wr, "pnl": pnl}
-
-def robustness(trades):
-    if len(trades) < 60:
-        return False, 0, 0
-    mid = len(trades) // 2
-    s1 = stats(trades[:mid])
-    s2 = stats(trades[mid:])
-    if not s1 or not s2:
-        return False, 0, 0
-    ok = s1["wr"] >= BREAKEVEN and s2["wr"] >= BREAKEVEN
-    return ok, s1["wr"], s2["wr"]
+    ag = g.ewm(alpha=1/RSI_P, min_periods=RSI_P).mean()
+    al = l.ewm(alpha=1/RSI_P, min_periods=RSI_P).mean()
+    rsi = (100 - (100/(1 + ag/al.replace(0, np.nan)))).fillna(50)
+    mid = c.rolling(BB_P).mean()
+    sd = c.rolling(BB_P).std()
+    return rsi, mid + BB_K*sd, mid - BB_K*sd, sd
 
 def fmt_sym(s):
-    b = s.replace("=X", "")
-    return f"{b[:3]}/{b[3:]}" if len(b) == 6 else s
+    b = s.replace("=X","")
+    return f"{b[:3]}/{b[3:]}" if len(b)==6 else s
 
-def build_report():
-    names = {1: "ارتداد أطراف النطاق (15م/45د)", 2: "تشبع RSI+بولينجر (5م/15د)", 3: "ترند ساعة (1س/4س)"}
-    if VERSION not in names:
-        return f"ℹ️ النسخة {VERSION} غير مستخدمة بهذه الجولة"
-    log.info(f"بدء الفرضية {VERSION}: {names[VERSION]}")
-    start = time.time()
+def fmt_px(v):
+    return f"{v:.3f}" if v > 50 else f"{v:.5f}"
 
-    if VERSION == 1:
-        iv, period = "15m", "730d"
-    elif VERSION == 2:
-        iv, period = "5m", "60d"
-    else:
-        iv, period = "1h", "730d"
-
-    all_trades = []
-    sym_stats = []
-    for sym in SYMBOLS:
-        try:
-            df = fetch(sym, iv, period)
-            df = add_ind(df)
-            if df is None:
-                continue
-            if VERSION == 1:
-                tr = collect_v1(df)
-            elif VERSION == 2:
-                tr = collect_v2(df)
-            else:
-                tr = collect_v3(df)
-            for t in tr:
-                t["sym"] = sym
-            all_trades.extend(tr)
-            s = stats(tr)
-            if s and s["total"] >= 10:
-                sym_stats.append((sym, s))
-            log.info(f"{sym}: {len(tr)} صفقة")
-            time.sleep(1)
-        except Exception as e:
-            log.error(f"{sym}: {e}")
-
-    overall = stats(all_trades)
-    if not overall:
-        return f"❌ الفرضية {VERSION}: لا صفقات"
-
-    robust, wr1, wr2 = robustness(all_trades)
-    sym_stats.sort(key=lambda x: x[1]["wr"], reverse=True)
-
-    msg = f"🎯 *فرضية {VERSION}: {names[VERSION]}*\n"
-    msg += f"• صفقات: *{overall['total']}*\n"
-    msg += f"• فوز: *{overall['wr']}%*\n"
-    msg += f"• صافي: *{overall['pnl']:+.2f}$*\n"
-    msg += f"• التعادل: {BREAKEVEN}%\n\n"
-    msg += f"📈 أفضل 5:\n"
-    for idx in range(min(5, len(sym_stats))):
-        sym, s = sym_stats[idx]
-        msg += f"• {fmt_sym(sym)}: {s['wr']}% ({s['total']})\n"
-    msg += f"\n🧪 صلابة: "
-    if robust:
-        msg += f"✅ ({wr1}%|{wr2}%)\n"
-    else:
-        msg += f"❌ ({wr1}%|{wr2}%)\n"
-    msg += f"\n💡 الحكم: "
-    if robust and overall["wr"] >= 55:
-        msg += f"🟢 رابحة صلبة - نعتمدها\n"
-    elif robust and overall["wr"] >= BREAKEVEN:
-        msg += f"🟡 هامشية صلبة\n"
-    elif overall["wr"] >= BREAKEVEN:
-        msg += f"🟠 فوق التعادل غير صلبة\n"
-    else:
-        msg += f"🔴 مرفوضة\n"
-    if overall["total"] < 100:
-        msg += f"⚠️ صفقات قليلة\n"
-    msg += f"\n⏱️ {time.time()-start:.0f}ث"
-    return msg
-
-def send_telegram(text):
-    if not TG_TOKEN or not TG_CHAT:
-        print(text)
+def listen(st):
+    if not TG_TOKEN:
         return
     try:
-        url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
-        payload = {"chat_id": TG_CHAT, "text": text, "parse_mode": "Markdown", "disable_web_page_preview": True}
-        requests.post(url, json=payload, timeout=15)
-        log.info("✅ أُرسل")
+        off = st.get("tg_offset", 0)
+        r = requests.get(f"https://api.telegram.org/bot{TG_TOKEN}/getUpdates", params={"offset": off, "timeout": 0}, timeout=15)
+        for u in r.json().get("result", []):
+            uid = u.get("update_id", 0)
+            if uid >= off:
+                off = uid + 1
+            m = u.get("message") or u.get("edited_message")
+            if not m:
+                continue
+            t = (m.get("text") or "").lower()
+            win = None
+            if any(w in t for w in ["ربحت","رابحة","won","win"]):
+                win = True
+            elif any(w in t for w in ["خسرت","خاسرة","lost","lose"]):
+                win = False
+            if win is None:
+                continue
+            rt = m.get("reply_to_message") or {}
+            mid = str(rt.get("message_id",""))
+            op = st.get("open", {}).get(mid)
+            d = day_obj(st)
+            if op is None:
+                tg_send("⚠️ رد على رسالة الإشارة مباشرة (Reply) لأسجل النتيجة")
+                continue
+            del st["open"][mid]
+            d["trades"] += 1
+            if win:
+                d["wins"] += 1
+                d["cl"] = 0
+            else:
+                d["losses"] += 1
+                d["cl"] += 1
+                if d["cl"] >= STOP_AFTER_LOSSES:
+                    st["stop_until"] = time.time() + STOP_HOURS*3600
+                    d["cl"] = 0
+            wr = round(100*d["wins"]/d["trades"],1) if d["trades"] else 0
+            pnl = round(d["wins"]*5.4 - d["losses"]*6, 2)
+            tg_send(f"💰 سُجلت: {'✅' if win else '❌'}\n• اليوم: {d['trades']} صفقة | فوز {wr}%\n• صافي تقديري: {pnl:+.2f}$")
+        st["tg_offset"] = off
     except Exception as e:
-        log.error(f"TG: {e}")
+        log.warning(f"listen: {e}")
+
+def scan(st):
+    d = day_obj(st)
+    if time.time() < st.get("stop_until", 0):
+        log.info("موقوف مؤقتاً (خسائر متتالية)")
+        return
+    if d["alerts"] >= MAX_ALERTS_DAY:
+        return
+    if d["trades"] >= MAX_TRADES_DAY:
+        return
+    for sym in SYMBOLS:
+        df = fetch5m(sym)
+        if df is None or len(df) < 60:
+            continue
+        rsi, bbu, bbl, sd = indicators(df)
+        i = len(df) - 1
+        ct = df.index[i]
+        key = ct.isoformat()
+        lastmap = st.setdefault("last_sig", {})
+        if lastmap.get(sym) == key:
+            continue
+        r = float(rsi.iloc[i])
+        cl = float(df["Close"].iloc[i])
+        bu = float(bbu.iloc[i])
+        bl = float(bbl.iloc[i])
+        sdv = float(sd.iloc[i])
+        dr = None
+        if r >= RSI_HI and cl >= bu:
+            dr = "PUT"
+        elif r <= RSI_LO and cl <= bl:
+            dr = "CALL"
+        if dr is None:
+            continue
+        lastmap[sym] = key
+        d["alerts"] += 1
+        over = abs(cl - (bu if dr == "PUT" else bl)) / sdv if sdv > 0 else 0.0
+        exp = datetime.now(timezone.utc) + timedelta(minutes=EXPIRY_MIN)
+        arrow = "🔴 PUT (هبوط)" if dr == "PUT" else "🟢 CALL (صعود)"
+        txt = (f"🎯 *إشارة H2 — تشبع + بولينجر*\n\n"
+               f"• الزوج: *{fmt_sym(sym)}*\n"
+               f"• الاتجاه: {arrow}\n"
+               f"• سعر الإشارة: {fmt_px(cl)}\n"
+               f"• السبب: RSI {r:.1f} + إغلاق خارج الباند بمقدار {over:.1f}σ\n\n"
+               f"⏱️ ادخل خلال 60 ثانية\n"
+               f"⌛ الانتهاء: 15 دقيقة (حتى {exp.strftime('%H:%M')} UTC)\n"
+               f"💰 شرط الـ payout: 85% فأعلى فقط\n\n"
+               f"📊 تنبيهات اليوم: {d['alerts']}/{MAX_ALERTS_DAY}\n"
+               f"📝 بعد الصفقة رد على الرسالة: ربحت / خسرت")
+        mid_id = tg_send(txt)
+        if mid_id:
+            st.setdefault("open", {})[str(mid_id)] = {"sym": sym, "dr": dr, "px": cl}
+        save_state(st)
+        time.sleep(0.5)
 
 def main():
-    report = build_report()
-    print("\n" + "=" * 60)
-    print(report)
-    print("=" * 60)
-    send_telegram(report)
+    st = load_state()
+    d = day_obj(st)
+    if st.get("boot_date") != d["date"]:
+        st["boot_date"] = d["date"]
+        tg_send(f"🚀 بوت H2 بدأ\n• أزواج: {len(SYMBOLS)}\n• سقف تنبيهات: {MAX_ALERTS_DAY}/يوم\n• سقف صفقات: {MAX_TRADES_DAY}/يوم\n• توقف تلقائي: {STOP_AFTER_LOSSES} خسائر متتالية = {STOP_HOURS} ساعات")
+    listen(st)
+    scan(st)
+    save_state(st)
+    log.info("done")
 
 if __name__ == "__main__":
-    try:
-        main()
-    except KeyboardInterrupt:
-        print("stopped")
-    except Exception as e:
-        logging.exception(f"fatal: {e}")
-        raise
+    main()
