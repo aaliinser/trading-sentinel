@@ -2,13 +2,13 @@
 # -*- coding: utf-8 -*-
 """
 =====================================================================
-غيث المزدوج — v27.2 (سعر حي حقيقي في تنبيهات التجهيز)
+غيث المزدوج — v28 الرشيقة (قلب قوي، دهون محذوفة)
 =====================================================================
-منطق v27.2:
-- المستويات المرشحة: دعم/مقاومة 60 شمعة + أرقام 000 (باتجاه الترند)
-- كل حراس v27 محفوظة: الاندفاع، الانحراف، RSI، ADX، لمس/رفض/تأكيد
-- النجمة ⭐ = توافق سوينغ + 000 (إشارة أقوى)
-- جديد: 👀 تعرض السعر الحي اللحظي الحقيقي (لا إغلاق الشمعة)
+منطق v28:
+- الماسح: ترند + مستوى (سوينغ/000 ضمن 1.0 ATR) + جودة ≥2
+- القناص: لمسة + رفض + تأكيد + منطقة انحراف + جلسة (7 فحوص فقط)
+- محذوف: بوابات ADX و RSI والمساحة (كانت تخنق الإشارات)
+- حارس الاندفاع 2.5 ATR (للاندفاعات المتطرفة فقط)
 =====================================================================
 """
 import os, sys, time, json, random, logging, threading
@@ -86,13 +86,13 @@ class Config:
     DAILY_TGT=env_float("DAILY_PROFIT_TARGET",999999.0); CD_LOS=max(env_int("COOLDOWN_AFTER_LOSSES",2),1)
     CD_MIN=max(env_int("COOLDOWN_MINUTES",120),0); RISK_GATE=env_bool("RISK_GATE_ENABLED",False)
     HR_START=env_int("TRADE_HOUR_START",7); HR_END=env_int("TRADE_HOUR_END",21)
-    MIN_SCORE=min(max(env_int("MIN_SIGNAL_SCORE",3),1),4); MAX_SC=4
+    MIN_SCORE=min(max(env_int("MIN_SIGNAL_SCORE",2),1),4); MAX_SC=4
     EMA_F=35; EMA_S=50; RSI_P=14; ADX_P=14; ATR_P=14; ADX_M15=18.0; ADX_H1=20.0; LVL_LB=60
-    MAX_DIST_EMA=2.0; MIN_SPACE=0.3
-    LVL_PROX=env_float("LEVEL_PROXIMITY_ATR",0.6)
+    MAX_DIST_EMA=3.0; MIN_SPACE=0.3
+    LVL_PROX=env_float("LEVEL_PROXIMITY_ATR",1.0)
     RSI_C_MIN=38.0; RSI_C_MAX=62.0; RSI_P_MIN=38.0; RSI_P_MAX=62.0
-    MAX_DEV=env_float("MAX_DEV",0.0010); MAX_AHEAD=env_float("MAX_AHEAD",0.0004)
-    TOUCH_TOL=0.0003; REJ_BODY=0.35
+    MAX_DEV=env_float("MAX_DEV",0.0020); MAX_AHEAD=env_float("MAX_AHEAD",0.0008)
+    TOUCH_TOL=env_float("TOUCH_TOLERANCE",0.0005); REJ_BODY=env_float("REJECTION_BODY",0.30)
     LVL_EXP=env_int("LEVEL_EXPIRY_HOURS",3)
     WATCH_CD=env_int("WATCH_ALERT_COOLDOWN_SEC",3600); WATCH_TOL=0.5
     RN_LARGE=0.5; RN_SMALL=0.005; SCAN_INT=env_int("SCAN_INTERVAL_SECONDS",60)
@@ -100,11 +100,8 @@ class Config:
     CACHE_TTL=env_int("CACHE_TTL_SECONDS",45)
     STATE=os.getenv("STATE_FILE","ghaith_state.json"); LOG=os.getenv("LOG_FILE","ghaith_bot.log"); MIN_R=200
     MAJOR_PAIRS = ["EURUSD=X", "GBPUSD=X", "USDJPY=X", "AUDUSD=X", "USDCAD=X", "USDCHF=X"]
-    ADX_MIN=env_float("ADX_MIN",22.0)
-    RSI_CALL_MAX=env_float("RSI_CALL_MAX",48.0)
-    RSI_PUT_MIN=env_float("RSI_PUT_MIN",52.0)
     WICK_BODY=env_float("WICK_BODY_RATIO",2.0)
-    IMPULSE_ATR=env_float("IMPULSE_GUARD_ATR",1.0)
+    IMPULSE_ATR=env_float("IMPULSE_GUARD_ATR",2.5)
     CONFL_ATR=env_float("CONFLUENCE_ATR",0.3)
 
 def setup_logger():
@@ -282,10 +279,9 @@ class Scan:
         if not s._dist(last): s.ls[sym]=lct; return None
         dr=s._dir(last,prev,h1)
         if dr is None: s.ls[sym]=lct; return None
-        if not s._sp(last,dr): s.ls[sym]=lct; return None
         lv,lt=s._lvl(last,dr)
         sc=s._sc(last,prev,h1,lv); tot=sum(sc.values())
-        if lv is None or tot<max(Config.MIN_SCORE,3): s.ls[sym]=lct; return None
+        if lv is None or tot<max(Config.MIN_SCORE,2): s.ls[sym]=lct; return None
         la=s.la.get(sym); atr=float(last["ATR"]) if pd.notna(last.get("ATR")) else None
         if la is not None and atr:
             pl,pts=la
@@ -305,12 +301,6 @@ class Scan:
         if not s._v(last["Close"],last["EMA_35"],last["ATR"]): return False
         c,e,a=float(last["Close"]),float(last["EMA_35"]),float(last["ATR"])
         return a>0 and abs(c-e)<=Config.MAX_DIST_EMA*a
-    def _sp(s,last,dr):
-        if not s._v(last.get("ATR"),last.get("H20"),last.get("L20"),last.get("Close")): return True
-        a,c=float(last["ATR"]),float(last["Close"])
-        if a<=0: return True
-        h,l=float(last["H20"]),float(last["L20"]); ms=Config.MIN_SPACE*a
-        return (h-c)>=ms if dr=="CALL" else (c-l)>=ms
     def _sc(s,last,prev,h1,lv):
         sc={"T":0,"M":0,"L":0,"Q":0}
         if s._v(last["EMA_35"],last["EMA_50"],prev["EMA_35"],h1["EMA_35"],h1["EMA_50"],last["Close"],h1["Close"]):
@@ -377,7 +367,7 @@ class SnR: WAITING="W"; BROKEN="B"; SIGNAL="S"; EXPIRED="E"; DEVIATED="D"
 
 class Sniper:
     def __init__(s,lg,nt,st): s.lg=lg; s.nt=nt; s.st=st; s.last={}
-    def check(s,w,d5,d15r,live=None):
+    def check(s,w,d5,live=None):
         if d5 is None or d5.empty or len(d5)<20: return SnR.WAITING,None
         if time.time()-w.get("created_at",0)>Config.LVL_EXP*3600: return SnR.EXPIRED,None
         lct=d5.index[-1]; wk=f"{w['symbol']}|{w['level']}"
@@ -385,7 +375,6 @@ class Sniper:
         if w.get("scores",{}).get("T",0)!=1: s.last[wk]=lct; return SnR.WAITING,None
         conf,rej,prev=d5.iloc[-1],d5.iloc[-2],d5.iloc[-3]
         lv=float(w["level"]); dr=w["direction"]; close=float(conf["Close"])
-        if not s._sp(d5,dr,close): s.last[wk]=lct; return SnR.WAITING,None
         brk=live if live else close
         if dr=="CALL" and brk<lv-0.0015*brk: s.last[wk]=lct; return SnR.BROKEN,None
         if dr=="PUT" and brk>lv+0.0015*brk: s.last[wk]=lct; return SnR.BROKEN,None
@@ -394,12 +383,10 @@ class Sniper:
         rej_close=float(rej["Close"])
         if dr=="CALL" and close<rej_close: s.last[wk]=lct; return SnR.WAITING,None
         if dr=="PUT" and close>rej_close: s.last[wk]=lct; return SnR.WAITING,None
-        if not s._adx(d15r): s.last[wk]=lct; return SnR.WAITING,None
         if not s._impulse(d5,dr): s.last[wk]=lct; return SnR.WAITING,None
         eff=live if live else close
         ok,reason=s._dev(lv,eff,close,dr)
         if not ok: s._alert(w,lv,eff,reason); s.last[wk]=lct; return SnR.DEVIATED,None
-        if not s._rsi(d15r,dr): s.last[wk]=lct; return SnR.WAITING,None
         h=ntp_now().hour
         if not (Config.HR_START<=h<Config.HR_END): s.last[wk]=lct; return SnR.WAITING,None
         zl,zh=s._zone(lv,dr)
@@ -407,14 +394,8 @@ class Sniper:
         sig={"id":f"{w['symbol']}|{lct.isoformat()}|{dr}","symbol":w["symbol"],"name":w["name"],"star":star,
              "direction":dr,"level":lv,"level_type":w.get("level_type","UNKNOWN"),"entry_price":eff,
              "entry_zone_low":zl,"entry_zone_high":zh,"signal_score":w["signal_score"]+1,
-             "max_score":w["max_score"]+1,"candle_time":lct,"expiry_minutes":Config.EXPIRY_MIN,
-             "rsi":float(d15r.iloc[-1]["RSI"]) if pd.notna(d15r.iloc[-1]["RSI"]) else None}
+             "max_score":w["max_score"]+1,"candle_time":lct,"expiry_minutes":Config.EXPIRY_MIN}
         s.last[wk]=lct; return SnR.SIGNAL,sig
-    def _adx(s,df15):
-        if df15 is None or df15.empty: return True
-        last=df15.iloc[-1]
-        if not pd.notna(last.get("ADX")): return True
-        return float(last["ADX"])>=Config.ADX_MIN
     def _impulse(s,d5,dr):
         if d5 is None or len(d5)<5: return True
         last3=d5.iloc[-4:-1]
@@ -431,14 +412,6 @@ class Sniper:
         n=12
         if dr=="PUT": return float(rej["High"])>=float(d5["High"].iloc[-n:].max())*0.9999
         return float(rej["Low"])<=float(d5["Low"].iloc[-n:].min())*1.0001
-    def _sp(s,df5,dr,close):
-        if df5.empty or len(df5)<20: return True
-        last=df5.iloc[-1]; a=float(last["ATR"]) if pd.notna(last.get("ATR")) else 0
-        if a<=0: return True
-        h=float(last["H20"]) if pd.notna(last.get("H20")) else close
-        l=float(last["L20"]) if pd.notna(last.get("L20")) else close
-        ms=Config.MIN_SPACE*a
-        return (h-close)>=ms if dr=="CALL" else (close-l)>=ms
     def _touch(s,last,lv,dr,close):
         t=Config.TOUCH_TOL*close
         return float(last["Low"])<=lv+t if dr=="CALL" else float(last["High"])>=lv-t
@@ -465,12 +438,6 @@ class Sniper:
             if up>Config.MAX_DEV: return False,"السعر طلع بعيد فوق المستوى"
             if dn>Config.MAX_AHEAD: return False,"السعر لم يصل للمستوى بعد"
         return True,""
-    def _rsi(s,df15,dr):
-        if df15 is None or df15.empty: return True
-        last=df15.iloc[-1]
-        if not pd.notna(last.get("RSI")): return True
-        r=float(last["RSI"])
-        return r<=Config.RSI_CALL_MAX if dr=="CALL" else r>=Config.RSI_PUT_MIN
     def _alert(s,w,lv,live,reason):
         lt=f"{lv:.3f}" if lv>50 else f"{lv:.5f}"; pt=f"{live:.3f}" if live>50 else f"{live:.5f}"
         s.nt.send_message(f"🛡️ حماية الانحراف\n\n• الزوج: {w['name']}\n• المستوى: {lt}\n• السعر الحي: {pt}\n• السبب: {reason}\n• الحالة: تم إلغاء الإشارة 🛡️")
@@ -563,7 +530,7 @@ class TG:
         if sg["direction"]=="CALL": ideal=f"🎯 الدخول المثالي: انتظر السعر يقترب من {zl} (قاع المنطقة) ثم ادخل CALL\n"
         else: ideal=f"🎯 الدخول المثالي: انتظر السعر يقترب من {zh} (قمة المنطقة) ثم ادخل PUT\n"
         star="⭐ إشارة مميزة — توافق مستوى سوينغ مع رقم 000\n" if sg.get("star") else ""
-        s.send(f"🟢 توصية ذهبية 🚀{Config.MODE_LABEL}\n\n{star}• الزوج: {sg['name']}\n• المستوى: {s._fmt(sg['level'])} ({sg['level_type']})\n• الاتجاه: {d}\n🎯 منطقة الدخول الذهبية: من {zl} إلى {zh}\n{ideal}💰 السعر الحي الآن: {s._fmt(sg['entry_price'])}\n🚫 لا تدخل إذا خرج السعر خارج المنطقة\n• مدة الصفقة: {sg['expiry_minutes']} دقيقة\n• جودة الإشارة: {sg['signal_score']}/{sg['max_score']}\n• البروتوكول: غيث المزدوج (v27.2)\n• {s.risk.txt()}\n\n📝 بعد الصفقة رد بـ: ربحت / خسرت")
+        s.send(f"🟢 توصية ذهبية 🚀{Config.MODE_LABEL}\n\n{star}• الزوج: {sg['name']}\n• المستوى: {s._fmt(sg['level'])} ({sg['level_type']})\n• الاتجاه: {d}\n🎯 منطقة الدخول الذهبية: من {zl} إلى {zh}\n{ideal}💰 السعر الحي الآن: {s._fmt(sg['entry_price'])}\n🚫 لا تدخل إذا خرج السعر خارج المنطقة\n• مدة الصفقة: {sg['expiry_minutes']} دقيقة\n• جودة الإشارة: {sg['signal_score']}/{sg['max_score']}\n• البروتوكول: غيث المزدوج (v28 الرشيقة)\n• {s.risk.txt()}\n\n📝 بعد الصفقة رد بـ: ربحت / خسرت")
     def listen(s):
         if not s.en: return
         try:
@@ -618,7 +585,7 @@ class Bot:
             offset=get_ntp_offset()
             ntp_status=f"✅ {offset:+.3f}s" if HAS_NTP and offset!=0 else ("⚠️ غير متاح" if not HAS_NTP else "✅ متزامن")
             risk_warn = "\n\n🔴🔴 تحذير: RISK_GATE_ENABLED غير مفعّل — إدارة المخاطر معطّلة! فعّلها للتداول الآمن." if not Config.RISK_GATE else ""
-            s.tg.send(f"🚀 غيث المزدوج (v27.2){Config.MODE_LABEL} بدأ\n\n• الرموز: {len(Config.SYMBOLS)} (حقيقية فقط)\n• الماسح: {Config.SCAN_TF} | القناص: {Config.SNIPER_TF} | الترند: {Config.TREND_TF}\n• مدة الصفقة: {Config.EXPIRY_MIN} دقيقة\n• الجودة: {Config.MIN_SCORE}/{Config.MAX_SC}\n• نافذة الجلسات: {Config.HR_START}-{Config.HR_END} UTC\n• 🕐 NTP: {ntp_status}\n• 🛡️ حارس الشموع: مفعّل\n• 🎯 مستويات: سوينغ + 000 باتجاه الترند\n• ⭐ توافق سوينغ+000 = إشارة أقوى\n• 🛡️ حارس الاندفاع: مفعّل\n• 📊 ADX≥22 | RSI≤55/≥45 | رفض 3 مسارات\n• 📝 النتائج: يدوية 100%\n• مراقبات محفوظة: {len(s.watch)}{risk_warn}")
+            s.tg.send(f"🚀 غيث المزدوج (v28 الرشيقة){Config.MODE_LABEL} بدأ\n\n• الرموز: {len(Config.SYMBOLS)} (حقيقية فقط)\n• الماسح: {Config.SCAN_TF} | القناص: {Config.SNIPER_TF} | الترند: {Config.TREND_TF}\n• مدة الصفقة: {Config.EXPIRY_MIN} دقيقة\n• الجودة: {Config.MIN_SCORE}/{Config.MAX_SC}\n• نافذة الجلسات: {Config.HR_START}-{Config.HR_END} UTC\n• 🕐 NTP: {ntp_status}\n• 🛡️ حارس الشموع: مفعّل\n• 🎯 مستويات: سوينغ + 000 (ضمن {Config.LVL_PROX} ATR)\n• ✂️ v28: ترند+مستوى+لمس+رفض+تأكيد\n• 🛡️ حارس الاندفاع: {Config.IMPULSE_ATR} ATR (متطرف فقط)\n• 📏 منطقة الانحراف: ±{Config.MAX_DEV*100:.2f}%/{Config.MAX_AHEAD*100:.2f}%\n• 📝 النتائج: يدوية 100%\n• مراقبات محفوظة: {len(s.watch)}{risk_warn}")
     def _scan(s):
         for sym in Config.SYMBOLS:
             if not is_real_market_symbol(sym): continue
@@ -647,11 +614,10 @@ class Bot:
                 sym=w["symbol"]
                 if not is_real_market_symbol(sym): continue
                 d5=s.data.fetch(sym,Config.SNIPER_TF,period_for(Config.SNIPER_TF))
-                d15=s.data.fetch(sym,Config.SCAN_TF,period_for(Config.SCAN_TF))
-                if d5 is None or d15 is None or d5.empty or d15.empty: continue
-                i5=s.ind.add(d5); i15=s.ind.add(d15)
+                if d5 is None or d5.empty: continue
+                i5=s.ind.add(d5)
                 live=s.data.live(sym)
-                res,pay=s.snip.check(w,i5,i15,live)
+                res,pay=s.snip.check(w,i5,live)
                 if res==SnR.EXPIRED or res==SnR.DEVIATED:
                     with s._wl: s.watch.pop(k,None)
                     s.lg.info(f"مراقبة أُلغيت ({res}): {k}")
