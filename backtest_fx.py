@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-غيث — 10 نسخ متدرجة القوة (غيّر VERSION من 1 إلى 10)
+غيث — 10 نسخ متدرجة (VERSION يقرأ من env تلقائياً)
 """
 import os, sys, time, logging
 import numpy as np, pandas as pd
@@ -25,10 +25,8 @@ except ImportError:
 
 import requests
 
-# ============================================================
-# ⭐ غيّر هذا الرقم من 1 إلى 10 ثم Commit وشغّل الـ workflow
-VERSION = 1
-# ============================================================
+# ⭐ VERSION يُقرأ من env (يرسله الـ workflow تلقائياً)
+VERSION = int(os.getenv("VERSION", "1"))
 
 F_SESSION_TIGHT = VERSION >= 2
 F_ADX_TREND = VERSION >= 3
@@ -318,7 +316,7 @@ def rsi_ok(rsi, dr):
     return r >= 33.0
 
 def collect_candidates(sym):
-    log.info(f"=== {sym} ===")
+    log.info(f"=== {sym} (v{VERSION}) ===")
     d15 = fetch(sym, SCAN_TF, f"{HISTORY_DAYS}d")
     d5 = fetch(sym, SNIPER_TF, "60d")
     d1h = fetch(sym, TREND_TF, f"{HISTORY_DAYS}d")
@@ -468,9 +466,9 @@ def build_report():
 
     filters = []
     if F_SESSION_TIGHT:
-        filters.append("جلسة ضيقة 7-17")
+        filters.append("جلسة 7-17")
     if F_ADX_TREND:
-        filters.append("ADX ساعة >= 20")
+        filters.append("ADX ساعة>=20")
     if F_REJ_STRONG:
         filters.append("رفض قوي")
     if F_CONF_MOM:
@@ -478,13 +476,13 @@ def build_report():
     if F_DEV_TIGHT:
         filters.append("انحراف أضيق")
     if F_SCORE3:
-        filters.append("جودة >= 3")
+        filters.append("جودة>=3")
     if F_COOLDOWN:
-        filters.append("تبريد 4 ساعات")
+        filters.append("تبريد 4س")
     if F_TREND_GAP:
         filters.append("فجوة ترند")
     if F_ADX22:
-        filters.append("ADX 15د >= 22")
+        filters.append("ADX 15د>=22")
 
     all_cands = {}
     for sym in SYMBOLS:
@@ -512,16 +510,15 @@ def build_report():
 
     msg = f"🏗️ *النسخة رقم {VERSION}*\n"
     if filters:
-        msg += f"🧩 الفلاتر: {', '.join(filters)}\n"
+        msg += f"🧩 {', '.join(filters)}\n"
     else:
-        msg += f"🧩 الفلاتر: الأساس فقط\n"
+        msg += f"🧩 الأساس فقط\n"
     msg += f"\n🎯 *الأرقام:*\n"
     msg += f"• صفقات: *{overall['total']}*\n"
     msg += f"• فوز: *{overall['wr']}%*\n"
-    msg += f"• صافي: *{overall['pnl']:+.2f}$*\n"
-    msg += f"• التعادل: {BREAKEVEN}%\n\n"
+    msg += f"• صافي: *{overall['pnl']:+.2f}$*\n\n"
 
-    msg += f"📈 *أفضل 5 أزواج:*\n"
+    msg += f"📈 أفضل 5:\n"
     for idx in range(min(5, len(sym_stats))):
         sym, s = sym_stats[idx]
         if s["total"] >= 10:
@@ -529,9 +526,9 @@ def build_report():
 
     msg += f"\n🧪 صلابة: "
     if robust:
-        msg += f"✅ ({wr1}% | {wr2}%)\n"
+        msg += f"✅ ({wr1}%|{wr2}%)\n"
     else:
-        msg += f"❌ ({wr1}% | {wr2}%)\n"
+        msg += f"❌ ({wr1}%|{wr2}%)\n"
 
     msg += f"\n💡 الحكم: "
     if robust and overall["wr"] >= 55:
@@ -539,13 +536,13 @@ def build_report():
     elif robust and overall["wr"] >= BREAKEVEN:
         msg += f"🟡 هامشية صلبة\n"
     elif overall["wr"] >= BREAKEVEN:
-        msg += f"🟠 فوق التعادل غير صلبة\n"
+        msg += f"🟠 فوق التعادل\n"
     else:
         msg += f"🔴 مرفوضة\n"
     if overall["total"] < 100:
-        msg += f"⚠️ صفقات قليلة (<100) = النتيجة غير موثوقة\n"
+        msg += f"⚠️ صفقات قليلة\n"
 
-    msg += f"\n⏱️ {time.time()-start:.0f} ثانية"
+    msg += f"\n⏱️ {time.time()-start:.0f}ث"
     return msg
 
 def send_telegram(text):
