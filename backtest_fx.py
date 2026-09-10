@@ -2,10 +2,14 @@
 # -*- coding: utf-8 -*-
 """
 =====================================================================
-غيث ترند-بولباك v1 — باك تست فوركس صادق
+غيث — باك تست استراتيجية الفيديو: تقاطع EMA7 / EMA12
 =====================================================================
-فلسفة: مع الترند الكبير (4H)، عند ارتداد صغير (1H)
-منطق رياضي عادل: R:R = 1:2 + SL واضح + BE عند 1R
+القاعدة المختبرة (حرفياً من الفيديو):
+- تقاطع EMA7 فوق EMA12 عند إغلاق الشمعة = CALL
+- تقاطع EMA7 تحت EMA12 عند إغلاق الشمعة = PUT
+- تقييم بخيارات ثنائية: فوز إذا كان سعر الانتهاء باتجاه الصفقة
+- ZigZag مستبعد (يعيد رسم نفسه = غير قابل للاختبار بصدق)
+نختبر: 3 فريمات × 3 فترات انتهاء × 8 أزواج × صلابة نصفين
 =====================================================================
 """
 import os, sys, time, logging
@@ -15,12 +19,6 @@ try:
     import yfinance as yf
 except ImportError:
     print("pip install yfinance"); sys.exit(1)
-
-try:
-    import pandas_ta as ta
-    HAS_TA = True
-except ImportError:
-    HAS_TA = False
 
 try:
     from dotenv import load_dotenv
@@ -36,19 +34,18 @@ SYMBOLS = [
     "USDCAD=X", "NZDUSD=X", "USDCHF=X", "EURJPY=X"
 ]
 
-TREND_TF = "1h"    # نستخدم 1H للترند (أسرع، والنتيجة مشابهة لـ 4H في الاتجاه)
-SIGNAL_TF = "1h"
-EMA_TREND_FAST = 50
-EMA_TREND_SLOW = 200
-EMA_VALUE_FAST = 21
-EMA_VALUE_SLOW = 50
-ATR_P = 14
-RISK_PER_TRADE = 0.0075   # 0.75% من الحساب
-RR_RATIO = 2.0            # هدف = 2R
-SL_BUFFER_ATR = 0.5       # مسافة إضافية للوقف
-SPREAD_PIPS = 1.5         # سبريد وسطي للأزواج الرئيسية
-MAX_HOLD_BARS = 48        # 48 ساعة خروج زمني
-MIN_TRADES_ROBUST = 30    # حد أدنى لاختبار الصلابة
+TIMEFRAMES = [
+    ("5m",  "60d"),    # 60 يوماً
+    ("15m", "730d"),   # سنتان
+    ("1h",  "730d"),   # سنتان
+]
+
+EXPIRIES = [1, 2, 3]   # عدد شموع الانتهاء بعد شمعة الإشارة
+EMA_FAST = 7
+EMA_SLOW = 12
+BREAKEVEN = 52.63      # نقطة التعادل عند payout 90%
+MIN_TRADES = 100       # حد أدنى لاعتبار التركيبة ذات معنى
+MIN_HALF = 30          # حد أدنى لكل نصف في اختبار الصلابة
 
 TG_TOKEN = os.getenv("TG_TOKEN","").strip()
 TG_CHAT = os.getenv("TG_CHAT","").strip()
@@ -59,14 +56,7 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
     handlers=[logging.StreamHandler(sys.stdout)]
 )
-log = logging.getLogger("FX_Backtest")
-
-def pip_value(sym):
-    """قيمة النقطة لكل زوج"""
-    s = sym.replace("=X","")
-    if "JPY" in s:
-        return 0.01
-    return 0.0001
+log = logging.getLogger("VideoStrategy_BT")
 
 # ============ الجلب ============
 def fetch(sym, iv, period):
@@ -92,415 +82,187 @@ def fetch(sym, iv, period):
             time.sleep(2 * attempt)
     return None
 
-# ============ المؤشرات ============
-def add_ind(df):
-    if df is None or len(df) < 250:
-        return df
-    df = df.copy()
-    if HAS_TA:
-        df["EMA50"]  = ta.ema(df["Close"], length=EMA_TREND_FAST)
-        df["EMA200"] = ta.ema(df["Close"], length=EMA_TREND_SLOW)
-        df["EMA21"]  = ta.ema(df["Close"], length=EMA_VALUE_FAST)
-        df["EMA50v"] = ta.ema(df["Close"], length=EMA_VALUE_SLOW)
-        a = ta.atr(df["High"], df["Low"], df["Close"], length=ATR_P)
-        if a is not None: df["ATR"] = a
-    else:
-        df["EMA50"]  = df["Close"].ewm(span=EMA_TREND_FAST, adjust=False).mean()
-        df["EMA200"] = df["Close"].ewm(span=EMA_TREND_SLOW, adjust=False).mean()
-        df["EMA21"]  = df["Close"].ewm(span=EMA_VALUE_FAST, adjust=False).mean()
-        df["EMA50v"] = df["Close"].ewm(span=EMA_VALUE_SLOW, adjust=False).mean()
-        pc = df["Close"].shift(1)
-        tr = pd.concat([df["High"]-df["Low"],
-                        (df["High"]-pc).abs(),
-                        (df["Low"]-pc).abs()], axis=1).max(axis=1)
-        df["ATR"] = tr.ewm(alpha=1/ATR_P, min_periods=ATR_P).mean()
-    df["BODY"]  = (df["Close"] - df["Open"]).abs()
-    df["RANGE"] = df["High"] - df["Low"]
-    df["UWICK"] = df["High"] - df[["Open","Close"]].max(axis=1)
-    df["LWICK"] = df[["Open","Close"]].min(axis=1) - df["Low"]
-    return df
-
-# ============ فحص الإشارة ============
-def is_rejection_signal(row, prev_row, dr):
-    """
-    شمعة رفض = Pin bar أو Engulfing باتجاه الترند
-    """
-    body = float(row["BODY"])
-    rng = float(row["RANGE"])
-    if rng <= 0 or body <= 0:
-        return False
-    # Pin bar
-    if dr == "CALL":
-        lw = float(row.get("LWICK", 0)) if pd.notna(row.get("LWICK")) else 0
-        pin = lw >= 2.0 * body and body / rng < 0.4
-        eng = row["Close"] > row["Open"] and prev_row["Close"] < prev_row["Open"] and row["Close"] >= prev_row["Open"] and row["Open"] <= prev_row["Close"]
-        return pin or eng
-    else:
-        uw = float(row.get("UWICK", 0)) if pd.notna(row.get("UWICK")) else 0
-        pin = uw >= 2.0 * body and body / rng < 0.4
-        eng = row["Close"] < row["Open"] and prev_row["Close"] > prev_row["Open"] and row["Close"] <= prev_row["Open"] and row["Open"] >= prev_row["Close"]
-        return pin or eng
-
-def in_value_zone(row, dr):
-    """السعر في منطقة القيمة (بين EMA21 و EMA50)"""
-    if dr == "CALL":
-        return row["Low"] <= row["EMA50v"] and row["Low"] >= row["EMA21"]
-    else:
-        return row["High"] >= row["EMA50v"] and row["High"] <= row["EMA21"]
-
-def trend_direction(row):
-    """اتجاه الترند من EMA50 و EMA200"""
-    if row["EMA50"] > row["EMA200"] and row["Close"] > row["EMA50"]:
-        return "CALL"
-    if row["EMA50"] < row["EMA200"] and row["Close"] < row["EMA50"]:
-        return "PUT"
-    return None
-
-# ============ محاكاة الصفقة ============
-def simulate_trade(df, entry_idx, dr, entry_price, sl, tp, pip):
-    """
-    تحاكي الصفقة بعد الدخول حتى:
-      - ضرب TP = فوز بـ +2R
-      - ضرب SL = خسارة بـ -1R
-      - BE نشط عند 1R
-      - 48 ساعة خروج = إغلاق بسعر الإغلاق
-    """
-    initial_risk = abs(entry_price - sl)
-    tp_price = entry_price + (tp - entry_price)  # TP محسوب مسبقاً
-    sl_price = sl
-    be_price = entry_price
-    be_activated = False
-    result_r = 0.0
-    outcome = ""
-    bars_held = 0
-
-    # نبدأ من الشمعة التالية للدخول
-    for j in range(entry_idx + 1, min(entry_idx + MAX_HOLD_BARS + 1, len(df))):
-        bar = df.iloc[j]
-        bars_held += 1
-        high = float(bar["High"])
-        low  = float(bar["Low"])
-        close = float(bar["Close"])
-
-        if dr == "CALL":
-            # فحص SL أولاً (متحفظ)
-            if low <= sl_price:
-                if be_activated:
-                    result_r = 0.0
-                    outcome = "BE"
-                else:
-                    result_r = -1.0
-                    outcome = "SL"
-                break
-            # فحص TP
-            if high >= tp_price:
-                result_r = RR_RATIO
-                outcome = "TP"
-                break
-            # تفعيل BE عند 1R
-            if not be_activated and high >= entry_price + initial_risk:
-                be_activated = True
-                sl_price = be_price
-        else:  # PUT
-            if high >= sl_price:
-                if be_activated:
-                    result_r = 0.0
-                    outcome = "BE"
-                else:
-                    result_r = -1.0
-                    outcome = "SL"
-                break
-            if low <= tp_price:
-                result_r = RR_RATIO
-                outcome = "TP"
-                break
-            if not be_activated and low <= entry_price - initial_risk:
-                be_activated = True
-                sl_price = be_price
-    else:
-        # الخروج الزمني (48 ساعة)
-        if entry_idx + MAX_HOLD_BARS < len(df):
-            close_price = float(df.iloc[entry_idx + MAX_HOLD_BARS]["Close"])
-        else:
-            close_price = float(df.iloc[-1]["Close"])
-        if dr == "CALL":
-            result_r = (close_price - entry_price) / initial_risk
-        else:
-            result_r = (entry_price - close_price) / initial_risk
-        outcome = "TIME"
-
-    return result_r, outcome, bars_held
-
-# ============ الباك تست الكامل ============
-def backtest_symbol(sym):
-    log.info(f"=== {sym} ===")
-    df = fetch(sym, "1h", "730d")  # سنتان
-    if df is None or len(df) < 400:
-        log.warning(f"{sym}: بيانات غير كافية")
+# ============ جمع الإشارات ============
+def collect_signals(sym, iv, period):
+    df = fetch(sym, iv, period)
+    if df is None or len(df) < 100:
         return []
-    df = add_ind(df)
-    if df is None or len(df) < 300:
-        return []
+    close = df["Close"]
+    e7 = close.ewm(span=EMA_FAST, adjust=False).mean()
+    e12 = close.ewm(span=EMA_SLOW, adjust=False).mean()
+    signals = []
+    for i in range(1, len(df)):
+        p7, p12 = e7.iloc[i-1], e12.iloc[i-1]
+        c7, c12 = e7.iloc[i], e12.iloc[i]
+        if pd.isna(p7) or pd.isna(p12) or pd.isna(c7) or pd.isna(c12):
+            continue
+        if p7 <= p12 and c7 > c12:
+            dr = "CALL"
+        elif p7 >= p12 and c7 < c12:
+            dr = "PUT"
+        else:
+            continue
+        entry = float(close.iloc[i])
+        rec = {"time": df.index[i], "sym": sym, "dr": dr, "entry": entry}
+        for exp in EXPIRIES:
+            j = i + exp
+            if j < len(df):
+                rec[f"exit_{exp}"] = float(close.iloc[j])
+            else:
+                rec[f"exit_{exp}"] = None
+        signals.append(rec)
+    return signals
 
+# ============ تقييم ============
+def evaluate(signals, exp):
     trades = []
-    spread = SPREAD_PIPS * pip_value(sym)
-
-    # نمشي من شمعة 250 (لضمان استقرار EMA200)
-    for i in range(250, len(df)):
-        row = df.iloc[i]
-        prev = df.iloc[i-1]
-        if pd.isna(row["EMA200"]) or pd.isna(row["ATR"]):
+    for s in signals:
+        exit_price = s[f"exit_{exp}"]
+        if exit_price is None:
             continue
-
-        dr = trend_direction(row)
-        if dr is None:
-            continue
-
-        # نافذة 5 شموع سابقة للارتداد
-        window = df.iloc[max(0,i-10):i+1]
-        if dr == "CALL":
-            pullback = (window["Low"].min() <= window.iloc[-1]["EMA50v"]) and (row["Close"] > row["EMA21"])
+        entry = s["entry"]
+        if s["dr"] == "CALL":
+            win = exit_price > entry
         else:
-            pullback = (window["High"].max() >= window.iloc[-1]["EMA50v"]) and (row["Close"] < row["EMA21"])
-        if not pullback:
-            continue
-
-        if not in_value_zone(row, dr):
-            continue
-
-        if not is_rejection_signal(row, prev, dr):
-            continue
-
-        # الدخول عند إغلاق شمعة الإشارة + سبريد
-        entry_price = float(row["Close"])
-        atr = float(row["ATR"])
-        if dr == "CALL":
-            entry_price += spread / 2
-            sl = float(row["Low"]) - SL_BUFFER_ATR * atr
-            risk = entry_price - sl
-            tp = entry_price + RR_RATIO * risk
-        else:
-            entry_price -= spread / 2
-            sl = float(row["High"]) + SL_BUFFER_ATR * atr
-            risk = sl - entry_price
-            tp = entry_price - RR_RATIO * risk
-
-        if risk <= 0:
-            continue
-
-        # لا ندخل إذا كانت المخاطرة كبيرة جداً (شمعة عملاقة)
-        if risk > 3 * atr:
-            continue
-
-        r_result, outcome, bars = simulate_trade(df, i, dr, entry_price, sl, tp, pip_value(sym))
-
-        # تجنب التداولات المتقاربة جداً (cooldown 6 شموع)
-        if trades and (i - trades[-1]["idx"]) < 6:
-            continue
-
+            win = exit_price < entry
         trades.append({
-            "idx": i,
-            "time": df.index[i],
-            "symbol": sym,
-            "dr": dr,
-            "entry": entry_price,
-            "sl": sl,
-            "tp": tp,
-            "r": r_result,
-            "outcome": outcome,
-            "bars": bars,
+            "time": s["time"],
+            "sym": s["sym"],
+            "dr": s["dr"],
+            "win": win,
         })
-
-    log.info(f"{sym}: {len(trades)} صفقة")
     return trades
 
-# ============ التحليل ============
-def analyze(trades, label=""):
-    if not trades:
-        return None
+def stats(trades):
     total = len(trades)
-    wins = sum(1 for t in trades if t["r"] > 0)
-    losses = sum(1 for t in trades if t["r"] < 0)
-    be = sum(1 for t in trades if t["outcome"] == "BE")
-    tp = sum(1 for t in trades if t["outcome"] == "TP")
-    sl = sum(1 for t in trades if t["outcome"] == "SL")
-    time_out = sum(1 for t in trades if t["outcome"] == "TIME")
-    wr = 100 * wins / total if total else 0
-    avg_r = sum(t["r"] for t in trades) / total
-    total_r = sum(t["r"] for t in trades)
-    # Profit Factor
-    gross_win = sum(t["r"] for t in trades if t["r"] > 0)
-    gross_loss = abs(sum(t["r"] for t in trades if t["r"] < 0))
-    pf = gross_win / gross_loss if gross_loss > 0 else 0
-    # Max Drawdown على منحنى R
-    equity = np.cumsum([t["r"] for t in trades])
-    peak = np.maximum.accumulate(equity)
-    dd = equity - peak
-    max_dd = dd.min()
-    # أطول سلسلة خسائر
-    streak = 0
-    max_loss_streak = 0
-    for t in trades:
-        if t["r"] < 0:
-            streak += 1
-            max_loss_streak = max(max_loss_streak, streak)
-        else:
-            streak = 0
-    # متوسط الشموع
-    avg_bars = sum(t["bars"] for t in trades) / total
-    return {
-        "label": label,
-        "total": total,
-        "wins": wins, "losses": losses, "be": be,
-        "tp": tp, "sl": sl, "time_out": time_out,
-        "wr": round(wr, 1),
-        "avg_r": round(avg_r, 3),
-        "total_r": round(total_r, 2),
-        "pf": round(pf, 2),
-        "max_dd": round(max_dd, 2),
-        "max_loss_streak": max_loss_streak,
-        "avg_bars": round(avg_bars, 1),
-    }
+    if total == 0:
+        return None
+    wins = sum(1 for t in trades if t["win"])
+    wr = round(100 * wins / total, 2)
+    return {"total": total, "wins": wins, "wr": wr}
 
-# ============ اختبار الصلابة ============
 def robustness(trades):
-    if len(trades) < MIN_TRADES_ROBUST * 2:
-        return False, 0, 0, 0, 0
-    mid = len(trades) // 2
-    h1 = analyze(trades[:mid], "h1")
-    h2 = analyze(trades[mid:], "h2")
-    if not h1 or not h2:
-        return False, 0, 0, 0, 0
-    # صلابة: النصفان إيجابيان + متوسط R > 0.15
-    robust = h1["avg_r"] > 0.1 and h2["avg_r"] > 0.1 and h1["avg_r"] > 0 and h2["avg_r"] > 0
-    return robust, h1["avg_r"], h2["avg_r"], h1["wr"], h2["wr"]
+    if len(trades) < MIN_HALF * 2:
+        return False, 0, 0
+    mid_time = trades[len(trades)//2]["time"]
+    h1 = [t for t in trades if t["time"] < mid_time]
+    h2 = [t for t in trades if t["time"] >= mid_time]
+    s1, s2 = stats(h1), stats(h2)
+    if not s1 or not s2:
+        return False, 0, 0
+    robust = s1["wr"] >= BREAKEVEN and s2["wr"] >= BREAKEVEN
+    return robust, s1["wr"], s2["wr"]
 
-# ============ التقرير ============
-def fmt_sym(s):
-    b = s.replace("=X","")
-    return f"{b[:3]}/{b[3:]}" if len(b) == 6 else s
-
-def build_report():
-    log.info(f"🏗️ بدء باك تست غيث ترند-بولباك v1 (8 أزواج × 730 يوم)")
-    start = time.time()
-    all_trades = {}
-    for sym in SYMBOLS:
-        try:
-            all_trades[sym] = backtest_symbol(sym)
-            time.sleep(1.5)
-        except Exception as e:
-            log.error(f"{sym}: {e}")
-            all_trades[sym] = []
-
-    # إحصاءات كل زوج
-    sym_stats = []
-    for sym, trades in all_trades.items():
-        s = analyze(trades, fmt_sym(sym))
-        if s:
-            sym_stats.append((sym, s))
-
-    # إحصاءات عامة
-    all_flat = [t for trades in all_trades.values() for t in trades]
-    overall = analyze(all_flat, "الإجمالي")
-    if not overall:
-        return "❌ لا توجد صفقات كافية"
-
-    robust, r1, r2, wr1, wr2 = robustness(all_flat)
-
-    # تقسيم حسب النتائج
-    outcomes = {"TP":0, "SL":0, "BE":0, "TIME":0}
-    for t in all_flat:
-        outcomes[t["outcome"]] += 1
-
-    # تقسيم حسب الجلسة (UTC)
-    sess_stats = {"لندن": [], "نيويورك": [], "آسيا": [], "هادئة": []}
-    for t in all_flat:
+def session_map(trades):
+    sess = {}
+    for t in trades:
         h = t["time"].hour
         if 7 <= h < 11: s = "لندن"
         elif 12 <= h < 17: s = "نيويورك"
         elif 0 <= h < 6: s = "آسيا"
         else: s = "هادئة"
-        sess_stats[s].append(t)
+        sess.setdefault(s, []).append(t)
+    return sess
 
-    sess_summary = []
-    for s, tr in sess_stats.items():
-        if len(tr) >= 10:
-            a = analyze(tr, s)
-            sess_summary.append((s, a))
-    sess_summary.sort(key=lambda x: x[1]["avg_r"], reverse=True)
+def fmt_sym(s):
+    b = s.replace("=X","")
+    return f"{b[:3]}/{b[3:]}" if len(b) == 6 else s
 
-    # الأزواج مرتبة حسب avg_r
-    sym_stats.sort(key=lambda x: x[1]["avg_r"], reverse=True)
+# ============ التقرير ============
+def build_report():
+    log.info("🎬 بدء باك تست استراتيجية الفيديو (EMA7/12)")
+    start = time.time()
 
-    # بناء الرسالة
-    msg = f"🏗️ *غيث ترند-بولباك v1*\n"
-    msg += f"(8 أزواج × 730 يوم = سنتان)\n\n"
+    all_signals = {}
+    for sym in SYMBOLS:
+        for iv, period in TIMEFRAMES:
+            try:
+                sigs = collect_signals(sym, iv, period)
+                all_signals[(sym, iv)] = sigs
+                log.info(f"{sym} {iv}: {len(sigs)} إشارة")
+            except Exception as e:
+                log.error(f"{sym} {iv}: {e}")
+                all_signals[(sym, iv)] = []
+            time.sleep(0.5)
 
-    msg += f"🎯 *الأرقام الأساسية:*\n"
-    msg += f"• عدد الصفقات: *{overall['total']}*\n"
-    msg += f"• نسبة الفوز: *{overall['wr']}%*\n"
-    msg += f"• *متوسط R للصفقة: {overall['avg_r']:+.3f}R*\n"
-    msg += f"• مجموع R: *{overall['total_r']:+.1f}R*\n"
-    msg += f"• Profit Factor: *{overall['pf']}*\n"
-    msg += f"• Max Drawdown: *{overall['max_dd']:+.2f}R*\n"
-    msg += f"• أطول سلسلة خسائر: *{overall['max_loss_streak']}*\n"
-    msg += f"• متوسط مدة الصفقة: *{overall['avg_bars']:.1f} ساعة*\n\n"
+    # تجميع لكل (فريم × انتهاء)
+    combos = []
+    for iv, _ in TIMEFRAMES:
+        for exp in EXPIRIES:
+            trades = []
+            for (sym, tf), sigs in all_signals.items():
+                if tf != iv:
+                    continue
+                trades.extend(evaluate(sigs, exp))
+            st = stats(trades)
+            if not st:
+                continue
+            robust, wr1, wr2 = robustness(trades)
+            combos.append({
+                "tf": iv, "exp": exp, "trades": trades,
+                "total": st["total"], "wr": st["wr"],
+                "robust": robust, "wr1": wr1, "wr2": wr2,
+            })
 
-    msg += f"📊 *توزيع النتائج:*\n"
-    msg += f"• TP (فوز +2R): {outcomes['TP']} ({100*outcomes['TP']/overall['total']:.1f}%)\n"
-    msg += f"• SL (خسارة -1R): {outcomes['SL']} ({100*outcomes['SL']/overall['total']:.1f}%)\n"
-    msg += f"• BE (تعادل): {outcomes['BE']} ({100*outcomes['BE']/overall['total']:.1f}%)\n"
-    msg += f"• خروج زمني: {outcomes['TIME']} ({100*outcomes['TIME']/overall['total']:.1f}%)\n\n"
+    combos.sort(key=lambda x: x["wr"], reverse=True)
 
-    msg += f"📈 *الأزواج مرتبة (بـ متوسط R):*\n"
+    msg = f"🎬 *استراتيجية الفيديو (تقاطع EMA7/12)*\n"
+    msg += f"(8 أزواج × 3 فريمات × 3 انتهاءات)\n\n"
+
+    msg += f"📋 *الجدول الكامل:*\n"
     msg += f"```\n"
-    msg += f"{'الزوج':<10} {'#':>4} {'WR':>6} {'R/صفقة':>8} {'مجموع R':>9}\n"
-    msg += f"{'-'*10} {'-'*4} {'-'*6} {'-'*8} {'-'*9}\n"
-    for sym, s in sym_stats:
-        if s["total"] >= 20:
-            medal = "🥇" if s == sym_stats[0][1] else ("🥈" if s == sym_stats[1][1] else ("🥉" if s == sym_stats[2][1] else " "))
-            msg += f"{medal}{fmt_sym(sym):<10} {s['total']:>4} {s['wr']:>5.1f}% {s['avg_r']:>+7.3f}R {s['total_r']:>+8.1f}R\n"
-    msg += f"```\n\n"
+    msg += f"{'فريم':<6} {'انتهاء':>6} {'صفقات':>7} {'فوز':>7} {'صلب؟':>6}\n"
+    msg += f"{'-'*6} {'-'*6} {'-'*7} {'-'*7} {'-'*6}\n"
+    for c in combos:
+        mark = "✅" if c["robust"] else "❌"
+        msg += f"{c['tf']:<6} {c['exp']:>5}ش {c['total']:>7} {c['wr']:>6.1f}% {mark:>6}\n"
+    msg += f"```\n"
+    msg += f"( نقطة التعادل = {BREAKEVEN}% )\n\n"
 
-    msg += f"⏰ *الأداء حسب الجلسات:*\n"
-    for s, a in sess_summary:
-        msg += f"• {s}: {a['wr']:.1f}% فوز، {a['avg_r']:+.3f}R/صفقة ({a['total']} صفقة)\n"
+    valid = [c for c in combos if c["total"] >= MIN_TRADES]
+    winners = [c for c in valid if c["robust"] and c["wr"] >= 55]
+    marginal = [c for c in valid if c["robust"] and BREAKEVEN <= c["wr"] < 55]
 
-    msg += f"\n🧪 *اختبار الصلابة (نصفان زمنيان):*\n"
-    if robust:
-        msg += f"✅ *صلبة* — النصف 1: {r1:+.3f}R ({wr1:.1f}%) | النصف 2: {r2:+.3f}R ({wr2:.1f}%)\n"
+    if winners:
+        best = winners[0]
+        msg += f"🏆 *أفضل تركيبة: فريم {best['tf']} + انتهاء {best['exp']} شموع*\n"
+        msg += f"• فوز: *{best['wr']}%* ({best['total']} صفقة)\n"
+        msg += f"• صلابة: {best['wr1']}% | {best['wr2']}%\n"
+        # أفضل الأزواج
+        by_sym = {}
+        for t in best["trades"]:
+            by_sym.setdefault(t["sym"], []).append(t)
+        ranked = sorted(by_sym.items(), key=lambda x: (stats(x[1]) or {"wr":-1})["wr"], reverse=True)
+        msg += f"• أفضل الأزواج: "
+        msg += ", ".join(f"{fmt_sym(s)} {stats(tr)['wr']}%" for s, tr in ranked[:3] if stats(tr))
+        msg += "\n"
+        # الجلسات
+        sess = session_map(best["trades"])
+        lines = []
+        for s, tr in sess.items():
+            st = stats(tr)
+            if st and st["total"] >= 20:
+                lines.append(f"  • {s}: {st['wr']}% ({st['total']})")
+        if lines:
+            msg += f"• حسب الجلسات:\n" + "\n".join(lines) + "\n"
+        msg += f"\n✅ *قابلة للتجربة على ديمو أسبوعين قبل أي دولار حقيقي*\n"
+    elif marginal:
+        best = marginal[0]
+        msg += f"⚠️ *هامشية فقط: فريم {best['tf']} + انتهاء {best['exp']} شموع = {best['wr']}%*\n"
+        msg += f"فوق التعادل بقليل - لا تكفي لتغطية الأيام السيئة\n"
+        msg += f"💭 الحكم: لا تعتمد عليها\n"
     else:
-        msg += f"❌ *غير صلبة* — النصف 1: {r1:+.3f}R | النصف 2: {r2:+.3f}R\n"
+        best = valid[0] if valid else combos[0]
+        msg += f"🔴 *الاستراتيجية مرفوضة إحصائياً*\n"
+        msg += f"• أفضل تركيبة: {best['tf']} + {best['exp']} شموع = *{best['wr']}%* فقط\n"
+        msg += f"• تحت نقطة التعادل ({BREAKEVEN}%)\n"
+        msg += f"• تقاطعات EMA7/12 = ضوضاء بالفريمات القصيرة (كما توقع التاريخ)\n"
+        msg += f"💭 لا تخسر وقتك ولا مالك عليها\n"
 
-    # محاكاة الربح الفعلي ($5,000 حساب، 0.75% مخاطرة)
-    account = 5000
-    risk_amount = account * RISK_PER_TRADE
-    pnl_usd = overall["total_r"] * risk_amount
-    avg_daily_trades = overall["total"] / 730
-    avg_daily_pnl = pnl_usd / 730
-
-    msg += f"\n💰 *محاكاة حساب $5,000 (مخاطرة 0.75%):*\n"
-    msg += f"• مبلغ الرهان لكل صفقة: *${risk_amount:.1f}*\n"
-    msg += f"• الربح الإجمالي سنتين: *${pnl_usd:+.0f}*\n"
-    msg += f"• متوسط الصفقات/يوم: *{avg_daily_trades:.2f}*\n"
-    msg += f"• متوسط الربح/يوم: *${avg_daily_pnl:+.2f}*\n"
-
-    msg += f"\n💡 *الحكم النهائي:*\n"
-    if robust and overall["avg_r"] >= 0.15:
-        msg += f"🟢 *الاستراتيجية قوية وصالبة*\n"
-        msg += f"✅ نعتمد التصميم وننتقل للبوابة 2 (إشارات حية + ديمو)\n"
-        best3 = [fmt_sym(s) for s,_ in sym_stats[:3] if _["total"] >= 20]
-        if best3:
-            msg += f"🎯 أفضل 3 أزواج للبدء: {', '.join(best3)}\n"
-    elif robust and overall["avg_r"] >= 0.05:
-        msg += f"🟡 *هامشية لكن صلبة*\n"
-        msg += f"💭 يمكن اعتمادها بتردد أقل أو فلترة إضافية\n"
-    elif overall["avg_r"] >= 0:
-        msg += f"🟠 *إيجابية لكن غير صلبة*\n"
-        msg += f"⚠️ نحتاج تحسين الفلاتر أو تقليل الأزواج\n"
-    else:
-        msg += f"🔴 *الاستراتيجية غير مربحة إحصائياً*\n"
-        msg += f"💭 نعيد تصميم الفلاتر أو الفلسفة\n"
+    msg += f"\n📌 *ملاحظات الصدق:*\n"
+    msg += f"• ZigZag مستبعد: يعيد رسم نفسه = أي اختبار له كاذب\n"
+    msg += f"• الفيديو تسويقي (روابط عمولة + قناة توصيات) ≠ دليل\n"
+    msg += f"• الاختبار هنا: دخول عند إغلاق شمعة التقاطع فقط (قابل للتنفيذ)\n"
 
     msg += f"\n⏱️ انتهى في {time.time()-start:.0f} ثانية"
     return msg
