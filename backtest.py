@@ -2,16 +2,19 @@
 # -*- coding: utf-8 -*-
 """
 =====================================================================
-غيث — باك تست v28 الشامل (20 زوجاً × 60 يوم)
+غيث — مصفوفة v29: اختبار كل التركيبات + الصلابة
 =====================================================================
-يعيد تشغيل قواعد v28 الرشيقة على التاريخ الكامل لكل زوج
-ويخرج تقريراً مفصلاً لكل زوج + ملخصاً عاماً + توصيات
+يفحص:
+1) الاتجاه: استمرار (v28) ← مقابل → عكس (Fade)
+2) الانتهاء: 15 دقيقة ← مقابل → 30 دقيقة
+3) نقطة الدخول: إغلاق التأكيد ← مقابل → إغلاق الرفض
+4) اختبار الصلابة: نصفان زمنيان (أول 30 يوم + آخر 30 يوم)
+
+يختار التركيبات الرابحة والصلبة فقط.
 =====================================================================
 """
 import os, sys, time, json, logging
-from logging.handlers import RotatingFileHandler
-from datetime import datetime, timedelta, timezone
-from pathlib import Path
+from datetime import datetime, timezone
 import numpy as np, pandas as pd
 
 try:
@@ -75,7 +78,7 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
     handlers=[logging.StreamHandler(sys.stdout)]
 )
-log = logging.getLogger("Backtest")
+log = logging.getLogger("Backtest_v29")
 
 # ============ الجلب ============
 def fetch(sym, iv, period="7d"):
@@ -138,7 +141,7 @@ def add_indicators(df):
     df["LWICK"] = df[["Open","Close"]].min(axis=1) - df["Low"]
     return df
 
-# ============ قواعد v28 ============
+# ============ قواعد v28 (للعثور على لحظات الإرهاق) ============
 def trend_aligned(last_15, prev_15, last_h1):
     if any(pd.isna(v) for v in [last_15["EMA_35"], last_15["EMA_50"],
                                  prev_15["EMA_35"], last_h1["EMA_35"],
@@ -183,39 +186,38 @@ def ema_distance_ok(last):
     return a > 0 and abs(c - e) <= MAX_DIST_EMA * a
 
 def touch_rej_confirm(d5_view, level, dr):
-    """يفحص آخر 3 شموع 5m: رفض + تأكيد"""
+    """يرجع: (rej_ok, conf_ok, rej_close, conf_close)"""
     if len(d5_view) < 3:
-        return False, None
+        return False, False, None, None
     conf, rej, prev = d5_view.iloc[-1], d5_view.iloc[-2], d5_view.iloc[-3]
     rej_close = float(rej["Close"])
+    conf_close = float(conf["Close"])
     rej_body = abs(float(rej["Close"]) - float(rej["Open"]))
     rej_range = float(rej["High"]) - float(rej["Low"])
     if rej_range <= 0 or rej_body <= 0:
-        return False, None
+        return False, False, None, None
     br = rej_body / rej_range
     brej = br >= REJ_BODY
-    # اللمس
     t = TOUCH_TOL * float(rej["Close"])
     if dr == "CALL":
         touched = float(rej["Low"]) <= level + t
     else:
         touched = float(rej["High"]) >= level - t
     if not touched:
-        return False, None
-    # الرفض
+        return False, False, None, None
     if dr == "CALL":
         lw = float(rej.get("LWICK", 0)) if pd.notna(rej.get("LWICK")) else 0
         pin = lw >= WICK_BODY * rej_body
         eng = rej["Close"] > rej["Open"] and prev["Close"] < prev["Open"] and rej["Close"] >= prev["Open"] and rej["Open"] <= prev["Close"]
         rej_ok = (brej or pin or eng) and rej_close > level
-        conf_ok = float(conf["Close"]) > rej_close
+        conf_ok = conf_close > rej_close
     else:
         uw = float(rej.get("UWICK", 0)) if pd.notna(rej.get("UWICK")) else 0
         pin = uw >= WICK_BODY * rej_body
         eng = rej["Close"] < rej["Open"] and prev["Close"] > prev["Open"] and rej["Close"] <= prev["Open"] and rej["Open"] >= prev["Close"]
         rej_ok = (brej or pin or eng) and rej_close < level
-        conf_ok = float(conf["Close"]) < rej_close
-    return rej_ok and conf_ok, conf.name
+        conf_ok = conf_close < rej_close
+    return rej_ok, conf_ok, rej_close, conf_close
 
 def impulse_ok(d5_view, dr):
     if len(d5_view) < 5:
@@ -242,29 +244,28 @@ def deviation_ok(level, entry_price, dr):
         if dn > MAX_AHEAD: return False
     return True
 
-# ============ المحاكاة ============
-def run_backtest(sym):
+# ============ جمع الصفقات الخام (بوابات v28) ============
+def collect_raw_trades(sym):
+    """يجمع كل لحظة استوفت بوابات v28 - بدون قرار اتجاه/انتهاء"""
     log.info(f"=== {sym} ===")
-    d15 = fetch(sym, SCAN_TF, "7d" if HISTORY_DAYS <= 7 else f"{HISTORY_DAYS}d")
+    d15 = fetch(sym, SCAN_TF, f"{HISTORY_DAYS}d")
     d5  = fetch(sym, SNIPER_TF, "60d")
     d1h = fetch(sym, TREND_TF, f"{HISTORY_DAYS}d")
     if d15 is None or d5 is None or d1h is None:
         log.warning(f"{sym}: فشل جلب البيانات")
-        return None
+        return []
     d15 = add_indicators(d15)
     d5  = add_indicators(d5)
     d1h = add_indicators(d1h)
     if d15 is None or d5 is None or d1h is None:
-        return None
+        return []
     if len(d15) < 300 or len(d5) < 1000 or len(d1h) < 100:
         log.warning(f"{sym}: بيانات غير كافية")
-        return None
+        return []
 
-    trades = []
-    # نمشي على كل شمعة 5m مغلقة
+    raw = []
     for i in range(10, len(d5)):
         cur_time = d5.index[i]
-        # أوجد أقرب شمعة 15m و 1h <= cur_time
         m15 = d15[d15.index <= cur_time]
         m1h = d1h[d1h.index <= cur_time]
         if len(m15) < 5 or len(m1h) < 3:
@@ -272,158 +273,247 @@ def run_backtest(sym):
         last_15 = m15.iloc[-1]
         prev_15 = m15.iloc[-2]
         last_h1 = m1h.iloc[-1]
-        # 1) ترند
         dr = trend_aligned(last_15, prev_15, last_h1)
         if dr is None:
             continue
-        # 2) EMA
         if not ema_distance_ok(last_15):
             continue
-        # 3) مستوى
         level = find_level(last_15, dr)
         if level is None:
             continue
-        # 4) نافذة 5m
         d5_view = d5.iloc[max(0, i-20):i+1]
         if len(d5_view) < 10:
             continue
-        # 5) لمس + رفض + تأكيد
-        ok, sig_time = touch_rej_confirm(d5_view, level, dr)
-        if not ok or sig_time is None:
+        rej_ok, conf_ok, rej_close, conf_close = touch_rej_confirm(d5_view, level, dr)
+        if not (rej_ok and conf_ok):
             continue
-        # 6) اندفاع
         if not impulse_ok(d5_view, dr):
             continue
-        # 7) انحراف
-        entry_price = float(d5_view.iloc[-1]["Close"])
-        if not deviation_ok(level, entry_price, dr):
+        entry_conf = float(d5_view.iloc[-1]["Close"])
+        if not deviation_ok(level, entry_conf, dr):
             continue
-        # 8) محاكاة انتهاء 15 دقيقة = 3 شموع 5m بعد
-        end_idx = i + 3
-        if end_idx >= len(d5):
-            continue
-        exit_price = float(d5.iloc[end_idx]["Close"])
-        win = (exit_price > entry_price) if dr == "CALL" else (exit_price < entry_price)
-        trades.append({
+        # أسعار الخروج المحتملة
+        end_idx_15 = i + 3   # 15 دقيقة = 3 شموع 5m
+        end_idx_30 = i + 6   # 30 دقيقة = 6 شموع 5m
+        exit_15 = float(d5.iloc[end_idx_15]["Close"]) if end_idx_15 < len(d5) else None
+        exit_30 = float(d5.iloc[end_idx_30]["Close"]) if end_idx_30 < len(d5) else None
+        raw.append({
             "time": cur_time,
-            "dr": dr,
+            "dr_detected": dr,     # الاتجاه الذي اكتشفه v28
             "level": level,
+            "rej_close": rej_close,
+            "conf_close": conf_close,
+            "exit_15": exit_15,
+            "exit_30": exit_30,
+        })
+    log.info(f"{sym}: {len(raw)} لحظة v28")
+    return raw
+
+# ============ تقييم تركيبة معينة ============
+def evaluate_combo(raw_trades, mode, expiry, entry_at):
+    """
+    mode: "continue" (استمرار v28) | "fade" (عكس v28)
+    expiry: 15 | 30
+    entry_at: "confirm" (إغلاق التأكيد) | "reject" (إغلاق الرفض)
+    """
+    wins = 0
+    losses = 0
+    trades = []
+    for t in raw_trades:
+        if expiry == 15 and t["exit_15"] is None:
+            continue
+        if expiry == 30 and t["exit_30"] is None:
+            continue
+        exit_price = t["exit_15"] if expiry == 15 else t["exit_30"]
+        entry_price = t["conf_close"] if entry_at == "confirm" else t["rej_close"]
+        dr_detected = t["dr_detected"]
+        # قرار الدخول الفعلي
+        if mode == "continue":
+            dr_enter = dr_detected
+        else:  # fade
+            dr_enter = "PUT" if dr_detected == "CALL" else "CALL"
+        win = (exit_price > entry_price) if dr_enter == "CALL" else (exit_price < entry_price)
+        if win:
+            wins += 1
+        else:
+            losses += 1
+        trades.append({
+            "time": t["time"],
+            "win": win,
+            "dr_enter": dr_enter,
             "entry": entry_price,
             "exit": exit_price,
-            "win": win
         })
-    return trades
+    total = wins + losses
+    wr = round(100 * wins / total, 2) if total > 0 else 0.0
+    pnl = round(wins * STAKE * PAYOUT - losses * STAKE, 2)
+    return {"total": total, "wins": wins, "losses": losses, "wr": wr, "pnl": pnl, "trades": trades}
 
-# ============ التحليل ============
-def analyze(sym, trades):
-    if not trades:
-        return {"symbol": sym, "trades": 0, "wins": 0, "wr": 0, "pnl": 0,
-                "call_w": 0, "call_t": 0, "put_w": 0, "put_t": 0,
-                "by_session": {}}
-    wins = sum(1 for t in trades if t["win"])
-    call_trades = [t for t in trades if t["dr"] == "CALL"]
-    put_trades = [t for t in trades if t["dr"] == "PUT"]
-    pnl = wins * STAKE * PAYOUT - (len(trades) - wins) * STAKE
-    by_session = {}
+# ============ اختبار الصلابة (نصفان زمنيان) ============
+def robustness_check(trades):
+    if len(trades) < 20:
+        return False, 0, 0
+    mid_time = trades[len(trades)//2]["time"]
+    first_half = [t for t in trades if t["time"] < mid_time]
+    second_half = [t for t in trades if t["time"] >= mid_time]
+    if len(first_half) < 10 or len(second_half) < 10:
+        return False, 0, 0
+    wr1 = 100 * sum(1 for t in first_half if t["win"]) / len(first_half)
+    wr2 = 100 * sum(1 for t in second_half if t["win"]) / len(second_half)
+    robust = wr1 >= 52.6 and wr2 >= 52.6
+    return robust, round(wr1, 1), round(wr2, 1)
+
+# ============ تحليل الجلسات للتركيبة الفائزة ============
+def session_analysis(trades):
+    sessions = {}
     for t in trades:
         h = t["time"].hour
-        if 2 <= h < 6:
-            s = "آسيا"
-        elif 7 <= h < 11:
-            s = "لندن-افتتاح"
-        elif 11 <= h < 15:
-            s = "لندن"
-        elif 15 <= h < 20:
-            s = "نيويورك"
-        else:
-            s = "هادئة"
-        if s not in by_session:
-            by_session[s] = {"w": 0, "t": 0}
-        by_session[s]["t"] += 1
+        if 2 <= h < 6: s = "آسيا"
+        elif 7 <= h < 11: s = "لندن-افتتاح"
+        elif 11 <= h < 15: s = "لندن"
+        elif 15 <= h < 20: s = "نيويورك"
+        else: s = "هادئة"
+        if s not in sessions:
+            sessions[s] = {"w": 0, "t": 0}
+        sessions[s]["t"] += 1
         if t["win"]:
-            by_session[s]["w"] += 1
-    return {
-        "symbol": sym,
-        "trades": len(trades),
-        "wins": wins,
-        "wr": round(100 * wins / len(trades), 1),
-        "pnl": round(pnl, 2),
-        "call_w": sum(1 for t in call_trades if t["win"]),
-        "call_t": len(call_trades),
-        "put_w": sum(1 for t in put_trades if t["win"]),
-        "put_t": len(put_trades),
-        "by_session": by_session
-    }
+            sessions[s]["w"] += 1
+    return sessions
 
-# ============ التقرير ============
+# ============ بناء التقرير ============
 def fmt_sym(s):
     b = s.replace("=X", "")
     return f"{b[:3]}/{b[3:]}" if len(b) == 6 else s
 
-def build_report(results):
-    valid = [r for r in results if r["trades"] > 0]
-    if not valid:
-        return "❌ لا توجد بيانات كافية لأي زوج"
-    total_t = sum(r["trades"] for r in valid)
-    total_w = sum(r["wins"] for r in valid)
-    total_pnl = sum(r["pnl"] for r in valid)
-    overall_wr = round(100 * total_w / total_t, 1) if total_t > 0 else 0
+def build_matrix_report():
+    log.info(f"🚀 بدء مصفوفة v29: {len(SYMBOLS)} زوجاً × {HISTORY_DAYS} يوم")
+    start = time.time()
 
-    # ترتيب حسب نسبة الفوز (مع حد أدنى 10 صفقات)
-    ranked = sorted([r for r in valid if r["trades"] >= 10], key=lambda x: x["wr"], reverse=True)
-    # ترتيب حسب عدد الصفقات
-    most_active = sorted(valid, key=lambda x: x["trades"], reverse=True)[:5]
+    # 1) جمع الصفقات الخام لكل زوج
+    all_raw = {}
+    for sym in SYMBOLS:
+        try:
+            all_raw[sym] = collect_raw_trades(sym)
+            time.sleep(1)
+        except Exception as e:
+            log.error(f"{sym}: {e}")
+            all_raw[sym] = []
 
-    # تجميع الجلسات
-    sessions = {}
-    for r in valid:
-        for s, d in r["by_session"].items():
-            if s not in sessions:
-                sessions[s] = {"w": 0, "t": 0}
-            sessions[s]["t"] += d["t"]
-            sessions[s]["w"] += d["w"]
-    session_lines = []
-    for s, d in sorted(sessions.items(), key=lambda x: (100*x[1]["w"]/x[1]["t"] if x[1]["t"] else 0), reverse=True):
-        if d["t"] >= 5:
-            wr = round(100 * d["w"] / d["t"], 1)
-            medal = "🏆" if wr >= 58 else ("✅" if wr >= 53 else "⚠️")
-            session_lines.append(f"• {medal} {s}: {wr}% ({d['t']} صفقة)")
+    # 2) المصفوفة: 2 اتجاه × 2 انتهاء × 2 دخول = 8 تركيبات
+    combos = [
+        ("continue", 15, "confirm", "استمرار v28 | 15د | تأكيد"),
+        ("continue", 30, "confirm", "استمرار v28 | 30د | تأكيد"),
+        ("continue", 15, "reject",  "استمرار v28 | 15د | رفض"),
+        ("continue", 30, "reject",  "استمرار v28 | 30د | رفض"),
+        ("fade",     15, "confirm", "عكس (Fade) | 15د | تأكيد"),
+        ("fade",     30, "confirm", "عكس (Fade) | 30د | تأكيد"),
+        ("fade",     15, "reject",  "عكس (Fade) | 15د | رفض"),
+        ("fade",     30, "reject",  "عكس (Fade) | 30د | رفض"),
+    ]
 
-    verdict = "🟢 استراتيجية رابحة" if overall_wr >= 55 else ("🟡 هامشية" if overall_wr >= 52.6 else "🔴 ضعيفة")
+    results = []
+    for mode, expiry, entry_at, label in combos:
+        total_t = 0
+        total_w = 0
+        total_pnl = 0.0
+        by_sym = {}
+        all_trades_for_robustness = []
+        for sym, raw in all_raw.items():
+            if not raw:
+                continue
+            r = evaluate_combo(raw, mode, expiry, entry_at)
+            total_t += r["total"]
+            total_w += r["wins"]
+            total_pnl += r["pnl"]
+            by_sym[sym] = r
+            all_trades_for_robustness.extend(r["trades"])
+        wr = round(100 * total_w / total_t, 2) if total_t > 0 else 0
+        robust, wr1, wr2 = robustness_check(all_trades_for_robustness)
+        sessions = session_analysis(all_trades_for_robustness) if all_trades_for_robustness else {}
+        # أفضل/أسوأ 3 أزواج
+        ranked = sorted(by_sym.items(), key=lambda x: x[1]["wr"] if x[1]["total"] >= 10 else -1, reverse=True)
+        top3 = [(s, d) for s, d in ranked[:3] if d["total"] >= 10]
+        bottom3 = [(s, d) for s, d in ranked[-3:] if d["total"] >= 10]
+        # أفضل جلسة
+        best_session = max(sessions.items(), key=lambda x: (100*x[1]["w"]/x[1]["t"] if x[1]["t"] else 0)) if sessions else None
+        results.append({
+            "label": label,
+            "mode": mode,
+            "expiry": expiry,
+            "entry_at": entry_at,
+            "total": total_t,
+            "wins": total_w,
+            "wr": wr,
+            "pnl": round(total_pnl, 2),
+            "robust": robust,
+            "wr_h1": wr1,
+            "wr_h2": wr2,
+            "top3": top3,
+            "bottom3": bottom3,
+            "best_session": best_session,
+            "sessions": sessions,
+        })
 
-    msg = f"📊 *تقرير باك تست v28* (60 يوم)\n\n"
-    msg += f"🎯 *النتيجة العامة:*\n"
-    msg += f"• صفقات: {total_t}\n"
-    msg += f"• فوز: {total_w} | خسارة: {total_t - total_w}\n"
-    msg += f"• *نسبة الفوز: {overall_wr}%*\n"
-    msg += f"• صافي الربح: {total_pnl:+.2f}$\n"
-    msg += f"• الحكم: {verdict}\n\n"
+    # 3) بناء الرسالة
+    winners = [r for r in results if r["robust"] and r["wr"] >= 55]
+    marginal = [r for r in results if r["robust"] and 52.6 <= r["wr"] < 55]
+    losers = [r for r in results if not r["robust"] or r["wr"] < 52.6]
 
-    msg += f"📈 *ترتيب الأزواج (الأقوى):*\n"
-    for i, r in enumerate(ranked[:8], 1):
-        medal = "🥇" if i == 1 else ("🥈" if i == 2 else ("🥉" if i == 3 else f"{i}."))
-        msg += f"{medal} *{fmt_sym(r['symbol'])}*: {r['wr']}% ({r['trades']} صفقة) — {r['pnl']:+.0f}$\n"
+    msg = f"🎯 *مصفوفة v29 — تقرير شامل*\n"
+    msg += f"(20 زوجاً × 60 يوم × 8 تركيبات)\n\n"
 
-    msg += f"\n🔻 *الأزواج الأضعف:*\n"
-    for r in ranked[-3:] if len(ranked) > 5 else []:
-        msg += f"• ❌ {fmt_sym(r['symbol'])}: {r['wr']}%\n"
+    msg += f"📋 *الجدول الكامل:*\n"
+    msg += f"```\n"
+    msg += f"{'التركيبة':<32} {'الصفقات':>7} {'الفوز':>6} {'الربح':>9} {'صلب؟':>5}\n"
+    msg += f"{'-'*32} {'-'*7} {'-'*6} {'-'*9} {'-'*5}\n"
+    for r in sorted(results, key=lambda x: x["wr"], reverse=True):
+        robust_mark = "✅" if r["robust"] else "❌"
+        pnl_mark = f"{r['pnl']:+.0f}$"
+        msg += f"{r['label']:<32} {r['total']:>7} {r['wr']:>5.1f}% {pnl_mark:>9} {robust_mark:>5}\n"
+    msg += f"```\n\n"
 
-    msg += f"\n⏰ *حسب الجلسات:*\n"
-    msg += "\n".join(session_lines) if session_lines else "• لا بيانات كافية"
-
-    msg += f"\n💡 *التوصيات:*\n"
-    if ranked and ranked[0]["wr"] >= 55:
-        msg += f"• ركّز على: {', '.join(fmt_sym(r['symbol']) for r in ranked[:3])}\n"
-    if session_lines:
-        best_s = max(sessions.items(), key=lambda x: (100*x[1]["w"]/x[1]["t"] if x[1]["t"] else 0))
-        msg += f"• أفضل جلسة: *{best_s[0]}*\n"
-    if overall_wr >= 55:
-        msg += f"• ✅ ابدأ التداول الحقيقي بثقة\n"
-    elif overall_wr >= 52.6:
-        msg += f"• ⚠️ هامشية — نحتاج تعديل بوابة\n"
+    if winners:
+        msg += f"🏆 *التركيبات الرابحة الصلبة ({len(winners)}):*\n"
+        for r in winners:
+            msg += f"\n*{r['label']}*\n"
+            msg += f"• نسبة الفوز: *{r['wr']}%*\n"
+            msg += f"• الربح 60 يوم: *{r['pnl']:+.2f}$*\n"
+            msg += f"• الصلابة: النصف الأول {r['wr_h1']}% | الثاني {r['wr_h2']}%\n"
+            if r["top3"]:
+                top_txt = " | ".join(f"*{fmt_sym(s)}* {d['wr']}%" for s, d in r["top3"])
+                msg += f"• أفضل 3 أزواج: {top_txt}\n"
+            if r["best_session"] and r["best_session"][1]["t"] >= 20:
+                s_name = r["best_session"][0]
+                s_wr = round(100*r["best_session"][1]["w"]/r["best_session"][1]["t"], 1)
+                msg += f"• أفضل جلسة: *{s_name}* ({s_wr}%)\n"
     else:
-        msg += f"• ❌ نحتاج إعادة تصميم القواعد\n"
+        msg += f"❌ *لا توجد تركيبة رابحة صلبة!* (فوق 55% في النصفين)\n\n"
 
+    if marginal:
+        msg += f"\n⚠️ *تركيبات هامشية (فوق التعادل لكن <55%):*\n"
+        for r in marginal:
+            msg += f"• {r['label']}: {r['wr']}% ({r['pnl']:+.0f}$)\n"
+
+    msg += f"\n💡 *الخلاصة:*\n"
+    if winners:
+        best = max(winners, key=lambda x: (x["wr"], x["pnl"]))
+        msg += f"🥇 *أفضل تركيبة:* {best['label']}\n"
+        msg += f"   نسبة الفوز: *{best['wr']}%* | ربح 60 يوم: *{best['pnl']:+.0f}$*\n"
+        if best["top3"]:
+            top_txt = ", ".join(f"*{fmt_sym(s)}* ({d['wr']}%)" for s, d in best["top3"])
+            msg += f"🎯 *الأزواج المختارة لـ v29:* {top_txt}\n"
+        if best["best_session"] and best["best_session"][1]["t"] >= 20:
+            s_name = best["best_session"][0]
+            msg += f"⏰ *أفضل جلسة:* {s_name}\n"
+        msg += f"\n✅ *توصية:* نعتمد هذه التركيبة كـ v29 وندمجها في البوت اليومي\n"
+    elif marginal:
+        msg += f"⚠️ لدينا تركيبات فوق التعادل لكنها ضعيفة نسبياً\n"
+        msg += f"💭 خياران: اعتمادهما بتردد أقل، أو إعادة تصميم الفلاتر\n"
+    else:
+        msg += f"❌ *لا توجد حافة حقيقية بأي تركيبة*\n"
+        msg += f"🔄 نحتاج إعادة تصميم القواعد من الصفر (فلاتر جديدة)\n"
+
+    msg += f"\n⏱️ انتهى في {time.time()-start:.0f} ثانية"
     return msg
 
 def send_telegram(text):
@@ -431,38 +521,37 @@ def send_telegram(text):
         log.warning("TG غير معد - اطبع التقرير محلياً فقط")
         print(text)
         return
-    try:
-        url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
-        payload = {"chat_id": TG_CHAT, "text": text, "parse_mode": "Markdown", "disable_web_page_preview": True}
-        r = requests.post(url, json=payload, timeout=15)
-        if r.status_code == 200:
-            log.info("✅ التقرير أُرسل على تليجرام")
+    # تقسيم إذا طويلاً جداً
+    chunks = []
+    lines = text.split("\n")
+    current = ""
+    for line in lines:
+        if len(current) + len(line) + 1 > 3800:
+            chunks.append(current)
+            current = line
         else:
-            log.warning(f"TG: {r.status_code} - {r.text[:200]}")
-    except Exception as e:
-        log.error(f"TG error: {e}")
-
-# ============ الرئيسي ============
-def main():
-    log.info(f"🚀 بدء باك تست v28 على {len(SYMBOLS)} زوجاً × {HISTORY_DAYS} يوم")
-    start = time.time()
-    results = []
-    for sym in SYMBOLS:
+            current = current + "\n" + line if current else line
+    if current:
+        chunks.append(current)
+    for i, chunk in enumerate(chunks):
         try:
-            trades = run_backtest(sym)
-            if trades is not None:
-                r = analyze(sym, trades)
-                results.append(r)
-                log.info(f"{fmt_sym(sym)}: {r['trades']} صفقة، {r['wr']}%")
+            url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
+            payload = {"chat_id": TG_CHAT, "text": chunk, "parse_mode": "Markdown", "disable_web_page_preview": True}
+            r = requests.post(url, json=payload, timeout=15)
+            if r.status_code == 200:
+                log.info(f"✅ الجزء {i+1}/{len(chunks)} أُرسل")
+            else:
+                log.warning(f"TG: {r.status_code}")
             time.sleep(1)
         except Exception as e:
-            log.error(f"{sym}: {e}")
-    report = build_report(results)
+            log.error(f"TG error: {e}")
+
+def main():
+    report = build_matrix_report()
     print("\n" + "=" * 50)
     print(report)
     print("=" * 50)
     send_telegram(report)
-    log.info(f"انتهى في {time.time()-start:.0f} ثانية")
 
 if __name__ == "__main__":
     try:
