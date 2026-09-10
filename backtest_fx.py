@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-=====================================================================
-غيث v20 — باك تست كامل ومصلح
-=====================================================================
+غيث — 10 نسخ متدرجة القوة (غيّر VERSION من 1 إلى 10)
 """
 import os, sys, time, logging
 import numpy as np, pandas as pd
@@ -27,6 +25,21 @@ except ImportError:
 
 import requests
 
+# ============================================================
+# ⭐ غيّر هذا الرقم من 1 إلى 10 ثم Commit وشغّل الـ workflow
+VERSION = 1
+# ============================================================
+
+F_SESSION_TIGHT = VERSION >= 2
+F_ADX_TREND = VERSION >= 3
+F_REJ_STRONG = VERSION >= 4
+F_CONF_MOM = VERSION >= 5
+F_DEV_TIGHT = VERSION >= 6
+F_SCORE3 = VERSION >= 7
+F_COOLDOWN = VERSION >= 8
+F_TREND_GAP = VERSION >= 9
+F_ADX22 = VERSION >= 10
+
 SYMBOLS = [
     "USDJPY=X","AUDJPY=X","EURJPY=X","EURUSD=X","GBPUSD=X",
     "EURGBP=X","CADJPY=X","EURCAD=X","GBPCAD=X","AUDCHF=X",
@@ -37,7 +50,6 @@ SYMBOLS = [
 SCAN_TF = "15m"
 SNIPER_TF = "5m"
 TREND_TF = "1h"
-EXPIRY_MIN = 15
 LVL_LB = 60
 EMA_F = 35
 EMA_S = 50
@@ -47,18 +59,7 @@ ADX_P = 14
 MAX_DIST_EMA = 2.0
 MIN_SPACE = 0.3
 LVL_PROX = 0.6
-MAX_DEV = 0.0010
-MAX_AHEAD = 0.0004
 TOUCH_TOL = 0.0003
-REJ_BODY = 0.35
-MIN_SCORE = 2
-MAX_SC = 4
-ADX_M15 = 18.0
-ADX_H1 = 20.0
-RSI_C_MIN = 38.0
-RSI_C_MAX = 62.0
-RSI_P_MIN = 38.0
-RSI_P_MAX = 62.0
 RN_LARGE = 0.5
 RN_SMALL = 0.005
 MIN_R = 200
@@ -76,7 +77,7 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
     handlers=[logging.StreamHandler(sys.stdout)]
 )
-log = logging.getLogger("Backtest_v20")
+log = logging.getLogger("Backtest10")
 
 def fetch(sym, iv, period):
     for attempt in range(1, 4):
@@ -120,7 +121,7 @@ def add_indicators(df):
         if x is not None:
             for c in x.columns:
                 df[c] = x[c]
-            df.rename(columns={f"ADX_{ADX_P}":"ADX", f"DMP_{ADX_P}":"PLUS_DI", f"DMN_{ADX_P}":"MINUS_DI"}, inplace=True)
+            df.rename(columns={"ADX_14":"ADX","DMP_14":"PLUS_DI","DMN_14":"MINUS_DI"}, inplace=True)
     else:
         df["EMA_35"] = df["Close"].ewm(span=EMA_F, adjust=False).mean()
         df["EMA_50"] = df["Close"].ewm(span=EMA_S, adjust=False).mean()
@@ -146,14 +147,10 @@ def add_indicators(df):
         mdi = 100*mdm.ewm(alpha=1/ADX_P).mean()/df["ATR"].replace(0, np.nan)
         dx = 100*(pdi-mdi).abs()/(pdi+mdi).replace(0, np.nan)
         df["ADX"] = dx.ewm(alpha=1/ADX_P).mean()
-        df["PLUS_DI"] = pdi
-        df["MINUS_DI"] = mdi
     df["RS"] = df["Low"].rolling(LVL_LB, min_periods=20).min()
     df["RR"] = df["High"].rolling(LVL_LB, min_periods=20).max()
     df["H20"] = df["High"].rolling(20, min_periods=10).max()
     df["L20"] = df["Low"].rolling(20, min_periods=10).min()
-    df["BODY"] = (df["Close"] - df["Open"]).abs()
-    df["RANGE"] = (df["High"] - df["Low"]).replace(0, np.nan)
     df["UWICK"] = df["High"] - df[["Open","Close"]].max(axis=1)
     df["LWICK"] = df[["Open","Close"]].min(axis=1) - df["Low"]
     return df
@@ -213,20 +210,20 @@ def find_level(last, dr):
     if dr == "CALL" and pd.notna(last.get("RS")):
         sp = float(last["RS"])
         if abs(c - sp) <= md:
-            cand.append((sp, "SUPPORT"))
+            cand.append(sp)
     if dr == "PUT" and pd.notna(last.get("RR")):
         r = float(last["RR"])
         if abs(c - r) <= md:
-            cand.append((r, "RESISTANCE"))
+            cand.append(r)
     step = RN_LARGE if c > 50 else RN_SMALL
     if step > 0:
         nr = round(c / step) * step
         if abs(c - nr) <= md:
-            cand.append((nr, "ROUND_NUMBER"))
+            cand.append(nr)
     if not cand:
         return None
-    cand.sort(key=lambda x: abs(c - x[0]))
-    return cand[0][0]
+    cand.sort(key=lambda x: abs(c - x))
+    return cand[0]
 
 def score(last, prev, h1, lv):
     sc = {"T":0, "M":0, "L":0, "Q":0}
@@ -242,42 +239,49 @@ def score(last, prev, h1, lv):
         pr = float(prev["RSI"])
         h = float(last["MACD_HIST"]) if pd.notna(last.get("MACD_HIST")) else 0.0
         ph = float(prev["MACD_HIST"]) if pd.notna(prev.get("MACD_HIST")) else 0.0
-        bb = RSI_C_MIN <= r <= RSI_C_MAX and r > pr
-        br = RSI_P_MIN <= r <= RSI_P_MAX and r < pr
+        bb = 38.0 <= r <= 62.0 and r > pr
+        br = 38.0 <= r <= 62.0 and r < pr
         if (bb and h > 0 and h >= ph) or (br and h < 0 and h <= ph):
             sc["M"] = 1
     sc["L"] = 1 if lv is not None else 0
     if _v(last.get("ADX"), h1.get("ADX")):
-        am = float(last["ADX"])
-        ah = float(h1["ADX"])
-        if am >= ADX_M15 and ah >= ADX_H1:
+        if float(last["ADX"]) >= 18.0 and float(h1["ADX"]) >= 20.0:
             sc["Q"] = 1
     return sc
 
-def touch(rej, level, dr):
+def touch_ok(rej, level, dr):
     t = TOUCH_TOL * float(rej["Close"])
     if dr == "CALL":
         return float(rej["Low"]) <= level + t
     return float(rej["High"]) >= level - t
 
-def rejection(rej, prev, level, dr):
+def rejection_ok(rej, prev, level, dr):
     close = float(rej["Close"])
     body = float(abs(rej["Close"] - rej["Open"]))
     fr = float(rej["High"] - rej["Low"])
     if fr <= 0 or body <= 0:
         return False
     br = body / fr
-    brej = br >= REJ_BODY
+    if F_REJ_STRONG:
+        brej = br >= 0.45
+    else:
+        brej = br >= 0.35
     if dr == "CALL":
         lw = float(rej.get("LWICK", 0)) if pd.notna(rej.get("LWICK")) else 0.0
-        pin = lw >= 0.6 * fr and br <= 0.4
+        if F_REJ_STRONG:
+            pin = lw >= 2.0 * body
+        else:
+            pin = lw >= 0.6 * fr and br <= 0.4
         eng = (rej["Close"] > rej["Open"] and
                prev["Close"] < prev["Open"] and
                rej["Close"] >= prev["Open"] and
                rej["Open"] <= prev["Close"])
         return (brej or pin or eng) and close > level
     uw = float(rej.get("UWICK", 0)) if pd.notna(rej.get("UWICK")) else 0.0
-    pin = uw >= 0.6 * fr and br <= 0.4
+    if F_REJ_STRONG:
+        pin = uw >= 2.0 * body
+    else:
+        pin = uw >= 0.6 * fr and br <= 0.4
     eng = (rej["Close"] < rej["Open"] and
            prev["Close"] > prev["Open"] and
            rej["Close"] <= prev["Open"] and
@@ -285,17 +289,23 @@ def rejection(rej, prev, level, dr):
     return (brej or pin or eng) and close < level
 
 def deviation_ok(level, entry, dr):
+    if F_DEV_TIGHT:
+        max_dev = 0.0008
+        max_ahead = 0.0003
+    else:
+        max_dev = 0.0010
+        max_ahead = 0.0004
     dn = (level - entry) / entry
     up = (entry - level) / entry
     if dr == "PUT":
-        if dn > MAX_DEV:
+        if dn > max_dev:
             return False
-        if up > MAX_AHEAD:
+        if up > max_ahead:
             return False
     else:
-        if up > MAX_DEV:
+        if up > max_dev:
             return False
-        if dn > MAX_AHEAD:
+        if dn > max_ahead:
             return False
     return True
 
@@ -304,8 +314,8 @@ def rsi_ok(rsi, dr):
         return True
     r = float(rsi)
     if dr == "CALL":
-        return r <= RSI_C_MAX + 5
-    return r >= RSI_P_MIN - 5
+        return r <= 67.0
+    return r >= 33.0
 
 def collect_candidates(sym):
     log.info(f"=== {sym} ===")
@@ -322,7 +332,10 @@ def collect_candidates(sym):
     if len(d15) < MIN_R or len(d5) < MIN_R or len(d1h) < 100:
         return []
 
+    min_score = 3 if F_SCORE3 else 2
     candidates = []
+    last_trade_time = {}
+
     for i in range(10, len(d5)):
         cur_time = d5.index[i]
         m15 = d15[d15.index <= cur_time]
@@ -333,18 +346,40 @@ def collect_candidates(sym):
         prev_15 = m15.iloc[-2]
         last_h1 = m1h.iloc[-1]
 
+        hour = cur_time.hour
+        if F_SESSION_TIGHT:
+            if not (7 <= hour < 17):
+                continue
+        else:
+            if not (7 <= hour < 21):
+                continue
+
         if not ema_distance_ok(last_15):
             continue
         dr = trend_direction(last_15, prev_15, last_h1)
         if dr is None:
             continue
+        if F_ADX_TREND:
+            adx_h1 = last_h1.get("ADX")
+            if adx_h1 is None or pd.isna(adx_h1) or float(adx_h1) < 20.0:
+                continue
+        if F_ADX22:
+            adx_15 = last_15.get("ADX")
+            if adx_15 is None or pd.isna(adx_15) or float(adx_15) < 22.0:
+                continue
+        if F_TREND_GAP:
+            atr_h1 = last_h1.get("ATR")
+            if pd.notna(atr_h1):
+                gap = abs(float(last_h1["EMA_35"]) - float(last_h1["EMA_50"]))
+                if gap < 0.2 * float(atr_h1):
+                    continue
         if not space_ok(last_15, dr):
             continue
         level = find_level(last_15, dr)
         if level is None:
             continue
         sc = score(last_15, prev_15, last_h1, level)
-        if sum(sc.values()) < MIN_SCORE:
+        if sum(sc.values()) < min_score:
             continue
 
         d5_view = d5.iloc[max(0, i-20):i+1]
@@ -354,9 +389,9 @@ def collect_candidates(sym):
         rej = d5_view.iloc[-2]
         prev = d5_view.iloc[-3]
 
-        if not touch(rej, level, dr):
+        if not touch_ok(rej, level, dr):
             continue
-        if not rejection(rej, prev, level, dr):
+        if not rejection_ok(rej, prev, level, dr):
             continue
         rej_close = float(rej["Close"])
         conf_close = float(conf["Close"])
@@ -364,19 +399,28 @@ def collect_candidates(sym):
             continue
         if dr == "PUT" and conf_close > rej_close:
             continue
+        if F_CONF_MOM:
+            atr5 = d5.iloc[i].get("ATR")
+            if pd.notna(atr5):
+                if abs(conf_close - rej_close) < 0.3 * float(atr5):
+                    continue
         if not deviation_ok(level, conf_close, dr):
             continue
-        rsi_15 = last_15.get("RSI")
-        if not rsi_ok(rsi_15, dr):
+        if not rsi_ok(last_15.get("RSI"), dr):
             continue
-        if not (7 <= cur_time.hour < 21):
-            continue
+        if F_COOLDOWN:
+            prev_t = last_trade_time.get(sym)
+            if prev_t is not None:
+                diff = cur_time - prev_t
+                if diff < pd.Timedelta(hours=4):
+                    continue
 
         end_idx = i + 3
         if end_idx >= len(d5):
             continue
         exit_price = float(d5.iloc[end_idx]["Close"])
 
+        last_trade_time[sym] = cur_time
         candidates.append({
             "time": cur_time,
             "sym": sym,
@@ -419,8 +463,28 @@ def fmt_sym(s):
     return f"{b[:3]}/{b[3:]}" if len(b) == 6 else s
 
 def build_report():
-    log.info(f"بدء باك تست v20 ({len(SYMBOLS)} زوجاً × {HISTORY_DAYS} يوم)")
+    log.info(f"بدء النسخة رقم {VERSION}")
     start = time.time()
+
+    filters = []
+    if F_SESSION_TIGHT:
+        filters.append("جلسة ضيقة 7-17")
+    if F_ADX_TREND:
+        filters.append("ADX ساعة >= 20")
+    if F_REJ_STRONG:
+        filters.append("رفض قوي")
+    if F_CONF_MOM:
+        filters.append("زخم تأكيد")
+    if F_DEV_TIGHT:
+        filters.append("انحراف أضيق")
+    if F_SCORE3:
+        filters.append("جودة >= 3")
+    if F_COOLDOWN:
+        filters.append("تبريد 4 ساعات")
+    if F_TREND_GAP:
+        filters.append("فجوة ترند")
+    if F_ADX22:
+        filters.append("ADX 15د >= 22")
 
     all_cands = {}
     for sym in SYMBOLS:
@@ -441,74 +505,60 @@ def build_report():
 
     overall = stats(all_flat)
     if not overall:
-        return "❌ لا توجد صفقات كافية"
+        return f"❌ النسخة {VERSION}: لا توجد صفقات كافية"
 
     robust, wr1, wr2 = robustness(all_flat)
     sym_stats.sort(key=lambda x: x[1]["wr"], reverse=True)
 
-    msg = f"🏗️ *غيث v20 — باك تست*\n"
-    msg += f"({len(SYMBOLS)} زوجاً × {HISTORY_DAYS} يوم)\n\n"
+    msg = f"🏗️ *النسخة رقم {VERSION}*\n"
+    if filters:
+        msg += f"🧩 الفلاتر: {', '.join(filters)}\n"
+    else:
+        msg += f"🧩 الفلاتر: الأساس فقط\n"
+    msg += f"\n🎯 *الأرقام:*\n"
+    msg += f"• صفقات: *{overall['total']}*\n"
+    msg += f"• فوز: *{overall['wr']}%*\n"
+    msg += f"• صافي: *{overall['pnl']:+.2f}$*\n"
+    msg += f"• التعادل: {BREAKEVEN}%\n\n"
 
-    msg += f"🎯 *الأرقام الأساسية:*\n"
-    msg += f"• عدد الصفقات: *{overall['total']}*\n"
-    msg += f"• نسبة الفوز: *{overall['wr']}%*\n"
-    msg += f"• صافي الربح: *{overall['pnl']:+.2f}$*\n"
-    msg += f"• (نقطة التعادل = {BREAKEVEN}%)\n\n"
-
-    msg += f"📈 *الأزواج مرتبة:*\n"
-    msg += f"```\n"
-    msg += f"{'الزوج':<10} {'#':>5} {'WR':>7} {'صافي':>10}\n"
-    msg += f"{'-'*10} {'-'*5} {'-'*7} {'-'*10}\n"
-    for idx, (sym, s) in enumerate(sym_stats):
+    msg += f"📈 *أفضل 5 أزواج:*\n"
+    for idx in range(min(5, len(sym_stats))):
+        sym, s = sym_stats[idx]
         if s["total"] >= 10:
-            medal = "🥇" if idx == 0 else ("🥈" if idx == 1 else ("🥉" if idx == 2 else " "))
-            msg += f"{medal}{fmt_sym(sym):<10} {s['total']:>5} {s['wr']:>6.1f}% {s['pnl']:>+9.0f}$\n"
-    msg += f"```\n\n"
+            msg += f"• {fmt_sym(sym)}: {s['wr']}% ({s['total']})\n"
 
-    msg += f"🧪 *اختبار الصلابة (نصفان):*\n"
+    msg += f"\n🧪 صلابة: "
     if robust:
-        msg += f"✅ *صلبة* — النصف 1: {wr1}% | النصف 2: {wr2}%\n"
+        msg += f"✅ ({wr1}% | {wr2}%)\n"
     else:
-        msg += f"❌ *غير صلبة* — النصف 1: {wr1}% | النصف 2: {wr2}%\n"
+        msg += f"❌ ({wr1}% | {wr2}%)\n"
 
-    msg += f"\n💡 *الحكم:*\n"
+    msg += f"\n💡 الحكم: "
     if robust and overall["wr"] >= 55:
-        msg += f"🟢 *رابحة صلبة* — نعتمدها\n"
+        msg += f"🟢 رابحة صلبة\n"
     elif robust and overall["wr"] >= BREAKEVEN:
-        msg += f"🟡 *هامشية لكن صلبة* — اعتماد بحذر\n"
+        msg += f"🟡 هامشية صلبة\n"
     elif overall["wr"] >= BREAKEVEN:
-        msg += f"🟠 *فوق التعادل لكن غير صلبة*\n"
+        msg += f"🟠 فوق التعادل غير صلبة\n"
     else:
-        msg += f"🔴 *تحت التعادل — مرفوضة*\n"
+        msg += f"🔴 مرفوضة\n"
+    if overall["total"] < 100:
+        msg += f"⚠️ صفقات قليلة (<100) = النتيجة غير موثوقة\n"
 
-    msg += f"\n⏱️ انتهى في {time.time()-start:.0f} ثانية"
+    msg += f"\n⏱️ {time.time()-start:.0f} ثانية"
     return msg
 
 def send_telegram(text):
     if not TG_TOKEN or not TG_CHAT:
         print(text)
         return
-    chunks = []
-    lines = text.split("\n")
-    current = ""
-    for line in lines:
-        if len(current) + len(line) + 1 > 3800:
-            chunks.append(current)
-            current = line
-        else:
-            current = current + "\n" + line if current else line
-    if current:
-        chunks.append(current)
-    for i, chunk in enumerate(chunks):
-        try:
-            url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
-            payload = {"chat_id": TG_CHAT, "text": chunk, "parse_mode": "Markdown", "disable_web_page_preview": True}
-            r = requests.post(url, json=payload, timeout=15)
-            if r.status_code == 200:
-                log.info(f"✅ الجزء {i+1}/{len(chunks)}")
-            time.sleep(1)
-        except Exception as e:
-            log.error(f"TG: {e}")
+    try:
+        url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
+        payload = {"chat_id": TG_CHAT, "text": text, "parse_mode": "Markdown", "disable_web_page_preview": True}
+        requests.post(url, json=payload, timeout=15)
+        log.info("✅ أُرسل")
+    except Exception as e:
+        log.error(f"TG: {e}")
 
 def main():
     report = build_report()
