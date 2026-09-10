@@ -1,4 +1,4 @@
-name: Backtest_v28
+name: Backtest_FX_v1
 
 on:
   workflow_dispatch:
@@ -6,7 +6,7 @@ on:
 jobs:
   backtest:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -20,7 +20,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/pip
-          key: pip-${{ runner.os }}-backtest-v1
+          key: pip-${{ runner.os }}-fx-v1
           restore-keys: |
             pip-${{ runner.os }}-
 
@@ -28,10 +28,10 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install requests numpy pandas yfinance python-dotenv
-          pip install pandas-ta || echo "pandas-ta غير متوفر - سيستخدم البدائل المدمجة"
+          pip install pandas-ta || echo "pandas-ta غير متوفر"
 
-      - name: Run backtest
-        run: python backtest.py
+      - name: Run FX backtest
+        run: python backtest_fx.py
         env:
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
           TG_CHAT: ${{ secrets.TG_CHAT }}
