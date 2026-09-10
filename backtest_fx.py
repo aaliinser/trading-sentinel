@@ -25,8 +25,10 @@ except ImportError:
 
 import requests
 
-# ⭐ VERSION يُقرأ من env (يرسله الـ workflow تلقائياً)
+# ============================================================
+# ⭐ VERSION يُقرأ تلقائياً من الـ workflow (لا تعدّله يدوياً)
 VERSION = int(os.getenv("VERSION", "1"))
+# ============================================================
 
 F_SESSION_TIGHT = VERSION >= 2
 F_ADX_TREND = VERSION >= 3
