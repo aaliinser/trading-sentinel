@@ -2,16 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 =====================================================================
-غيث v20 — باك تست (نفس الفلسفة، تعديلات طفيفة)
-=====================================================================
-قواعد v20 الفعلية من الكود:
-- SCAN_TF = 15m، SNIPER_TF = 5m، TREND_TF = 1h
-- MAX_DIST_EMA = 2.0 (أضيق من v28)
-- LVL_PROX = 0.6 (أضيق - فلتر أقوى للمستوى القريب)
-- REJ_BODY = 0.35 (أعلى)
-- لا يوجد حارس اندفاع (IMPULSE محذوف)
-- MIN_SCORE = 2، MAX_DIST_EMA = 2.0
-- RSI: CALL ≤ 67، PUT ≥ 33
+غيث v20 — باك تست كامل ومصلح
 =====================================================================
 """
 import os, sys, time, logging
@@ -43,7 +34,6 @@ SYMBOLS = [
     "EURAUD=X","EURCHF=X","GBPJPY=X","GBPCHF=X","GBPAUD=X"
 ]
 
-# معلمات v20 الفعلية
 SCAN_TF = "15m"
 SNIPER_TF = "5m"
 TREND_TF = "1h"
@@ -124,15 +114,19 @@ def add_indicators(df):
             df = pd.concat([df, m], axis=1)
             df.rename(columns={"MACD_12_26_9":"MACD","MACDh_12_26_9":"MACD_HIST","MACDs_12_26_9":"MACD_SIGNAL"}, inplace=True)
         a = ta.atr(df["High"], df["Low"], df["Close"], length=ATR_P)
-        if a is not None: df["ATR"] = a
+        if a is not None:
+            df["ATR"] = a
         x = ta.adx(df["High"], df["Low"], df["Close"], length=ADX_P)
         if x is not None:
-            for c in x.columns: df[c] = x[c]
-            df.rename(columns={f"ADX_{ADX_P}":"ADX",f"DMP_{ADX_P}":"PLUS_DI",f"DMN_{ADX_P}":"MINUS_DI"}, inplace=True)
+            for c in x.columns:
+                df[c] = x[c]
+            df.rename(columns={f"ADX_{ADX_P}":"ADX", f"DMP_{ADX_P}":"PLUS_DI", f"DMN_{ADX_P}":"MINUS_DI"}, inplace=True)
     else:
         df["EMA_35"] = df["Close"].ewm(span=EMA_F, adjust=False).mean()
         df["EMA_50"] = df["Close"].ewm(span=EMA_S, adjust=False).mean()
-        d = df["Close"].diff(); g = d.clip(lower=0); l = -d.clip(upper=0)
+        d = df["Close"].diff()
+        g = d.clip(lower=0)
+        l = -d.clip(upper=0)
         ag = g.ewm(alpha=1/RSI_P, min_periods=RSI_P).mean()
         al = l.ewm(alpha=1/RSI_P, min_periods=RSI_P).mean()
         df["RSI"] = (100 - (100 / (1 + ag / al.replace(0, np.nan)))).fillna(50)
@@ -142,16 +136,18 @@ def add_indicators(df):
         df["MACD_SIGNAL"] = df["MACD"].ewm(span=9, adjust=False).mean()
         df["MACD_HIST"] = df["MACD"] - df["MACD_SIGNAL"]
         pc = df["Close"].shift(1)
-        tr = pd.concat([df["High"]-df["Low"],(df["High"]-pc).abs(),(df["Low"]-pc).abs()], axis=1).max(axis=1)
+        tr = pd.concat([df["High"]-df["Low"], (df["High"]-pc).abs(), (df["Low"]-pc).abs()], axis=1).max(axis=1)
         df["ATR"] = tr.ewm(alpha=1/ATR_P, min_periods=ATR_P).mean()
-        um = df["High"].diff(); dm = -df["Low"].diff()
-        pdm = pd.Series(np.where((um>dm)&(um>0),um,0.0), index=df.index)
-        mdm = pd.Series(np.where((dm>um)&(dm>0),dm,0.0), index=df.index)
-        pdi = 100*pdm.ewm(alpha=1/ADX_P).mean()/df["ATR"].replace(0,np.nan)
-        mdi = 100*mdm.ewm(alpha=1/ADX_P).mean()/df["ATR"].replace(0,np.nan)
-        dx = 100*(pdi-mdi).abs()/(pdi+mdi).replace(0,np.nan)
+        um = df["High"].diff()
+        dm = -df["Low"].diff()
+        pdm = pd.Series(np.where((um>dm)&(um>0), um, 0.0), index=df.index)
+        mdm = pd.Series(np.where((dm>um)&(dm>0), dm, 0.0), index=df.index)
+        pdi = 100*pdm.ewm(alpha=1/ADX_P).mean()/df["ATR"].replace(0, np.nan)
+        mdi = 100*mdm.ewm(alpha=1/ADX_P).mean()/df["ATR"].replace(0, np.nan)
+        dx = 100*(pdi-mdi).abs()/(pdi+mdi).replace(0, np.nan)
         df["ADX"] = dx.ewm(alpha=1/ADX_P).mean()
-        df["PLUS_DI"] = pdi; df["MINUS_DI"] = mdi
+        df["PLUS_DI"] = pdi
+        df["MINUS_DI"] = mdi
     df["RS"] = df["Low"].rolling(LVL_LB, min_periods=20).min()
     df["RR"] = df["High"].rolling(LVL_LB, min_periods=20).max()
     df["H20"] = df["High"].rolling(20, min_periods=10).max()
@@ -164,10 +160,13 @@ def add_indicators(df):
 
 def _v(*vs):
     for v in vs:
-        if v is None: return False
+        if v is None:
+            return False
         try:
-            if pd.isna(v) or not np.isfinite(float(v)): return False
-        except: return False
+            if pd.isna(v) or not np.isfinite(float(v)):
+                return False
+        except Exception:
+            return False
     return True
 
 def ema_distance_ok(last):
@@ -184,8 +183,10 @@ def trend_direction(last_15, prev_15, last_h1):
     hr = last_h1["Close"] < last_h1["EMA_35"] < last_h1["EMA_50"]
     mb = last_15["Close"] > last_15["EMA_35"] > last_15["EMA_50"] and last_15["EMA_35"] > prev_15["EMA_35"]
     mr = last_15["Close"] < last_15["EMA_35"] < last_15["EMA_50"] and last_15["EMA_35"] < prev_15["EMA_35"]
-    if hb and mb: return "CALL"
-    if hr and mr: return "PUT"
+    if hb and mb:
+        return "CALL"
+    if hr and mr:
+        return "PUT"
     return None
 
 def space_ok(last, dr):
@@ -193,16 +194,20 @@ def space_ok(last, dr):
         return True
     a = float(last["ATR"])
     c = float(last["Close"])
-    if a <= 0: return True
+    if a <= 0:
+        return True
     h = float(last["H20"])
     l = float(last["L20"])
     ms = MIN_SPACE * a
-    return (h - c) >= ms if dr == "CALL" else (c - l) >= ms
+    if dr == "CALL":
+        return (h - c) >= ms
+    return (c - l) >= ms
 
 def find_level(last, dr):
     c = float(last["Close"])
     a = float(last["ATR"]) if pd.notna(last.get("ATR")) else 0
-    if a <= 0: return None
+    if a <= 0:
+        return None
     md = LVL_PROX * a
     cand = []
     if dr == "CALL" and pd.notna(last.get("RS")):
@@ -218,7 +223,8 @@ def find_level(last, dr):
         nr = round(c / step) * step
         if abs(c - nr) <= md:
             cand.append((nr, "ROUND_NUMBER"))
-    if not cand: return None
+    if not cand:
+        return None
     cand.sort(key=lambda x: abs(c - x[0]))
     return cand[0][0]
 
@@ -229,20 +235,22 @@ def score(last, prev, h1, lv):
         hr = h1["Close"] < h1["EMA_35"] < h1["EMA_50"]
         mb = last["Close"] > last["EMA_35"] > last["EMA_50"] and last["EMA_35"] > prev["EMA_35"]
         mr = last["Close"] < last["EMA_35"] < last["EMA_50"] and last["EMA_35"] < prev["EMA_35"]
-        if (hb and mb) or (hr and mr): sc["T"] = 1
-    if _v(last["RSI"], prev["RSI"], last.get("MACD_HIST"), prev.get("MACD_HIST")):
-        r, pr = float(last["RSI"]), float(prev["RSI"])
-        h = float(last["MACD_HIST"]) if pd.notna(last.get("MACD_HIST")) else 0
-        ph = float(prev["MACD_HIST"]) if pd.notna(prev.get("MACD_HIST")) else 0
+        if (hb and mb) or (hr and mr):
+            sc["T"] = 1
+    if _v(last["RSI"], prev["RSI"]):
+        r = float(last["RSI"])
+        pr = float(prev["RSI"])
+        h = float(last["MACD_HIST"]) if pd.notna(last.get("MACD_HIST")) else 0.0
+        ph = float(prev["MACD_HIST"]) if pd.notna(prev.get("MACD_HIST")) else 0.0
         bb = RSI_C_MIN <= r <= RSI_C_MAX and r > pr
         br = RSI_P_MIN <= r <= RSI_P_MAX and r < pr
-        if (bb and h > 0 and h >= ph) or (br and h < 0 and h <= ph): sc["M"] = 1
+        if (bb and h > 0 and h >= ph) or (br and h < 0 and h <= ph):
+            sc["M"] = 1
     sc["L"] = 1 if lv is not None else 0
     if _v(last.get("ADX"), h1.get("ADX")):
         am = float(last["ADX"])
         ah = float(h1["ADX"])
-        ap = 50.0
-        if am >= ADX_M15 and ah >= ADX_H1 and 20 <= ap <= 95:
+        if am >= ADX_M15 and ah >= ADX_H1:
             sc["Q"] = 1
     return sc
 
@@ -256,18 +264,19 @@ def rejection(rej, prev, level, dr):
     close = float(rej["Close"])
     body = float(abs(rej["Close"] - rej["Open"]))
     fr = float(rej["High"] - rej["Low"])
-    if fr <= 0 or body <= 0: return False
+    if fr <= 0 or body <= 0:
+        return False
     br = body / fr
     brej = br >= REJ_BODY
     if dr == "CALL":
-        lw = float(rej.get("LWICK", 0)) if pd.notna(rej.get("LWICK")) else 0
+        lw = float(rej.get("LWICK", 0)) if pd.notna(rej.get("LWICK")) else 0.0
         pin = lw >= 0.6 * fr and br <= 0.4
         eng = (rej["Close"] > rej["Open"] and
                prev["Close"] < prev["Open"] and
                rej["Close"] >= prev["Open"] and
                rej["Open"] <= prev["Close"])
         return (brej or pin or eng) and close > level
-    uw = float(rej.get("UWICK", 0)) if pd.notna(rej.get("UWICK")) else 0
+    uw = float(rej.get("UWICK", 0)) if pd.notna(rej.get("UWICK")) else 0.0
     pin = uw >= 0.6 * fr and br <= 0.4
     eng = (rej["Close"] < rej["Open"] and
            prev["Close"] > prev["Open"] and
@@ -279,17 +288,23 @@ def deviation_ok(level, entry, dr):
     dn = (level - entry) / entry
     up = (entry - level) / entry
     if dr == "PUT":
-        if dn > MAX_DEV: return False
-        if up > MAX_AHEAD: return False
+        if dn > MAX_DEV:
+            return False
+        if up > MAX_AHEAD:
+            return False
     else:
-        if up > MAX_DEV: return False
-        if dn > MAX_AHEAD: return False
+        if up > MAX_DEV:
+            return False
+        if dn > MAX_AHEAD:
+            return False
     return True
 
 def rsi_ok(rsi, dr):
-    if pd.isna(rsi): return True
+    if rsi is None or pd.isna(rsi):
+        return True
     r = float(rsi)
-    if dr == "CALL": return r <= RSI_C_MAX + 5
+    if dr == "CALL":
+        return r <= RSI_C_MAX + 5
     return r >= RSI_P_MIN - 5
 
 def collect_candidates(sym):
@@ -335,9 +350,6 @@ def collect_candidates(sym):
         d5_view = d5.iloc[max(0, i-20):i+1]
         if len(d5_view) < 10:
             continue
-
-        if len(d5_view) < 3:
-            continue
         conf = d5_view.iloc[-1]
         rej = d5_view.iloc[-2]
         prev = d5_view.iloc[-3]
@@ -347,19 +359,16 @@ def collect_candidates(sym):
         if not rejection(rej, prev, level, dr):
             continue
         rej_close = float(rej["Close"])
-        if dr == "CALL" and float(conf["Close"]) < rej_close:
-            continue
-        if dr == "PUT" and float(conf["Close"]) > rej_close:
-            continue
-
         conf_close = float(conf["Close"])
+        if dr == "CALL" and conf_close < rej_close:
+            continue
+        if dr == "PUT" and conf_close > rej_close:
+            continue
         if not deviation_ok(level, conf_close, dr):
             continue
-        rsi_15 = m15.iloc[-1].get("RSI")
+        rsi_15 = last_15.get("RSI")
         if not rsi_ok(rsi_15, dr):
             continue
-
-        # نافذة الجلسات (7-21 UTC)
         if not (7 <= cur_time.hour < 21):
             continue
 
@@ -381,8 +390,14 @@ def collect_candidates(sym):
 def stats(candidates):
     if not candidates:
         return None
-    wins = sum(1 for c in candidates if
-               (c["exit"] > c["entry"]) if c["dr"] == "CALL" else (c["exit"] < c["entry"]))
+    wins = 0
+    for c in candidates:
+        if c["dr"] == "CALL":
+            if c["exit"] > c["entry"]:
+                wins += 1
+        else:
+            if c["exit"] < c["entry"]:
+                wins += 1
     total = len(candidates)
     wr = round(100 * wins / total, 2)
     pnl = round(wins * STAKE * PAYOUT - (total - wins) * STAKE, 2)
@@ -404,7 +419,7 @@ def fmt_sym(s):
     return f"{b[:3]}/{b[3:]}" if len(b) == 6 else s
 
 def build_report():
-    log.info(f"🏗️ بدء باك test v20 ({len(SYMBOLS)} زوجاً × {HISTORY_DAYS} يوم)")
+    log.info(f"بدء باك تست v20 ({len(SYMBOLS)} زوجاً × {HISTORY_DAYS} يوم)")
     start = time.time()
 
     all_cands = {}
@@ -429,10 +444,9 @@ def build_report():
         return "❌ لا توجد صفقات كافية"
 
     robust, wr1, wr2 = robustness(all_flat)
-
     sym_stats.sort(key=lambda x: x[1]["wr"], reverse=True)
 
-    msg = f"🏗️ *غيث v20 — باك test*\n"
+    msg = f"🏗️ *غيث v20 — باك تست*\n"
     msg += f"({len(SYMBOLS)} زوجاً × {HISTORY_DAYS} يوم)\n\n"
 
     msg += f"🎯 *الأرقام الأساسية:*\n"
@@ -445,9 +459,9 @@ def build_report():
     msg += f"```\n"
     msg += f"{'الزوج':<10} {'#':>5} {'WR':>7} {'صافي':>10}\n"
     msg += f"{'-'*10} {'-'*5} {'-'*7} {'-'*10}\n"
-    for sym, s in sym_stats:
+    for idx, (sym, s) in enumerate(sym_stats):
         if s["total"] >= 10:
-            medal = "🥇" if s == sym_stats[0][1] else ("🥈" if s == sym_stats[1][1] else ("🥉" if len(sym_stats) > 2 and s == sym_stats[2][1] else " "))
+            medal = "🥇" if idx == 0 else ("🥈" if idx == 1 else ("🥉" if idx == 2 else " "))
             msg += f"{medal}{fmt_sym(sym):<10} {s['total']:>5} {s['wr']:>6.1f}% {s['pnl']:>+9.0f}$\n"
     msg += f"```\n\n"
 
@@ -457,24 +471,15 @@ def build_report():
     else:
         msg += f"❌ *غير صلبة* — النصف 1: {wr1}% | النصف 2: {wr2}%\n"
 
-    msg += f"\n📊 *مقارنة مع v28 (السابق):*\n"
-    if overall["wr"] >= 52:
-        msg += f"• v20: {overall['wr']}% | v28: 44.7%\n"
-        msg += f"• *تحسن ملحوظ (+{overall['wr'] - 44.7:.1f} نقاط)*\n"
-    else:
-        msg += f"• v20: {overall['wr']}% | v28: 44.7%\n"
-        msg += f"• فرق بسيط\n"
-
     msg += f"\n💡 *الحكم:*\n"
     if robust and overall["wr"] >= 55:
         msg += f"🟢 *رابحة صلبة* — نعتمدها\n"
     elif robust and overall["wr"] >= BREAKEVEN:
-        msg += f"🟡 *هامشية لكن صلبة* — اعتمدها بحذر\n"
+        msg += f"🟡 *هامشية لكن صلبة* — اعتماد بحذر\n"
     elif overall["wr"] >= BREAKEVEN:
         msg += f"🟠 *فوق التعادل لكن غير صلبة*\n"
     else:
         msg += f"🔴 *تحت التعادل — مرفوضة*\n"
-        msg += f"💭 الفلسفة نفسها (ارتداد من مستوى على 15m) لا تحقق الحافة\n"
 
     msg += f"\n⏱️ انتهى في {time.time()-start:.0f} ثانية"
     return msg
