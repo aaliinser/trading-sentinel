@@ -2,672 +2,473 @@
 # -*- coding: utf-8 -*-
 """
 =====================================================================
-غيث المزدوج — v28 الرشيقة (قلب قوي، دهون محذوفة)
+غيث — باك تست v28 الشامل (20 زوجاً × 60 يوم)
 =====================================================================
-منطق v28:
-- الماسح: ترند + مستوى (سوينغ/000 ضمن 1.0 ATR) + جودة ≥2
-- القناص: لمسة + رفض + تأكيد + منطقة انحراف + جلسة (7 فحوص فقط)
-- محذوف: بوابات ADX و RSI والمساحة (كانت تخنق الإشارات)
-- حارس الاندفاع 2.5 ATR (للاندفاعات المتطرفة فقط)
+يعيد تشغيل قواعد v28 الرشيقة على التاريخ الكامل لكل زوج
+ويخرج تقريراً مفصلاً لكل زوج + ملخصاً عاماً + توصيات
 =====================================================================
 """
-import os, sys, time, json, random, logging, threading
+import os, sys, time, json, logging
 from logging.handlers import RotatingFileHandler
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-import numpy as np, pandas as pd, requests
-
-try:
-    import ntplib
-    HAS_NTP = True
-except ImportError:
-    HAS_NTP = False
+import numpy as np, pandas as pd
 
 try:
     import yfinance as yf
-except ImportError: print("pip install yfinance"); sys.exit(1)
+except ImportError:
+    print("pip install yfinance"); sys.exit(1)
 
 try:
-    import pandas_ta as ta; HAS_TA=True
-except ImportError: HAS_TA=False
+    import pandas_ta as ta
+    HAS_TA = True
+except ImportError:
+    HAS_TA = False
 
 try:
-    from dotenv import load_dotenv; load_dotenv()
-except ImportError: pass
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 
-_NTP_OFFSET = None
-_NTP_LAST_CHECK = 0
+import requests
 
-def get_ntp_offset():
-    global _NTP_OFFSET, _NTP_LAST_CHECK
-    if not HAS_NTP:
-        return 0.0
-    if _NTP_OFFSET is not None and time.time() - _NTP_LAST_CHECK < 600:
-        return _NTP_OFFSET
-    try:
-        client = ntplib.NTPClient()
-        response = client.request('pool.ntp.org', version=3, timeout=3)
-        _NTP_OFFSET = response.offset
-        _NTP_LAST_CHECK = time.time()
-        return _NTP_OFFSET
-    except Exception:
-        return _NTP_OFFSET if _NTP_OFFSET is not None else 0.0
+# ============ الإعدادات ============
+SYMBOLS = [
+    "USDJPY=X","AUDJPY=X","EURJPY=X","EURUSD=X","GBPUSD=X",
+    "EURGBP=X","CADJPY=X","EURCAD=X","GBPCAD=X","AUDCHF=X",
+    "AUDUSD=X","USDCHF=X","CHFJPY=X","AUDCAD=X","USDCAD=X",
+    "EURAUD=X","EURCHF=X","GBPJPY=X","GBPCHF=X","GBPAUD=X"
+]
 
-def ntp_now():
-    return datetime.now(timezone.utc) + timedelta(seconds=get_ntp_offset())
+SCAN_TF = "15m"
+SNIPER_TF = "5m"
+TREND_TF = "1h"
+EXPIRY_MIN = 15
+LVL_LB = 60
+EMA_F = 35
+EMA_S = 50
+RSI_P = 14
+ATR_P = 14
+LVL_PROX = 1.0
+MAX_DIST_EMA = 3.0
+MAX_DEV = 0.0020
+MAX_AHEAD = 0.0008
+TOUCH_TOL = 0.0005
+REJ_BODY = 0.30
+WICK_BODY = 2.0
+IMPULSE_ATR = 2.5
+CONFL_ATR = 0.3
+RN_LARGE = 0.5
+RN_SMALL = 0.005
+HISTORY_DAYS = 60
+STAKE = 6.0
+PAYOUT = 0.90
 
-def is_real_market_symbol(sym):
-    return "OTC" not in str(sym).upper()
+TG_TOKEN = os.getenv("TG_TOKEN","").strip()
+TG_CHAT = os.getenv("TG_CHAT","").strip()
 
-def env_bool(k,d=False):
-    v=os.getenv(k); return d if v is None else v.strip().lower() in {"1","true","yes","y","on","نعم"}
-def env_int(k,d):
-    try: return int(os.getenv(k,d))
-    except: return d
-def env_float(k,d):
-    try: return float(os.getenv(k,d))
-    except: return d
-def env_list(k,d):
-    v=os.getenv(k); return d if not v else [x.strip() for x in v.split(",") if x.strip()]
-def period_for(i):
-    return {"1m":"1d","5m":"2d","15m":"7d","30m":"7d","1h":"30d","4h":"60d"}.get(i,"7d")
-def big_round(lv):
-    if lv>50: return abs(lv-round(lv))<1e-9
-    return abs(lv-round(lv,2))<1e-9
+# ============ Logging ============
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)-8s | %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    handlers=[logging.StreamHandler(sys.stdout)]
+)
+log = logging.getLogger("Backtest")
 
-class Config:
-    TG_TOKEN=os.getenv("TG_TOKEN","").strip(); TG_CHAT=os.getenv("TG_CHAT","").strip()
-    CHANNEL_LINK=os.getenv("CHANNEL_LINK","https://t.me/YOUR_CHANNEL_USERNAME"); MODE_LABEL=os.getenv("MODE_LABEL","")
-    STAKE=env_float("STAKE",6.0); PAYOUT=env_float("PAYOUT",0.90); TZ_OFFSET=env_int("TIMEZONE_OFFSET",1)
-    EXPIRY_MIN=env_int("EXPIRY_MINUTES",15); CD_TRADE=env_int("COOLDOWN_AFTER_TRADE",900)
-    SYMBOLS=env_list("SYMBOLS",["USDJPY=X","AUDJPY=X","EURJPY=X","EURUSD=X","GBPUSD=X","EURGBP=X","CADJPY=X","EURCAD=X","GBPCAD=X","AUDCHF=X","AUDUSD=X","USDCHF=X","CHFJPY=X","AUDCAD=X","USDCAD=X","EURAUD=X","EURCHF=X","GBPJPY=X","GBPCHF=X","GBPAUD=X"])
-    SCAN_TF=os.getenv("SCAN_TIMEFRAME","15m"); SNIPER_TF=os.getenv("SNIPER_TIMEFRAME","5m"); TREND_TF=os.getenv("TREND_TIMEFRAME","1h")
-    MAX_TR=max(env_int("MAX_TRADES_PER_DAY",3),0); MAX_LOS=max(env_int("MAX_LOSSES_PER_DAY",3),0)
-    DAILY_TGT=env_float("DAILY_PROFIT_TARGET",999999.0); CD_LOS=max(env_int("COOLDOWN_AFTER_LOSSES",2),1)
-    CD_MIN=max(env_int("COOLDOWN_MINUTES",120),0); RISK_GATE=env_bool("RISK_GATE_ENABLED",False)
-    HR_START=env_int("TRADE_HOUR_START",7); HR_END=env_int("TRADE_HOUR_END",21)
-    MIN_SCORE=min(max(env_int("MIN_SIGNAL_SCORE",2),1),4); MAX_SC=4
-    EMA_F=35; EMA_S=50; RSI_P=14; ADX_P=14; ATR_P=14; ADX_M15=18.0; ADX_H1=20.0; LVL_LB=60
-    MAX_DIST_EMA=3.0; MIN_SPACE=0.3
-    LVL_PROX=env_float("LEVEL_PROXIMITY_ATR",1.0)
-    RSI_C_MIN=38.0; RSI_C_MAX=62.0; RSI_P_MIN=38.0; RSI_P_MAX=62.0
-    MAX_DEV=env_float("MAX_DEV",0.0020); MAX_AHEAD=env_float("MAX_AHEAD",0.0008)
-    TOUCH_TOL=env_float("TOUCH_TOLERANCE",0.0005); REJ_BODY=env_float("REJECTION_BODY",0.30)
-    LVL_EXP=env_int("LEVEL_EXPIRY_HOURS",3)
-    WATCH_CD=env_int("WATCH_ALERT_COOLDOWN_SEC",3600); WATCH_TOL=0.5
-    RN_LARGE=0.5; RN_SMALL=0.005; SCAN_INT=env_int("SCAN_INTERVAL_SECONDS",60)
-    REQ_TO=env_int("REQUEST_TIMEOUT",15); MAX_RET=env_int("MAX_RETRIES",4)
-    CACHE_TTL=env_int("CACHE_TTL_SECONDS",45)
-    STATE=os.getenv("STATE_FILE","ghaith_state.json"); LOG=os.getenv("LOG_FILE","ghaith_bot.log"); MIN_R=200
-    MAJOR_PAIRS = ["EURUSD=X", "GBPUSD=X", "USDJPY=X", "AUDUSD=X", "USDCAD=X", "USDCHF=X"]
-    WICK_BODY=env_float("WICK_BODY_RATIO",2.0)
-    IMPULSE_ATR=env_float("IMPULSE_GUARD_ATR",2.5)
-    CONFL_ATR=env_float("CONFLUENCE_ATR",0.3)
-
-def setup_logger():
-    lg=logging.getLogger("GhaithDual"); lg.setLevel(logging.INFO)
-    if lg.handlers: return lg
-    fmt=logging.Formatter("%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",datefmt="%Y-%m-%d %H:%M:%S")
-    ch=logging.StreamHandler(sys.stdout); ch.setFormatter(fmt)
-    fh=RotatingFileHandler(Config.LOG,maxBytes=5*1024*1024,backupCount=5,encoding="utf-8"); fh.setFormatter(fmt)
-    lg.addHandler(ch); lg.addHandler(fh); return lg
-
-class State:
-    def __init__(s,lg): s.lg=lg; s.st={}; s._l=threading.Lock(); s.load()
-    def load(s):
-        p=Path(Config.STATE)
-        if p.exists():
-            try:
-                with open(p,"r",encoding="utf-8") as f: s.st=json.load(f)
-            except: s.st={}
-    def save(s):
-        with s._l:
-            try:
-                t=Path(Config.STATE+".tmp")
-                with open(t,"w",encoding="utf-8") as f: json.dump(s.st,f,ensure_ascii=False,indent=2,default=str)
-                t.replace(Config.STATE)
-            except Exception as e: s.lg.error(f"save: {e}")
-    def get(s,k,d=None): return s.st.get(k,d)
-    def set(s,k,v): s.st[k]=v
-    def day(s):
-        today=datetime.now(timezone.utc).strftime("%Y-%m-%d"); d=s.st.get("day",{})
-        if d.get("date")!=today: d={"date":today,"trades":0,"wins":0,"losses":0,"mw":0,"ml":0,"pnl":0.0,"cl":0,"stop":None}; s.st["day"]=d
-        return d
-    def month(s):
-        ym=datetime.now(timezone.utc).strftime("%Y-%m"); m=s.st.get("month",{})
-        if m.get("ym")!=ym: m={"ym":ym,"wins":0,"losses":0,"mw":0,"ml":0,"pnl":0.0}; s.st["month"]=m
-        return m
-    def reset(s): s.day()
-
-class Data:
-    ITD={"1m":pd.Timedelta(minutes=1),"5m":pd.Timedelta(minutes=5),"15m":pd.Timedelta(minutes=15),"30m":pd.Timedelta(minutes=30),"1h":pd.Timedelta(hours=1),"1d":pd.Timedelta(days=1)}
-    def __init__(s,lg): s.lg=lg; s.c={}; s._l=threading.Lock()
-    def _candle_guard(s, df, iv):
-        if df is None or df.empty: return df
-        td = s.ITD.get(iv)
-        if td is None: return df
-        now = ntp_now()
-        last_ts = df.index[-1]
-        if last_ts + td > now + timedelta(seconds=5):
-            df = df.iloc[:-1]
-        return df
-    def fetch(s,sym,iv,pd_="7d",force=False):
-        if not is_real_market_symbol(sym): return None
-        key=f"{sym}|{iv}|{pd_}"; now=time.time()
-        with s._l:
-            cc=s.c.get(key)
-            if cc and not force and now-cc["ts"]<Config.CACHE_TTL: return cc["df"].copy()
-        last=None
-        for a in range(1,Config.MAX_RET+1):
-            try:
-                df=yf.Ticker(sym).history(period=pd_,interval=iv,auto_adjust=False,actions=False,timeout=Config.REQ_TO)
-                if df is None or df.empty: raise ValueError("empty")
-                df=s._clean(df,iv)
-                df=s._candle_guard(df,iv)
-                if df.empty: raise ValueError("no rows after guard")
-                with s._l: s.c[key]={"ts":time.time(),"df":df.copy()}
-                return df.copy()
-            except Exception as e: last=e; time.sleep(min(45,(2**a)+random.uniform(0,1.5)))
-        raise RuntimeError(f"fetch fail {sym}: {last}")
-    def live(s,sym):
-        if not is_real_market_symbol(sym): return None
-        if sym in Config.MAJOR_PAIRS:
-            api_key = os.getenv("TWELVE_DATA_API_KEY", "").strip()
-            if api_key:
-                symbol = sym.replace("=X", "")
-                if len(symbol) == 6:
-                    symbol = f"{symbol[:3]}/{symbol[3:]}"
-                try:
-                    url = "https://api.twelvedata.com/price"
-                    params = {"symbol": symbol, "apikey": api_key}
-                    r = requests.get(url, params=params, timeout=10)
-                    if r.status_code == 200:
-                        data = r.json()
-                        if "price" in data and data["price"]:
-                            return float(data["price"])
-                except Exception as e:
-                    s.lg.warning(f"Twelve Data fallback for {sym}: {e}")
+# ============ الجلب ============
+def fetch(sym, iv, period="7d"):
+    for attempt in range(1, 4):
         try:
-            df=yf.Ticker(sym).history(period="1d",interval="1m",auto_adjust=False,actions=False,timeout=Config.REQ_TO)
-            if df is None or df.empty: return None
-            df=df.copy()
-            if isinstance(df.columns,pd.MultiIndex): df.columns=df.columns.get_level_values(0)
-            if "Close" not in df.columns: return None
-            df.index=pd.to_datetime(df.index,utc=True)
-            df=df[~df.index.duplicated(keep="last")].sort_index().dropna(subset=["Close"])
-            df=df[df.index<=ntp_now()]
-            return float(df.iloc[-1]["Close"]) if not df.empty else None
-        except: return None
-    def _clean(s,df,iv):
-        df=df.copy()
-        if isinstance(df.columns,pd.MultiIndex): df.columns=df.columns.get_level_values(0)
-        for c in ["Open","High","Low","Close","Volume"]:
-            if c not in df.columns: df[c]=np.nan
-        df=df[["Open","High","Low","Close","Volume"]]
-        df.index=pd.to_datetime(df.index,utc=True); df=df[~df.index.duplicated(keep="last")].sort_index()
-        df.dropna(subset=["Open","High","Low","Close"],inplace=True); df["Volume"]=df["Volume"].fillna(0)
-        now=ntp_now(); df=df[df.index<=now]
-        td=s.ITD.get(iv)
-        if td is not None and not df.empty and df.index[-1]+td>now: df=df.iloc[:-1]
-        return df[(df["High"]>=df["Low"])&(df["Open"]>0)&(df["Close"]>0)]
+            df = yf.Ticker(sym).history(period=period, interval=iv, auto_adjust=False, actions=False, timeout=20)
+            if df is None or df.empty:
+                raise ValueError("empty")
+            df = df.copy()
+            if isinstance(df.columns, pd.MultiIndex):
+                df.columns = df.columns.get_level_values(0)
+            for c in ["Open","High","Low","Close","Volume"]:
+                if c not in df.columns:
+                    df[c] = np.nan
+            df = df[["Open","High","Low","Close","Volume"]]
+            df.index = pd.to_datetime(df.index, utc=True)
+            df = df[~df.index.duplicated(keep="last")].sort_index()
+            df.dropna(subset=["Open","High","Low","Close"], inplace=True)
+            df = df[(df["High"]>=df["Low"]) & (df["Open"]>0) & (df["Close"]>0)]
+            if not df.empty:
+                return df
+        except Exception as e:
+            log.warning(f"{sym} {iv} attempt {attempt}: {e}")
+            time.sleep(2 * attempt)
+    return None
 
-class Ind:
-    def __init__(s,lg): s.lg=lg
-    def add(s,df):
-        if df is None or df.empty or len(df)<Config.MIN_R: return df
-        df=df.copy()
-        if HAS_TA:
-            df["EMA_35"]=ta.ema(df["Close"],length=Config.EMA_F)
-            df["EMA_50"]=ta.ema(df["Close"],length=Config.EMA_S)
-            df["RSI"]=ta.rsi(df["Close"],length=Config.RSI_P)
-            m=ta.macd(df["Close"],fast=12,slow=26,signal=9)
-            if m is not None:
-                df=pd.concat([df,m],axis=1)
-                df.rename(columns={"MACD_12_26_9":"MACD","MACDh_12_26_9":"MACD_HIST","MACDs_12_26_9":"MACD_SIGNAL"},inplace=True)
-            a=ta.atr(df["High"],df["Low"],df["Close"],length=Config.ATR_P)
-            if a is not None: df["ATR"]=a
-            x=ta.adx(df["High"],df["Low"],df["Close"],length=Config.ADX_P)
-            if x is not None:
-                for c in x.columns: df[c]=x[c]
-                df.rename(columns={f"ADX_{Config.ADX_P}":"ADX",f"DMP_{Config.ADX_P}":"PLUS_DI",f"DMN_{Config.ADX_P}":"MINUS_DI"},inplace=True)
-        else:
-            df["EMA_35"]=df["Close"].ewm(span=Config.EMA_F,adjust=False).mean()
-            df["EMA_50"]=df["Close"].ewm(span=Config.EMA_S,adjust=False).mean()
-            d=df["Close"].diff(); g=d.clip(lower=0); l=-d.clip(upper=0)
-            ag=g.ewm(alpha=1/Config.RSI_P,min_periods=Config.RSI_P).mean()
-            al=l.ewm(alpha=1/Config.RSI_P,min_periods=Config.RSI_P).mean()
-            df["RSI"]=(100-(100/(1+ag/al.replace(0,np.nan)))).fillna(50)
-            e12=df["Close"].ewm(span=12,adjust=False).mean(); e26=df["Close"].ewm(span=26,adjust=False).mean()
-            df["MACD"]=e12-e26; df["MACD_SIGNAL"]=df["MACD"].ewm(span=9,adjust=False).mean(); df["MACD_HIST"]=df["MACD"]-df["MACD_SIGNAL"]
-            pc=df["Close"].shift(1)
-            tr=pd.concat([df["High"]-df["Low"],(df["High"]-pc).abs(),(df["Low"]-pc).abs()],axis=1).max(axis=1)
-            df["ATR"]=tr.ewm(alpha=1/Config.ATR_P,min_periods=Config.ATR_P).mean()
-            um=df["High"].diff(); dm=-df["Low"].diff()
-            pdm=pd.Series(np.where((um>dm)&(um>0),um,0.0),index=df.index); mdm=pd.Series(np.where((dm>um)&(dm>0),dm,0.0),index=df.index)
-            pdi=100*pdm.ewm(alpha=1/Config.ADX_P).mean()/df["ATR"].replace(0,np.nan)
-            mdi=100*mdm.ewm(alpha=1/Config.ADX_P).mean()/df["ATR"].replace(0,np.nan)
-            dx=100*(pdi-mdi).abs()/(pdi+mdi).replace(0,np.nan)
-            df["ADX"]=dx.ewm(alpha=1/Config.ADX_P).mean(); df["PLUS_DI"]=pdi; df["MINUS_DI"]=mdi
-        df["ATR_PCT"]=s._pct(df["ATR"],100)
-        df["RS"]=df["Low"].rolling(Config.LVL_LB,min_periods=20).min()
-        df["RR"]=df["High"].rolling(Config.LVL_LB,min_periods=20).max()
-        df["H20"]=df["High"].rolling(20,min_periods=10).max()
-        df["L20"]=df["Low"].rolling(20,min_periods=10).min()
-        df["BODY"]=(df["Close"]-df["Open"]).abs()
-        df["RANGE"]=(df["High"]-df["Low"]).replace(0,np.nan)
-        df["UWICK"]=df["High"]-df[["Open","Close"]].max(axis=1)
-        df["LWICK"]=df[["Open","Close"]].min(axis=1)-df["Low"]
+# ============ المؤشرات ============
+def add_indicators(df):
+    if df is None or df.empty or len(df) < 200:
         return df
-    @staticmethod
-    def _pct(s,w):
-        mp=max(20,w//2)
-        def f(x):
-            if len(x)<2: return np.nan
-            fin=x[~np.isnan(x)]
-            if len(fin)<2: return np.nan
-            return float((fin<fin[-1]).mean())*100.0
-        return s.rolling(window=w,min_periods=mp).apply(f,raw=True)
+    df = df.copy()
+    if HAS_TA:
+        df["EMA_35"] = ta.ema(df["Close"], length=EMA_F)
+        df["EMA_50"] = ta.ema(df["Close"], length=EMA_S)
+        df["RSI"] = ta.rsi(df["Close"], length=RSI_P)
+        a = ta.atr(df["High"], df["Low"], df["Close"], length=ATR_P)
+        if a is not None:
+            df["ATR"] = a
+    else:
+        df["EMA_35"] = df["Close"].ewm(span=EMA_F, adjust=False).mean()
+        df["EMA_50"] = df["Close"].ewm(span=EMA_S, adjust=False).mean()
+        d = df["Close"].diff()
+        g = d.clip(lower=0)
+        l = -d.clip(upper=0)
+        ag = g.ewm(alpha=1/RSI_P, min_periods=RSI_P).mean()
+        al = l.ewm(alpha=1/RSI_P, min_periods=RSI_P).mean()
+        df["RSI"] = (100 - (100 / (1 + ag / al.replace(0, np.nan)))).fillna(50)
+        pc = df["Close"].shift(1)
+        tr = pd.concat([
+            df["High"]-df["Low"],
+            (df["High"]-pc).abs(),
+            (df["Low"]-pc).abs()
+        ], axis=1).max(axis=1)
+        df["ATR"] = tr.ewm(alpha=1/ATR_P, min_periods=ATR_P).mean()
+    df["RS"] = df["Low"].rolling(LVL_LB, min_periods=20).min()
+    df["RR"] = df["High"].rolling(LVL_LB, min_periods=20).max()
+    df["H20"] = df["High"].rolling(20, min_periods=10).max()
+    df["L20"] = df["Low"].rolling(20, min_periods=10).min()
+    df["UWICK"] = df["High"] - df[["Open","Close"]].max(axis=1)
+    df["LWICK"] = df[["Open","Close"]].min(axis=1) - df["Low"]
+    return df
 
-class Scan:
-    def __init__(s,lg,nt): s.lg=lg; s.nt=nt; s.ls={}; s.la={}
-    def scan(s,sym,d15,d60,act):
-        if d15 is None or d60 is None or len(d15)<Config.MIN_R: return None
-        if sym in act: return None
-        lct=d15.index[-1]
-        if s.ls.get(sym)==lct: return None
-        last,prev,h1=d15.iloc[-1],d15.iloc[-2],d60.iloc[-1]
-        if not s._dist(last): s.ls[sym]=lct; return None
-        dr=s._dir(last,prev,h1)
-        if dr is None: s.ls[sym]=lct; return None
-        lv,lt=s._lvl(last,dr)
-        sc=s._sc(last,prev,h1,lv); tot=sum(sc.values())
-        if lv is None or tot<max(Config.MIN_SCORE,2): s.ls[sym]=lct; return None
-        la=s.la.get(sym); atr=float(last["ATR"]) if pd.notna(last.get("ATR")) else None
-        if la is not None and atr:
-            pl,pts=la
-            if abs(lv-pl)<=Config.WATCH_TOL*atr and (time.time()-pts)<Config.WATCH_CD: s.ls[sym]=lct; return None
-        cn=float(last["Close"]); pip=0.01 if cn>50 else 0.0001
-        lvl=float(lv)
-        star=s._confl(last,lvl)
-        if dr=="CALL": zl,zh=lvl-Config.MAX_AHEAD*lvl, lvl+Config.MAX_DEV*lvl
-        else: zl,zh=lvl-Config.MAX_DEV*lvl, lvl+Config.MAX_AHEAD*lvl
-        w={"symbol":sym,"name":s._n(sym),"direction":dr,"level":lvl,"level_type":lt,
-           "signal_score":tot,"max_score":Config.MAX_SC,"scores":sc,"entry_price":cn,
-           "live_price":cn,"distance_pips":round(abs(cn-lvl)/pip,1),
-           "entry_zone_low":zl,"entry_zone_high":zh,"candle_time":lct,"created_at":time.time(),"flips":0,"star":star}
-        s.ls[sym]=lct; s.la[sym]=(lvl,time.time())
-        return w
-    def _dist(s,last):
-        if not s._v(last["Close"],last["EMA_35"],last["ATR"]): return False
-        c,e,a=float(last["Close"]),float(last["EMA_35"]),float(last["ATR"])
-        return a>0 and abs(c-e)<=Config.MAX_DIST_EMA*a
-    def _sc(s,last,prev,h1,lv):
-        sc={"T":0,"M":0,"L":0,"Q":0}
-        if s._v(last["EMA_35"],last["EMA_50"],prev["EMA_35"],h1["EMA_35"],h1["EMA_50"],last["Close"],h1["Close"]):
-            hb=h1["Close"]>h1["EMA_35"]>h1["EMA_50"]; hr=h1["Close"]<h1["EMA_35"]<h1["EMA_50"]
-            mb=last["Close"]>last["EMA_35"]>last["EMA_50"] and last["EMA_35"]>prev["EMA_35"]
-            mr=last["Close"]<last["EMA_35"]<last["EMA_50"] and last["EMA_35"]<prev["EMA_35"]
-            if (hb and mb) or (hr and mr): sc["T"]=1
-        if s._v(last["RSI"],prev["RSI"],last["MACD_HIST"],prev["MACD_HIST"]):
-            r,pr,h,ph=float(last["RSI"]),float(prev["RSI"]),float(last["MACD_HIST"]),float(prev["MACD_HIST"])
-            bb=Config.RSI_C_MIN<=r<=Config.RSI_C_MAX and r>pr
-            br=Config.RSI_P_MIN<=r<=Config.RSI_P_MAX and r<pr
-            if (bb and h>0 and h>=ph) or (br and h<0 and h<=ph): sc["M"]=1
-        sc["L"]=1 if lv is not None else 0
-        if s._v(last["ADX"],last["ATR_PCT"],h1.get("ADX")):
-            am,ah,ap=float(last["ADX"]),float(h1["ADX"]),float(last["ATR_PCT"])
-            if am>=Config.ADX_M15 and ah>=Config.ADX_H1 and 20<=ap<=95: sc["Q"]=1
-        return sc
-    def _dir(s,last,prev,h1):
-        if not s._v(last["EMA_35"],last["EMA_50"],prev["EMA_35"],h1["EMA_35"],h1["EMA_50"],last["Close"],h1["Close"]): return None
-        hb=h1["Close"]>h1["EMA_35"]>h1["EMA_50"]; hr=h1["Close"]<h1["EMA_35"]<h1["EMA_50"]
-        mb=last["Close"]>last["EMA_35"]>last["EMA_50"] and last["EMA_35"]>prev["EMA_35"]
-        mr=last["Close"]<last["EMA_35"]<last["EMA_50"] and last["EMA_35"]<prev["EMA_35"]
-        if hb and mb: return "CALL"
-        if hr and mr: return "PUT"
+# ============ قواعد v28 ============
+def trend_aligned(last_15, prev_15, last_h1):
+    if any(pd.isna(v) for v in [last_15["EMA_35"], last_15["EMA_50"],
+                                 prev_15["EMA_35"], last_h1["EMA_35"],
+                                 last_h1["EMA_50"], last_15["Close"], last_h1["Close"]]):
         return None
-    def _lvl(s,last,dr):
-        if not s._v(last["Close"]): return None,""
-        c=float(last["Close"]); a=float(last["ATR"]) if pd.notna(last.get("ATR")) else 0
-        if a<=0: return None,""
-        md=Config.LVL_PROX*a; cand=[]
-        if dr=="CALL" and pd.notna(last.get("RS")):
-            sp=float(last["RS"])
-            if abs(c-sp)<=md: cand.append((sp,"SUPPORT"))
-        if dr=="PUT" and pd.notna(last.get("RR")):
-            r=float(last["RR"])
-            if abs(c-r)<=md: cand.append((r,"RESISTANCE"))
-        step=Config.RN_LARGE if c>50 else Config.RN_SMALL
-        if step>0:
-            nr=round(c/step)*step
-            if abs(c-nr)<=md: cand.append((nr,"ROUND_NUMBER"))
-        if not cand: return None,""
-        cand.sort(key=lambda x:abs(c-x[0])); return cand[0]
-    def _confl(s,last,lv):
-        if not s._v(last["Close"],lv): return False
-        c=float(last["Close"]); a=float(last["ATR"]) if pd.notna(last.get("ATR")) else 0
-        if a<=0: return False
-        step=Config.RN_LARGE if c>50 else Config.RN_SMALL
-        if step<=0: return False
-        nr=round(float(lv)/step)*step
-        return abs(nr-float(lv))<=Config.CONFL_ATR*a
-    @staticmethod
-    def _n(s):
-        b=s.replace("=X",""); return f"{b[:3]}/{b[3:]}" if len(b)==6 else s
-    @staticmethod
-    def _v(*vs):
-        for v in vs:
-            if v is None: return False
-            try:
-                if pd.isna(v) or not np.isfinite(float(v)): return False
-            except: return False
-        return True
+    hb = last_h1["Close"] > last_h1["EMA_35"] > last_h1["EMA_50"]
+    hr = last_h1["Close"] < last_h1["EMA_35"] < last_h1["EMA_50"]
+    mb = last_15["Close"] > last_15["EMA_35"] > last_15["EMA_50"] and last_15["EMA_35"] > prev_15["EMA_35"]
+    mr = last_15["Close"] < last_15["EMA_35"] < last_15["EMA_50"] and last_15["EMA_35"] < prev_15["EMA_35"]
+    if hb and mb: return "CALL"
+    if hr and mr: return "PUT"
+    return None
 
-class SnR: WAITING="W"; BROKEN="B"; SIGNAL="S"; EXPIRED="E"; DEVIATED="D"
-
-class Sniper:
-    def __init__(s,lg,nt,st): s.lg=lg; s.nt=nt; s.st=st; s.last={}
-    def check(s,w,d5,live=None):
-        if d5 is None or d5.empty or len(d5)<20: return SnR.WAITING,None
-        if time.time()-w.get("created_at",0)>Config.LVL_EXP*3600: return SnR.EXPIRED,None
-        lct=d5.index[-1]; wk=f"{w['symbol']}|{w['level']}"
-        if s.last.get(wk)==lct: return SnR.WAITING,None
-        if w.get("scores",{}).get("T",0)!=1: s.last[wk]=lct; return SnR.WAITING,None
-        conf,rej,prev=d5.iloc[-1],d5.iloc[-2],d5.iloc[-3]
-        lv=float(w["level"]); dr=w["direction"]; close=float(conf["Close"])
-        brk=live if live else close
-        if dr=="CALL" and brk<lv-0.0015*brk: s.last[wk]=lct; return SnR.BROKEN,None
-        if dr=="PUT" and brk>lv+0.0015*brk: s.last[wk]=lct; return SnR.BROKEN,None
-        if not s._touch(rej,lv,dr,float(rej["Close"])): return SnR.WAITING,None
-        if not s._rej(rej,prev,lv,dr): s.last[wk]=lct; return SnR.WAITING,None
-        rej_close=float(rej["Close"])
-        if dr=="CALL" and close<rej_close: s.last[wk]=lct; return SnR.WAITING,None
-        if dr=="PUT" and close>rej_close: s.last[wk]=lct; return SnR.WAITING,None
-        if not s._impulse(d5,dr): s.last[wk]=lct; return SnR.WAITING,None
-        eff=live if live else close
-        ok,reason=s._dev(lv,eff,close,dr)
-        if not ok: s._alert(w,lv,eff,reason); s.last[wk]=lct; return SnR.DEVIATED,None
-        h=ntp_now().hour
-        if not (Config.HR_START<=h<Config.HR_END): s.last[wk]=lct; return SnR.WAITING,None
-        zl,zh=s._zone(lv,dr)
-        star=w.get("star",False) and s._top_conf(d5,dr,rej)
-        sig={"id":f"{w['symbol']}|{lct.isoformat()}|{dr}","symbol":w["symbol"],"name":w["name"],"star":star,
-             "direction":dr,"level":lv,"level_type":w.get("level_type","UNKNOWN"),"entry_price":eff,
-             "entry_zone_low":zl,"entry_zone_high":zh,"signal_score":w["signal_score"]+1,
-             "max_score":w["max_score"]+1,"candle_time":lct,"expiry_minutes":Config.EXPIRY_MIN}
-        s.last[wk]=lct; return SnR.SIGNAL,sig
-    def _impulse(s,d5,dr):
-        if d5 is None or len(d5)<5: return True
-        last3=d5.iloc[-4:-1]
-        net=float((last3["Close"]-last3["Open"]).sum())
-        atr=float(d5.iloc[-1]["ATR"]) if pd.notna(d5.iloc[-1].get("ATR")) else 0
-        if atr<=0: return True
-        if dr=="PUT" and net>Config.IMPULSE_ATR*atr: return False
-        if dr=="CALL" and net<-Config.IMPULSE_ATR*atr: return False
-        return True
-    def _zone(s,lv,dr):
-        d=Config.MAX_DEV*lv; a=Config.MAX_AHEAD*lv
-        return (lv-a,lv+d) if dr=="CALL" else (lv-d,lv+a)
-    def _top_conf(s,d5,dr,rej):
-        n=12
-        if dr=="PUT": return float(rej["High"])>=float(d5["High"].iloc[-n:].max())*0.9999
-        return float(rej["Low"])<=float(d5["Low"].iloc[-n:].min())*1.0001
-    def _touch(s,last,lv,dr,close):
-        t=Config.TOUCH_TOL*close
-        return float(last["Low"])<=lv+t if dr=="CALL" else float(last["High"])>=lv-t
-    def _rej(s,last,prev,lv,dr):
-        close=float(last["Close"]); body=float(abs(last["Close"]-last["Open"])); fr=float(last["High"]-last["Low"])
-        if fr<=0 or body<=0: return False
-        br=body/fr
-        brej=br>=Config.REJ_BODY
-        if dr=="CALL":
-            lw=float(last.get("LWICK",0)) if pd.notna(last.get("LWICK")) else 0
-            pin=lw>=Config.WICK_BODY*body
-            eng=last["Close"]>last["Open"] and prev["Close"]<prev["Open"] and last["Close"]>=prev["Open"] and last["Open"]<=prev["Close"]
-            return (brej or pin or eng) and close>lv
-        uw=float(last.get("UWICK",0)) if pd.notna(last.get("UWICK")) else 0
-        pin=uw>=Config.WICK_BODY*body
-        eng=last["Close"]<last["Open"] and prev["Close"]>prev["Open"] and last["Close"]<=prev["Open"] and last["Open"]>=prev["Close"]
-        return (brej or pin or eng) and close<lv
-    def _dev(s,lv,live,close,dr):
-        dn=(lv-live)/close; up=(live-lv)/close
-        if dr=="PUT":
-            if dn>Config.MAX_DEV: return False,"السعر نزل بعيد تحت المستوى"
-            if up>Config.MAX_AHEAD: return False,"السعر لم يصل للمستوى بعد"
-        else:
-            if up>Config.MAX_DEV: return False,"السعر طلع بعيد فوق المستوى"
-            if dn>Config.MAX_AHEAD: return False,"السعر لم يصل للمستوى بعد"
-        return True,""
-    def _alert(s,w,lv,live,reason):
-        lt=f"{lv:.3f}" if lv>50 else f"{lv:.5f}"; pt=f"{live:.3f}" if live>50 else f"{live:.5f}"
-        s.nt.send_message(f"🛡️ حماية الانحراف\n\n• الزوج: {w['name']}\n• المستوى: {lt}\n• السعر الحي: {pt}\n• السبب: {reason}\n• الحالة: تم إلغاء الإشارة 🛡️")
-
-class Risk:
-    def __init__(s,lg,st): s.lg=lg; s.st=st
-    def can(s,score):
-        if not Config.RISK_GATE: return True,"OK"
-        s.st.reset(); d=s.st.day()
-        if score<Config.MIN_SCORE: return False,"LOW_SCORE"
-        if d.get("stop"): return False,"STOPPED"
-        if d["trades"]>=Config.MAX_TR: return False,"MAX_TRADES"
-        if d["losses"]>=Config.MAX_LOS: d["stop"]="MAX_LOSSES"; s.st.save(); return False,"MAX_LOSSES"
-        if d["pnl"]>=Config.DAILY_TGT: d["stop"]="TARGET"; s.st.save(); return False,"TARGET"
-        lu=s.st.get("lock_until",0)
-        if time.time()<lu: return False,"COOLDOWN"
-        return True,"OK"
-    def reg_sig(s):
-        s.st.reset(); d=s.st.day()
-        d["trades"]+=1; s.st.set("lock_until",time.time()+Config.CD_TRADE); s.st.save()
-    def reg_res(s,win,manual=False):
-        s.st.reset(); d=s.st.day(); m=s.st.month()
-        at=s.st.get("alltime",{"wins":0,"losses":0})
-        if win:
-            p=round(Config.STAKE*Config.PAYOUT,2)
-            d["pnl"]=round(d.get("pnl",0)+p,2); m["pnl"]=round(m.get("pnl",0)+p,2)
-            if manual: d["mw"]=d.get("mw",0)+1; m["mw"]=m.get("mw",0)+1
-            else: d["wins"]=d.get("wins",0)+1; m["wins"]=m.get("wins",0)+1
-            at["wins"]=at.get("wins",0)+1; d["cl"]=0
-        else:
-            d["pnl"]=round(d.get("pnl",0)-Config.STAKE,2); m["pnl"]=round(m.get("pnl",0)-Config.STAKE,2)
-            if manual: d["ml"]=d.get("ml",0)+1; m["ml"]=m.get("ml",0)+1
-            else: d["losses"]=d.get("losses",0)+1; m["losses"]=m.get("losses",0)+1
-            at["losses"]=at.get("losses",0)+1; d["cl"]=d.get("cl",0)+1
-            if d["cl"]>=Config.CD_LOS: s.st.set("lock_until",time.time()+Config.CD_MIN*60); d["cl"]=0
-            if d["losses"]>=Config.MAX_LOS: d["stop"]="MAX_LOSSES"
-        s.st.set("alltime",at); s.st.save()
-    def txt(s):
-        s.st.reset(); d=s.st.day()
-        return f"صفقات: {d['trades']}/{Config.MAX_TR} | فوز: {d['wins']} | خسارة: {d['losses']} | صافي: {d['pnl']:.2f}$"
-
-class Tracker:
-    def __init__(s,lg,st,risk,nt): s.lg=lg; s.st=st; s.risk=risk; s.nt=nt
-    def add(s,sig):
-        t=s.st.get("open_trades",{})
-        t[sig["id"]]={"symbol":sig["symbol"],"name":sig["name"],"direction":sig["direction"],"entry_price":sig["entry_price"],
-                     "created_at":time.time(),"expiry":time.time()+sig["expiry_minutes"]*60,"done":False}
-        s.st.set("open_trades",t); s.st.save()
-    def clean(s):
-        t=s.st.get("open_trades",{}); now=time.time()
-        rm=[i for i,tr in t.items() if tr.get("done") or now-tr.get("created_at",now)>86400]
-        for i in rm: del t[i]
-        s.st.set("open_trades",t); s.st.save()
-
-class TG:
-    def __init__(s,lg,st,risk):
-        s.lg=lg; s.st=st; s.risk=risk
-        s.token=Config.TG_TOKEN; s.chat=Config.TG_CHAT
-        s.en=bool(s.token and s.chat)
-        s.api=f"https://api.telegram.org/bot{s.token}" if s.en else None
-        s.off=s.st.get("tg_offset",0); s._l=threading.Lock()
-    @staticmethod
-    def _fmt(v): return f"{v:.3f}" if v>50 else f"{v:.5f}"
-    def send(s,text,reply_to=None):
-        if not s.en: s.lg.info(f"TG_DISABLED:\n{text}"); return None
-        url=f"{s.api}/sendMessage"; p={"chat_id":s.chat,"text":text,"disable_web_page_preview":True}
-        if reply_to: p["reply_to_message_id"]=reply_to
-        with s._l:
-            for a in range(1,4):
-                try:
-                    r=requests.post(url,json=p,timeout=Config.REQ_TO)
-                    if r.status_code==200: return r.json().get("result",{}).get("message_id")
-                    if r.status_code==429: time.sleep(r.json().get("parameters",{}).get("retry_after",5)+1); continue
-                except Exception as e: s.lg.warning(f"TG {a}: {e}")
-                time.sleep(2*a)
+def find_level(last, dr):
+    c = float(last["Close"])
+    a = float(last["ATR"]) if pd.notna(last.get("ATR")) else 0
+    if a <= 0: return None
+    md = LVL_PROX * a
+    cand = []
+    if dr == "CALL" and pd.notna(last.get("RS")):
+        sp = float(last["RS"])
+        if abs(c - sp) <= md:
+            cand.append((sp, "SUPPORT"))
+    if dr == "PUT" and pd.notna(last.get("RR")):
+        r = float(last["RR"])
+        if abs(c - r) <= md:
+            cand.append((r, "RESISTANCE"))
+    step = RN_LARGE if c > 50 else RN_SMALL
+    if step > 0:
+        nr = round(c / step) * step
+        if abs(c - nr) <= md:
+            cand.append((nr, "ROUND_NUMBER"))
+    if not cand:
         return None
-    def send_message(s,text,reply_to=None): return s.send(text,reply_to)
-    def watch(s,w):
-        d="صعود 🟢" if w["direction"]=="CALL" else "هبوط 🔴"
-        zl=s._fmt(w.get('entry_zone_low',w['level']))
-        zh=s._fmt(w.get('entry_zone_high',w['level']))
-        ideal="انتظر السعر يقترب من قاع المنطقة ثم ادخل CALL" if w["direction"]=="CALL" else "انتظر السعر يقترب من قمة المنطقة ثم ادخل PUT"
-        flip=" 🔄 (انقلاب)" if w.get("flips",0)>0 else ""
-        star=" ⭐" if w.get("star") else ""
-        s.send(f"👀 تنبيه تجهيز{Config.MODE_LABEL}{flip}{star}\n\n• الزوج: {w['name']}\n• المستوى: {s._fmt(w['level'])} ({w['level_type']})\n• الاتجاه المتوقع: {d}\n🎯 منطقة الدخول: من {zl} إلى {zh}\n🎯 {ideal}\n📍 السعر الحي الآن: {s._fmt(w.get('live_price',w['entry_price']))}\n📏 يبعد عن المستوى: {w.get('distance_pips',0)} نقطة\n• جودة الإشارة: {w['signal_score']}/{w['max_score']}\n• الخطة: انتظر اللمس والرفض والتأكيد\n• الصلاحية: {Config.LVL_EXP} ساعات")
-    def signal(s,sg):
-        d="صعود 🟢 (CALL)" if sg["direction"]=="CALL" else "هبوط 🔴 (PUT)"
-        zl=s._fmt(sg.get('entry_zone_low',sg['level']))
-        zh=s._fmt(sg.get('entry_zone_high',sg['level']))
-        if sg["direction"]=="CALL": ideal=f"🎯 الدخول المثالي: انتظر السعر يقترب من {zl} (قاع المنطقة) ثم ادخل CALL\n"
-        else: ideal=f"🎯 الدخول المثالي: انتظر السعر يقترب من {zh} (قمة المنطقة) ثم ادخل PUT\n"
-        star="⭐ إشارة مميزة — توافق مستوى سوينغ مع رقم 000\n" if sg.get("star") else ""
-        s.send(f"🟢 توصية ذهبية 🚀{Config.MODE_LABEL}\n\n{star}• الزوج: {sg['name']}\n• المستوى: {s._fmt(sg['level'])} ({sg['level_type']})\n• الاتجاه: {d}\n🎯 منطقة الدخول الذهبية: من {zl} إلى {zh}\n{ideal}💰 السعر الحي الآن: {s._fmt(sg['entry_price'])}\n🚫 لا تدخل إذا خرج السعر خارج المنطقة\n• مدة الصفقة: {sg['expiry_minutes']} دقيقة\n• جودة الإشارة: {sg['signal_score']}/{sg['max_score']}\n• البروتوكول: غيث المزدوج (v28 الرشيقة)\n• {s.risk.txt()}\n\n📝 بعد الصفقة رد بـ: ربحت / خسرت")
-    def listen(s):
-        if not s.en: return
-        try:
-            r=requests.get(f"{s.api}/getUpdates",params={"offset":s.off,"timeout":0},timeout=Config.REQ_TO)
-            for u in r.json().get("result",[]):
-                uid=u.get("update_id",0)
-                if uid>=s.off: s.off=uid+1
-                m=u.get("message") or u.get("edited_message")
-                if not m: continue
-                t=(m.get("text") or "").lower(); win=None
-                if any(w in t for w in ["ربحت","رابحة","won","win"]): win=True
-                elif any(w in t for w in ["خسرت","خاسرة","lost","lose"]): win=False
-                if win is None: continue
-                trades=s.st.get("open_trades",{}); tgt=None
-                rt=m.get("reply_to_message")
-                if rt: tgt=trades.get(str(rt.get("message_id")))
-                if not tgt:
-                    for tid,tr in trades.items():
-                        if not tr.get("done") and tr.get("name","") in t: tgt=tr; break
-                if not tgt: s.send("⚠️ لم أتمكن من ربط ردك بصفقة — استخدم Reply"); continue
-                tgt["done"]=True; s.risk.reg_res(win,manual=True)
-                pl=f"+{Config.STAKE*Config.PAYOUT:.2f}$" if win else f"-{Config.STAKE:.2f}$"
-                s.send(f"💰 تم تسجيل صفقتك\n\n• الزوج: {tgt['name']}\n• النتيجة: {'✅' if win else '❌'} {pl}\n• {s.risk.txt()}")
-            s.st.set("tg_offset",s.off); s.st.save()
-        except Exception as e: s.lg.warning(f"ردود: {e}")
+    cand.sort(key=lambda x: abs(c - x[0]))
+    return cand[0][0]
 
-class Bot:
-    def __init__(s):
-        s.lg=setup_logger(); s.st=State(s.lg); s.data=Data(s.lg)
-        s.ind=Ind(s.lg); s.scan=Scan(s.lg,None)
-        s.snip=Sniper(s.lg,None,s.st); s.risk=Risk(s.lg,s.st)
-        s.tg=TG(s.lg,s.st,s.risk); s.trk=Tracker(s.lg,s.st,s.risk,s.tg)
-        s.scan.nt=s.tg; s.snip.nt=s.tg
-        s.watch=s.st.get("watch_levels",{}) or {}; s._wl=threading.Lock()
-    def run(s):
-        s._boot()
-        budget=env_int("RUN_BUDGET_SECONDS",200); start=time.time()
-        while time.time()<start+budget:
-            try:
-                s.tg.listen(); s.trk.clean()
-                s._snipe(); s._exp(); s._scan(); s._save()
-            except Exception as e: s.lg.exception(f"loop: {e}")
-            time.sleep(Config.SCAN_INT)
-        s.lg.info("done")
-    def _save(s):
-        with s._wl: s.st.set("watch_levels",s.watch)
-        s.st.save()
-    def _boot(s):
-        today=datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        if s.st.get("boot_date")!=today:
-            s.st.set("boot_date",today); s.st.save()
-            offset=get_ntp_offset()
-            ntp_status=f"✅ {offset:+.3f}s" if HAS_NTP and offset!=0 else ("⚠️ غير متاح" if not HAS_NTP else "✅ متزامن")
-            risk_warn = "\n\n🔴🔴 تحذير: RISK_GATE_ENABLED غير مفعّل — إدارة المخاطر معطّلة! فعّلها للتداول الآمن." if not Config.RISK_GATE else ""
-            s.tg.send(f"🚀 غيث المزدوج (v28 الرشيقة){Config.MODE_LABEL} بدأ\n\n• الرموز: {len(Config.SYMBOLS)} (حقيقية فقط)\n• الماسح: {Config.SCAN_TF} | القناص: {Config.SNIPER_TF} | الترند: {Config.TREND_TF}\n• مدة الصفقة: {Config.EXPIRY_MIN} دقيقة\n• الجودة: {Config.MIN_SCORE}/{Config.MAX_SC}\n• نافذة الجلسات: {Config.HR_START}-{Config.HR_END} UTC\n• 🕐 NTP: {ntp_status}\n• 🛡️ حارس الشموع: مفعّل\n• 🎯 مستويات: سوينغ + 000 (ضمن {Config.LVL_PROX} ATR)\n• ✂️ v28: ترند+مستوى+لمس+رفض+تأكيد\n• 🛡️ حارس الاندفاع: {Config.IMPULSE_ATR} ATR (متطرف فقط)\n• 📏 منطقة الانحراف: ±{Config.MAX_DEV*100:.2f}%/{Config.MAX_AHEAD*100:.2f}%\n• 📝 النتائج: يدوية 100%\n• مراقبات محفوظة: {len(s.watch)}{risk_warn}")
-    def _scan(s):
-        for sym in Config.SYMBOLS:
-            if not is_real_market_symbol(sym): continue
-            try:
-                d15=s.data.fetch(sym,Config.SCAN_TF,period_for(Config.SCAN_TF))
-                d60=s.data.fetch(sym,Config.TREND_TF,period_for(Config.TREND_TF))
-                if d15 is None or d60 is None or d15.empty or d60.empty: continue
-                i15=s.ind.add(d15); i60=s.ind.add(d60)
-                with s._wl: act={w["symbol"] for w in s.watch.values()}
-                w=s.scan.scan(sym,i15,i60,act)
-                if w:
-                    lv_live=s.data.live(sym)
-                    if lv_live:
-                        w["live_price"]=lv_live
-                        pip=0.01 if lv_live>50 else 0.0001
-                        w["distance_pips"]=round(abs(lv_live-w["level"])/pip,1)
-                    k=f"{sym}|{w['level']}"
-                    with s._wl: s.watch[k]=w
-                    s.tg.watch(w)
-                time.sleep(random.uniform(0.3,0.8))
-            except Exception as e: s.lg.warning(f"scan {sym}: {e}")
-    def _snipe(s):
-        with s._wl: items=list(s.watch.items())
-        for k,w in items:
-            try:
-                sym=w["symbol"]
-                if not is_real_market_symbol(sym): continue
-                d5=s.data.fetch(sym,Config.SNIPER_TF,period_for(Config.SNIPER_TF))
-                if d5 is None or d5.empty: continue
-                i5=s.ind.add(d5)
-                live=s.data.live(sym)
-                res,pay=s.snip.check(w,i5,live)
-                if res==SnR.EXPIRED or res==SnR.DEVIATED:
-                    with s._wl: s.watch.pop(k,None)
-                    s.lg.info(f"مراقبة أُلغيت ({res}): {k}")
-                    continue
-                if res==SnR.BROKEN:
-                    with s._wl:
-                        cur=s.watch.get(k)
-                        if cur is not None and cur.get("flips",0)<1:
-                            nd="CALL" if cur["direction"]=="PUT" else "PUT"
-                            lv=cur["level"]
-                            lt="SUPPORT" if nd=="CALL" else "RESISTANCE"
-                            if nd=="CALL":
-                                zl,zh=lv-Config.MAX_AHEAD*lv, lv+Config.MAX_DEV*lv
-                            else:
-                                zl,zh=lv-Config.MAX_DEV*lv, lv+Config.MAX_AHEAD*lv
-                            cur_price=live if live else float(d5.iloc[-1]["Close"])
-                            pip=0.01 if cur_price>50 else 0.0001
-                            cur["direction"]=nd; cur["level_type"]=lt
-                            cur["entry_zone_low"]=zl; cur["entry_zone_high"]=zh
-                            cur["entry_price"]=cur_price; cur["live_price"]=cur_price
-                            cur["distance_pips"]=round(abs(cur_price-lv)/pip,1)
-                            cur["created_at"]=time.time(); cur["flips"]=cur.get("flips",0)+1
-                            s.snip.last.pop(f"{cur['symbol']}|{lv}",None)
-                            flipped=cur
-                        else:
-                            s.watch.pop(k,None); flipped=None
-                    if flipped is not None: s.tg.watch(flipped)
-                    continue
-                if res==SnR.SIGNAL and pay:
-                    ok,reason=s.risk.can(pay["signal_score"])
-                    if not ok:
-                        with s._wl: s.watch.pop(k,None); continue
-                    s.risk.reg_sig(); s.trk.add(pay)
-                    mid=s.tg.signal(pay)
-                    if mid:
-                        t=s.st.get("open_trades",{}); t[str(mid)]=t.pop(pay["id"],{}); s.st.set("open_trades",t); s.st.save()
-                    with s._wl: s.watch.pop(k,None)
-                time.sleep(random.uniform(0.2,0.5))
-            except Exception as e: s.lg.warning(f"snipe {k}: {e}")
-    def _exp(s):
-        now=time.time()
-        with s._wl:
-            rm=[k for k,w in s.watch.items() if now-w.get("created_at",now)>Config.LVL_EXP*3600]
-            for k in rm: del s.watch[k]
+def ema_distance_ok(last):
+    c = float(last["Close"])
+    e = float(last["EMA_35"])
+    a = float(last["ATR"]) if pd.notna(last.get("ATR")) else 0
+    return a > 0 and abs(c - e) <= MAX_DIST_EMA * a
 
-if __name__=="__main__":
+def touch_rej_confirm(d5_view, level, dr):
+    """يفحص آخر 3 شموع 5m: رفض + تأكيد"""
+    if len(d5_view) < 3:
+        return False, None
+    conf, rej, prev = d5_view.iloc[-1], d5_view.iloc[-2], d5_view.iloc[-3]
+    rej_close = float(rej["Close"])
+    rej_body = abs(float(rej["Close"]) - float(rej["Open"]))
+    rej_range = float(rej["High"]) - float(rej["Low"])
+    if rej_range <= 0 or rej_body <= 0:
+        return False, None
+    br = rej_body / rej_range
+    brej = br >= REJ_BODY
+    # اللمس
+    t = TOUCH_TOL * float(rej["Close"])
+    if dr == "CALL":
+        touched = float(rej["Low"]) <= level + t
+    else:
+        touched = float(rej["High"]) >= level - t
+    if not touched:
+        return False, None
+    # الرفض
+    if dr == "CALL":
+        lw = float(rej.get("LWICK", 0)) if pd.notna(rej.get("LWICK")) else 0
+        pin = lw >= WICK_BODY * rej_body
+        eng = rej["Close"] > rej["Open"] and prev["Close"] < prev["Open"] and rej["Close"] >= prev["Open"] and rej["Open"] <= prev["Close"]
+        rej_ok = (brej or pin or eng) and rej_close > level
+        conf_ok = float(conf["Close"]) > rej_close
+    else:
+        uw = float(rej.get("UWICK", 0)) if pd.notna(rej.get("UWICK")) else 0
+        pin = uw >= WICK_BODY * rej_body
+        eng = rej["Close"] < rej["Open"] and prev["Close"] > prev["Open"] and rej["Close"] <= prev["Open"] and rej["Open"] >= prev["Close"]
+        rej_ok = (brej or pin or eng) and rej_close < level
+        conf_ok = float(conf["Close"]) < rej_close
+    return rej_ok and conf_ok, conf.name
+
+def impulse_ok(d5_view, dr):
+    if len(d5_view) < 5:
+        return True
+    last3 = d5_view.iloc[-4:-1]
+    net = float((last3["Close"] - last3["Open"]).sum())
+    atr = float(d5_view.iloc[-1]["ATR"]) if pd.notna(d5_view.iloc[-1].get("ATR")) else 0
+    if atr <= 0:
+        return True
+    if dr == "PUT" and net > IMPULSE_ATR * atr:
+        return False
+    if dr == "CALL" and net < -IMPULSE_ATR * atr:
+        return False
+    return True
+
+def deviation_ok(level, entry_price, dr):
+    dn = (level - entry_price) / entry_price
+    up = (entry_price - level) / entry_price
+    if dr == "PUT":
+        if dn > MAX_DEV: return False
+        if up > MAX_AHEAD: return False
+    else:
+        if up > MAX_DEV: return False
+        if dn > MAX_AHEAD: return False
+    return True
+
+# ============ المحاكاة ============
+def run_backtest(sym):
+    log.info(f"=== {sym} ===")
+    d15 = fetch(sym, SCAN_TF, "7d" if HISTORY_DAYS <= 7 else f"{HISTORY_DAYS}d")
+    d5  = fetch(sym, SNIPER_TF, "60d")
+    d1h = fetch(sym, TREND_TF, f"{HISTORY_DAYS}d")
+    if d15 is None or d5 is None or d1h is None:
+        log.warning(f"{sym}: فشل جلب البيانات")
+        return None
+    d15 = add_indicators(d15)
+    d5  = add_indicators(d5)
+    d1h = add_indicators(d1h)
+    if d15 is None or d5 is None or d1h is None:
+        return None
+    if len(d15) < 300 or len(d5) < 1000 or len(d1h) < 100:
+        log.warning(f"{sym}: بيانات غير كافية")
+        return None
+
+    trades = []
+    # نمشي على كل شمعة 5m مغلقة
+    for i in range(10, len(d5)):
+        cur_time = d5.index[i]
+        # أوجد أقرب شمعة 15m و 1h <= cur_time
+        m15 = d15[d15.index <= cur_time]
+        m1h = d1h[d1h.index <= cur_time]
+        if len(m15) < 5 or len(m1h) < 3:
+            continue
+        last_15 = m15.iloc[-1]
+        prev_15 = m15.iloc[-2]
+        last_h1 = m1h.iloc[-1]
+        # 1) ترند
+        dr = trend_aligned(last_15, prev_15, last_h1)
+        if dr is None:
+            continue
+        # 2) EMA
+        if not ema_distance_ok(last_15):
+            continue
+        # 3) مستوى
+        level = find_level(last_15, dr)
+        if level is None:
+            continue
+        # 4) نافذة 5m
+        d5_view = d5.iloc[max(0, i-20):i+1]
+        if len(d5_view) < 10:
+            continue
+        # 5) لمس + رفض + تأكيد
+        ok, sig_time = touch_rej_confirm(d5_view, level, dr)
+        if not ok or sig_time is None:
+            continue
+        # 6) اندفاع
+        if not impulse_ok(d5_view, dr):
+            continue
+        # 7) انحراف
+        entry_price = float(d5_view.iloc[-1]["Close"])
+        if not deviation_ok(level, entry_price, dr):
+            continue
+        # 8) محاكاة انتهاء 15 دقيقة = 3 شموع 5m بعد
+        end_idx = i + 3
+        if end_idx >= len(d5):
+            continue
+        exit_price = float(d5.iloc[end_idx]["Close"])
+        win = (exit_price > entry_price) if dr == "CALL" else (exit_price < entry_price)
+        trades.append({
+            "time": cur_time,
+            "dr": dr,
+            "level": level,
+            "entry": entry_price,
+            "exit": exit_price,
+            "win": win
+        })
+    return trades
+
+# ============ التحليل ============
+def analyze(sym, trades):
+    if not trades:
+        return {"symbol": sym, "trades": 0, "wins": 0, "wr": 0, "pnl": 0,
+                "call_w": 0, "call_t": 0, "put_w": 0, "put_t": 0,
+                "by_session": {}}
+    wins = sum(1 for t in trades if t["win"])
+    call_trades = [t for t in trades if t["dr"] == "CALL"]
+    put_trades = [t for t in trades if t["dr"] == "PUT"]
+    pnl = wins * STAKE * PAYOUT - (len(trades) - wins) * STAKE
+    by_session = {}
+    for t in trades:
+        h = t["time"].hour
+        if 2 <= h < 6:
+            s = "آسيا"
+        elif 7 <= h < 11:
+            s = "لندن-افتتاح"
+        elif 11 <= h < 15:
+            s = "لندن"
+        elif 15 <= h < 20:
+            s = "نيويورك"
+        else:
+            s = "هادئة"
+        if s not in by_session:
+            by_session[s] = {"w": 0, "t": 0}
+        by_session[s]["t"] += 1
+        if t["win"]:
+            by_session[s]["w"] += 1
+    return {
+        "symbol": sym,
+        "trades": len(trades),
+        "wins": wins,
+        "wr": round(100 * wins / len(trades), 1),
+        "pnl": round(pnl, 2),
+        "call_w": sum(1 for t in call_trades if t["win"]),
+        "call_t": len(call_trades),
+        "put_w": sum(1 for t in put_trades if t["win"]),
+        "put_t": len(put_trades),
+        "by_session": by_session
+    }
+
+# ============ التقرير ============
+def fmt_sym(s):
+    b = s.replace("=X", "")
+    return f"{b[:3]}/{b[3:]}" if len(b) == 6 else s
+
+def build_report(results):
+    valid = [r for r in results if r["trades"] > 0]
+    if not valid:
+        return "❌ لا توجد بيانات كافية لأي زوج"
+    total_t = sum(r["trades"] for r in valid)
+    total_w = sum(r["wins"] for r in valid)
+    total_pnl = sum(r["pnl"] for r in valid)
+    overall_wr = round(100 * total_w / total_t, 1) if total_t > 0 else 0
+
+    # ترتيب حسب نسبة الفوز (مع حد أدنى 10 صفقات)
+    ranked = sorted([r for r in valid if r["trades"] >= 10], key=lambda x: x["wr"], reverse=True)
+    # ترتيب حسب عدد الصفقات
+    most_active = sorted(valid, key=lambda x: x["trades"], reverse=True)[:5]
+
+    # تجميع الجلسات
+    sessions = {}
+    for r in valid:
+        for s, d in r["by_session"].items():
+            if s not in sessions:
+                sessions[s] = {"w": 0, "t": 0}
+            sessions[s]["t"] += d["t"]
+            sessions[s]["w"] += d["w"]
+    session_lines = []
+    for s, d in sorted(sessions.items(), key=lambda x: (100*x[1]["w"]/x[1]["t"] if x[1]["t"] else 0), reverse=True):
+        if d["t"] >= 5:
+            wr = round(100 * d["w"] / d["t"], 1)
+            medal = "🏆" if wr >= 58 else ("✅" if wr >= 53 else "⚠️")
+            session_lines.append(f"• {medal} {s}: {wr}% ({d['t']} صفقة)")
+
+    verdict = "🟢 استراتيجية رابحة" if overall_wr >= 55 else ("🟡 هامشية" if overall_wr >= 52.6 else "🔴 ضعيفة")
+
+    msg = f"📊 *تقرير باك تست v28* (60 يوم)\n\n"
+    msg += f"🎯 *النتيجة العامة:*\n"
+    msg += f"• صفقات: {total_t}\n"
+    msg += f"• فوز: {total_w} | خسارة: {total_t - total_w}\n"
+    msg += f"• *نسبة الفوز: {overall_wr}%*\n"
+    msg += f"• صافي الربح: {total_pnl:+.2f}$\n"
+    msg += f"• الحكم: {verdict}\n\n"
+
+    msg += f"📈 *ترتيب الأزواج (الأقوى):*\n"
+    for i, r in enumerate(ranked[:8], 1):
+        medal = "🥇" if i == 1 else ("🥈" if i == 2 else ("🥉" if i == 3 else f"{i}."))
+        msg += f"{medal} *{fmt_sym(r['symbol'])}*: {r['wr']}% ({r['trades']} صفقة) — {r['pnl']:+.0f}$\n"
+
+    msg += f"\n🔻 *الأزواج الأضعف:*\n"
+    for r in ranked[-3:] if len(ranked) > 5 else []:
+        msg += f"• ❌ {fmt_sym(r['symbol'])}: {r['wr']}%\n"
+
+    msg += f"\n⏰ *حسب الجلسات:*\n"
+    msg += "\n".join(session_lines) if session_lines else "• لا بيانات كافية"
+
+    msg += f"\n💡 *التوصيات:*\n"
+    if ranked and ranked[0]["wr"] >= 55:
+        msg += f"• ركّز على: {', '.join(fmt_sym(r['symbol']) for r in ranked[:3])}\n"
+    if session_lines:
+        best_s = max(sessions.items(), key=lambda x: (100*x[1]["w"]/x[1]["t"] if x[1]["t"] else 0))
+        msg += f"• أفضل جلسة: *{best_s[0]}*\n"
+    if overall_wr >= 55:
+        msg += f"• ✅ ابدأ التداول الحقيقي بثقة\n"
+    elif overall_wr >= 52.6:
+        msg += f"• ⚠️ هامشية — نحتاج تعديل بوابة\n"
+    else:
+        msg += f"• ❌ نحتاج إعادة تصميم القواعد\n"
+
+    return msg
+
+def send_telegram(text):
+    if not TG_TOKEN or not TG_CHAT:
+        log.warning("TG غير معد - اطبع التقرير محلياً فقط")
+        print(text)
+        return
     try:
-        Bot().run()
+        url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
+        payload = {"chat_id": TG_CHAT, "text": text, "parse_mode": "Markdown", "disable_web_page_preview": True}
+        r = requests.post(url, json=payload, timeout=15)
+        if r.status_code == 200:
+            log.info("✅ التقرير أُرسل على تليجرام")
+        else:
+            log.warning(f"TG: {r.status_code} - {r.text[:200]}")
+    except Exception as e:
+        log.error(f"TG error: {e}")
+
+# ============ الرئيسي ============
+def main():
+    log.info(f"🚀 بدء باك تست v28 على {len(SYMBOLS)} زوجاً × {HISTORY_DAYS} يوم")
+    start = time.time()
+    results = []
+    for sym in SYMBOLS:
+        try:
+            trades = run_backtest(sym)
+            if trades is not None:
+                r = analyze(sym, trades)
+                results.append(r)
+                log.info(f"{fmt_sym(sym)}: {r['trades']} صفقة، {r['wr']}%")
+            time.sleep(1)
+        except Exception as e:
+            log.error(f"{sym}: {e}")
+    report = build_report(results)
+    print("\n" + "=" * 50)
+    print(report)
+    print("=" * 50)
+    send_telegram(report)
+    log.info(f"انتهى في {time.time()-start:.0f} ثانية")
+
+if __name__ == "__main__":
+    try:
+        main()
     except KeyboardInterrupt:
         print("stopped")
     except Exception as e:
-        logging.getLogger("GhaithDual").exception(f"fatal: {e}")
+        logging.exception(f"fatal: {e}")
         raise
