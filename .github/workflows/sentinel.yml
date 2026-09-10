@@ -1,29 +1,33 @@
 name: Sentinel_H2
+
 on:
   workflow_dispatch:
   schedule:
     - cron: "*/5 * * * *"
+
 concurrency:
   group: h2-live
   cancel-in-progress: false
+
 jobs:
   scan:
     runs-on: ubuntu-latest
-    timeout-minutes: 4
+    timeout-minutes: 12
+
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - uses: actions/cache@v4
-        with:
-          path: state_h2.json
-          key: h2-state-${{ github.run_id }}
-          restore-keys: |
-            h2-state-
-      - name: deps
-        run: pip install requests numpy pandas yfinance
-      - name: run
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests numpy pandas yfinance
+
+      - name: Run H2 Sentinel
         run: python sentinel_h2.py
         env:
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
