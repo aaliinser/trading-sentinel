@@ -2,6 +2,8 @@
 # -*- coding: utf-8 -*-
 """
 غيث H2 — بوت إشارات حي: تشبع RSI + بولينجر (5m) — انتهاء 15 دقيقة
++ وسم V4 (باند 2.5σ) + أمر "تقرير" للمقارنة
+مُصلَح: حماية من فشل TG + cl مستمر عبر الأيام + وقت انتهاء دقيق
 """
 import os, sys, time, json, logging
 from datetime import datetime, timedelta, timezone
@@ -54,7 +56,9 @@ def day_obj(st):
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     d = st.get("day", {})
     if d.get("date") != today:
-        d = {"date": today, "alerts": 0, "trades": 0, "wins": 0, "losses": 0, "cl": 0}
+        # 🔧 الإصلاح 2: cl (consecutive losses) مستمر عبر الأيام - لا يُعاد تعيينه
+        old_cl = d.get("cl", 0)
+        d = {"date": today, "alerts": 0, "trades": 0, "wins": 0, "losses": 0, "cl": old_cl}
         st["day"] = d
     return d
 
@@ -117,6 +121,28 @@ def fmt_sym(s):
 def fmt_px(v):
     return f"{v:.3f}" if v > 50 else f"{v:.5f}"
 
+def send_report(st):
+    log_list = st.get("log", [])
+    if not log_list:
+        tg_send("📊 لا صفقات مسجلة بعد — تداول أولاً ثم اطلب التقرير")
+        return
+    tot = len(log_list)
+    wins = sum(1 for x in log_list if x["win"])
+    v4_list = [x for x in log_list if x["v4"]]
+    v4_tot = len(v4_list)
+    v4_wins = sum(1 for x in v4_list if x["win"])
+    bo_tot = tot - v4_tot
+    bo_wins = wins - v4_wins
+    wr = round(100 * wins / tot, 1) if tot else 0
+    v4_wr = round(100 * v4_wins / v4_tot, 1) if v4_tot else 0
+    bo_wr = round(100 * bo_wins / bo_tot, 1) if bo_tot else 0
+    txt = (f"📊 *تقرير الديمو*\n\n"
+           f"• كل الصفقات (الأساس): *{tot}* | فوز *{wr}%*\n"
+           f"• صفقات V4 (الموسومة ✅): *{v4_tot}* | فوز *{v4_wr}%*\n"
+           f"• صفقات الأساس فقط (➖): *{bo_tot}* | فوز *{bo_wr}%*\n\n"
+           f"📌 القاعدة: V4 تُعتمد فقط إذا تفوقت بنقطتين+ على الأساس فقط، وبعد 30+ صفقة موسومة")
+    tg_send(txt)
+
 def listen(st):
     if not TG_TOKEN:
         return
@@ -131,6 +157,9 @@ def listen(st):
             if not m:
                 continue
             t = (m.get("text") or "").lower()
+            if ("تقرير" in t) or ("report" in t):
+                send_report(st)
+                continue
             win = None
             if any(w in t for w in ["ربحت","رابحة","won","win"]):
                 win = True
@@ -146,6 +175,15 @@ def listen(st):
                 tg_send("⚠️ رد على رسالة الإشارة مباشرة (Reply) لأسجل النتيجة")
                 continue
             del st["open"][mid]
+            st.setdefault("log", []).append({
+                "date": d["date"],
+                "sym": op.get("sym", "?"),
+                "dr": op.get("dr", "?"),
+                "v4": bool(op.get("v4", False)),
+                "win": bool(win),
+            })
+            if len(st["log"]) > 600:
+                st["log"] = st["log"][-600:]
             d["trades"] += 1
             if win:
                 d["wins"] += 1
@@ -183,6 +221,8 @@ def scan(st):
         lastmap = st.setdefault("last_sig", {})
         if lastmap.get(sym) == key:
             continue
+        if np.isnan(sd.iloc[i]):
+            continue
         r = float(rsi.iloc[i])
         cl = float(df["Close"].iloc[i])
         bu = float(bbu.iloc[i])
@@ -195,24 +235,30 @@ def scan(st):
             dr = "CALL"
         if dr is None:
             continue
-        lastmap[sym] = key
-        d["alerts"] += 1
         over = abs(cl - (bu if dr == "PUT" else bl)) / sdv if sdv > 0 else 0.0
-        exp = datetime.now(timezone.utc) + timedelta(minutes=EXPIRY_MIN)
+        v4 = over >= 0.5
+        # 🔧 الإصلاح 3: وقت الانتهاء محسوب من إغلاق الشمعة (أدق)
+        exp = ct + timedelta(minutes=5 + EXPIRY_MIN)
         arrow = "🔴 PUT (هبوط)" if dr == "PUT" else "🟢 CALL (صعود)"
         txt = (f"🎯 *إشارة H2 — تشبع + بولينجر*\n\n"
                f"• الزوج: *{fmt_sym(sym)}*\n"
                f"• الاتجاه: {arrow}\n"
                f"• سعر الإشارة: {fmt_px(cl)}\n"
-               f"• السبب: RSI {r:.1f} + إغلاق خارج الباند بمقدار {over:.1f}σ\n\n"
+               f"• السبب: RSI {r:.1f} + إغلاق خارج الباند بمقدار {over:.1f}σ\n"
+               f"🏷️ ضمن نسخة V4: {'✅' if v4 else '➖'}\n\n"
                f"⏱️ ادخل خلال 60 ثانية\n"
                f"⌛ الانتهاء: 15 دقيقة (حتى {exp.strftime('%H:%M')} UTC)\n"
                f"💰 شرط الـ payout: 85% فأعلى فقط\n\n"
                f"📊 تنبيهات اليوم: {d['alerts']}/{MAX_ALERTS_DAY}\n"
                f"📝 بعد الصفقة رد على الرسالة: ربحت / خسرت")
         mid_id = tg_send(txt)
-        if mid_id:
-            st.setdefault("open", {})[str(mid_id)] = {"sym": sym, "dr": dr, "px": cl}
+        # 🔧 الإصلاح 1: نحدث الحالة فقط إذا نجح الإرسال فعلاً
+        if mid_id is None:
+            log.warning(f"فشل إرسال إشارة {sym} — ستُعاد المحاولة")
+            continue
+        lastmap[sym] = key
+        d["alerts"] += 1
+        st.setdefault("open", {})[str(mid_id)] = {"sym": sym, "dr": dr, "px": cl, "v4": v4}
         save_state(st)
         time.sleep(0.5)
 
@@ -221,7 +267,7 @@ def main():
     d = day_obj(st)
     if st.get("boot_date") != d["date"]:
         st["boot_date"] = d["date"]
-        tg_send(f"🚀 بوت H2 بدأ\n• أزواج: {len(SYMBOLS)}\n• سقف تنبيهات: {MAX_ALERTS_DAY}/يوم\n• سقف صفقات: {MAX_TRADES_DAY}/يوم\n• توقف تلقائي: {STOP_AFTER_LOSSES} خسائر متتالية = {STOP_HOURS} ساعات")
+        tg_send(f"🚀 بوت H2 بدأ (v3 نهائي)\n• أزواج: {len(SYMBOLS)}\n• سقف تنبيهات: {MAX_ALERTS_DAY}/يوم\n• سقف صفقات: {MAX_TRADES_DAY}/يوم\n• توقف تلقائي: {STOP_AFTER_LOSSES} خسائر متتالية = {STOP_HOURS} ساعات\n• 🔧 حماية من فشل TG + cl مستمر + وقت انتهاء دقيق")
     listen(st)
     scan(st)
     save_state(st)
