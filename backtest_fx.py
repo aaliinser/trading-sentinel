@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-غيث H2 — مصفوفة الحساسية (9 نسخ بتشغيل واحد)
-الهدف: التحقق أن الحافة حقيقية (هضبة) لا صدفة (جرف)
+غيث H2-H1 — منطق H2 على فريم الساعة + انتهاءات 30/60/120 دقيقة
 """
 import os, sys, time, logging
 import numpy as np, pandas as pd
@@ -26,7 +25,6 @@ SYMBOLS = [
     "AUDUSD=X","USDCHF=X","CHFJPY=X","AUDCAD=X","USDCAD=X",
     "EURAUD=X","EURCHF=X","GBPJPY=X","GBPCHF=X","GBPAUD=X"
 ]
-TOP3 = ["USDJPY=X", "EURAUD=X", "USDCHF=X"]
 
 RSI_P = 14
 BB_P = 20
@@ -34,31 +32,15 @@ HISTORY_DAYS = 60
 STAKE = 6.0
 PAYOUT = 0.90
 BREAKEVEN = 52.63
-MIN_TRADES = 500
+MIN_TRADES = 300
 
 VARIANTS = [
-    (1, "BASE",      dict(rsi_hi=75.0, rsi_lo=25.0, k=2.0, exp=3, hours=None, syms=None)),
-    (2, "RSI 80/20", dict(rsi_hi=80.0, rsi_lo=20.0, k=2.0, exp=3, hours=None, syms=None)),
-    (3, "RSI 70/30", dict(rsi_hi=70.0, rsi_lo=30.0, k=2.0, exp=3, hours=None, syms=None)),
-    (4, "BB 2.5sig", dict(rsi_hi=75.0, rsi_lo=25.0, k=2.5, exp=3, hours=None, syms=None)),
-    (5, "EXP 10m",   dict(rsi_hi=75.0, rsi_lo=25.0, k=2.0, exp=2, hours=None, syms=None)),
-    (6, "EXP 20m",   dict(rsi_hi=75.0, rsi_lo=25.0, k=2.0, exp=4, hours=None, syms=None)),
-    (7, "SESS 7-17", dict(rsi_hi=75.0, rsi_lo=25.0, k=2.0, exp=3, hours=(7, 17), syms=None)),
-    (8, "NO 0-6h",   dict(rsi_hi=75.0, rsi_lo=25.0, k=2.0, exp=3, hours=(6, 24), syms=None)),
-    (9, "TOP3 SYM",  dict(rsi_hi=75.0, rsi_lo=25.0, k=2.0, exp=3, hours=None, syms=TOP3)),
+    (1, "H1+30m 2.0s",  dict(k=2.0, exp_min=30)),
+    (2, "H1+60m 2.0s",  dict(k=2.0, exp_min=60)),
+    (3, "H1+120m 2.0s", dict(k=2.0, exp_min=120)),
+    (4, "H1+30m 2.5s",  dict(k=2.5, exp_min=30)),
+    (5, "H1+60m 2.5s",  dict(k=2.5, exp_min=60)),
 ]
-
-EXPLAIN = {
-    1: "الأساس: RSI 75/25 + باند 2.0 + انتهاء 15د",
-    2: "تشبع أصرم: RSI 80/20",
-    3: "تشبع أرخى: RSI 70/30",
-    4: "باند أوسع: 2.5 سيغما",
-    5: "انتهاء 10 دقائق",
-    6: "انتهاء 20 دقيقة",
-    7: "جلسات لندن+نيويورك فقط (7-17 UTC)",
-    8: "استثناء الساعات الميتة (00-06 UTC)",
-    9: "أفضل 3 أزواج فقط",
-}
 
 TG_TOKEN = os.getenv("TG_TOKEN", "").strip()
 TG_CHAT = os.getenv("TG_CHAT", "").strip()
@@ -69,7 +51,7 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
     handlers=[logging.StreamHandler(sys.stdout)]
 )
-log = logging.getLogger("H2_Matrix")
+log = logging.getLogger("H2_H1")
 
 def fetch(sym, iv, period):
     for attempt in range(1, 4):
@@ -92,51 +74,67 @@ def fetch(sym, iv, period):
     return None
 
 def prepare(sym):
-    df = fetch(sym, "5m", f"{HISTORY_DAYS}d")
+    df = fetch(sym, "30m", f"{HISTORY_DAYS}d")
     if df is None or len(df) < 200:
         return None
-    c = df["Close"].to_numpy(dtype=float)
-    s = pd.Series(c)
-    d = s.diff()
+    now = pd.Timestamp.now(tz="UTC")
+    df = df[df.index + pd.Timedelta(minutes=30) <= now]
+    if len(df) < 200:
+        return None
+    close30 = df["Close"]
+    h1 = df.resample("1h", label="left", closed="left").agg(
+        {"Open":"first","High":"max","Low":"min","Close":"last"}
+    ).dropna()
+    h1 = h1[h1.index + pd.Timedelta(hours=1) <= now]
+    if len(h1) < 120:
+        return None
+    c = h1["Close"]
+    d = c.diff()
     g = d.clip(lower=0)
     l = -d.clip(upper=0)
     ag = g.ewm(alpha=1/RSI_P, min_periods=RSI_P).mean()
     al = l.ewm(alpha=1/RSI_P, min_periods=RSI_P).mean()
-    rsi = (100 - (100/(1 + ag/al.replace(0, np.nan)))).fillna(50).to_numpy(dtype=float)
-    mid = s.rolling(BB_P).mean().to_numpy(dtype=float)
-    sd = s.rolling(BB_P).std().to_numpy(dtype=float)
-    hours = df.index.hour.to_numpy(dtype=int)
-    return {"close": c, "rsi": rsi, "mid": mid, "sd": sd, "hours": hours, "times": df.index}
+    rsi = (100 - (100/(1 + ag/al.replace(0, np.nan)))).fillna(50)
+    mid = c.rolling(BB_P).mean()
+    sd = c.rolling(BB_P).std()
+    return {
+        "times": h1.index,
+        "rsi": rsi.to_numpy(dtype=float),
+        "close": c.to_numpy(dtype=float),
+        "mid": mid.to_numpy(dtype=float),
+        "sd": sd.to_numpy(dtype=float),
+        "c30map": close30.to_dict(),
+    }
 
 def evaluate(data, cfg):
-    c = data["close"]
     rsi = data["rsi"]
+    cl = data["close"]
     mid = data["mid"]
     sd = data["sd"]
-    h = data["hours"]
-    n = len(c)
-    exp = cfg["exp"]
+    times = data["times"]
+    c30map = data["c30map"]
     up = mid + cfg["k"] * sd
     dn = mid - cfg["k"] * sd
-    put = (rsi >= cfg["rsi_hi"]) & (c >= up)
-    call = (rsi <= cfg["rsi_lo"]) & (c <= dn)
-    idx = np.where(put | call)[0]
-    if len(idx) == 0:
-        return []
-    if cfg["hours"] is not None:
-        lo_h, hi_h = cfg["hours"]
-        idx = idx[(h[idx] >= lo_h) & (h[idx] < hi_h)]
-    idx = idx[idx + exp < n]
-    if len(idx) == 0:
-        return []
-    entries = c[idx]
-    exits = c[idx + exp]
-    is_put = put[idx]
-    wins = np.where(is_put, exits < entries, exits > entries)
-    times = data["times"]
+    put = (rsi >= 75.0) & (cl >= up)
+    call = (rsi <= 25.0) & (cl <= dn)
+    off = pd.Timedelta(minutes=30 + cfg["exp_min"])
     trades = []
-    for j in range(len(idx)):
-        trades.append((times[idx[j]], bool(wins[j])))
+    for i in range(len(cl)):
+        if not (put[i] or call[i]):
+            continue
+        if np.isnan(sd[i]):
+            continue
+        exit_px = c30map.get(times[i] + off)
+        if exit_px is None:
+            continue
+        if isinstance(exit_px, float) and np.isnan(exit_px):
+            continue
+        entry = cl[i]
+        if put[i]:
+            win = exit_px < entry
+        else:
+            win = exit_px > entry
+        trades.append((times[i], bool(win)))
     return trades
 
 def stats(trades):
@@ -161,7 +159,7 @@ def robustness(trades):
     return ok, s1["wr"], s2["wr"]
 
 def build_report():
-    log.info("بدء مصفوفة حساسية H2 (9 نسخ)")
+    log.info("بدء اختبار فريم الساعة (5 تركيبات)")
     start = time.time()
 
     data_by_sym = {}
@@ -180,58 +178,51 @@ def build_report():
         for sym, data in data_by_sym.items():
             if data is None:
                 continue
-            if cfg["syms"] is not None and sym not in cfg["syms"]:
-                continue
             trades.extend(evaluate(data, cfg))
         st = stats(trades)
         if not st:
-            rows.append((vid, label, 0, 0.0, False, 0.0, 0.0, 0.0))
+            rows.append((vid, label, 0, 0.0, False, 0.0, 0.0, 0.0, 0.0))
             continue
         rob, w1, w2 = robustness(trades)
-        rows.append((vid, label, st["total"], st["wr"], rob, w1, w2, st["pnl"]))
-        log.info(f"نسخة {vid}: {st['total']} صفقة {st['wr']}%")
+        per_day = round(st["total"] / HISTORY_DAYS, 1)
+        rows.append((vid, label, st["total"], st["wr"], rob, w1, w2, st["pnl"], per_day))
+        log.info(f"تركيبة {vid}: {st['total']} صفقة {st['wr']}%")
 
-    base = rows[0]
-    valid = [r for r in rows if r[2] >= MIN_TRADES]
-    if not valid:
-        return "❌ لا صفقات كافية في أي نسخة"
-    spread = max(r[3] for r in valid) - min(r[3] for r in valid)
-    candidates = [r for r in rows[1:] if r[2] >= MIN_TRADES and r[4] and r[3] >= base[3] + 2.0]
-    base_weak = base[3] < (min(r[3] for r in valid) - 2.0)
-
-    msg = f"🧪 *مصفوفة حساسية H2*\n(20 زوجاً × 60 يوماً × 9 نسخ)\n\n"
+    msg = f"⏰ *H2 على فريم الساعة*\n(20 زوجاً × 60 يوماً)\n\n"
     msg += "```\n"
-    msg += f"{'#':<3}{'النسخة':<11}{'صفقات':>7}{'فوز':>8}{'صلب':>6}\n"
+    msg += f"{'#':<3}{'التركيبة':<14}{'صفقات':>7}{'فوز':>8}{'/يوم':>6}{'صلب':>5}\n"
     for r in rows:
         mark = "Y" if r[4] else "N"
-        msg += f"{r[0]:<3}{r[1]:<11}{r[2]:>7}{r[3]:>7.1f}%{mark:>6}\n"
+        msg += f"{r[0]:<3}{r[1]:<14}{r[2]:>7}{r[3]:>7.1f}%{r[8]:>6}{mark:>5}\n"
     msg += "```\n\n"
-    msg += f"📋 *شرح النسخ:*\n"
-    for vid in EXPLAIN:
-        msg += f"{vid}) {EXPLAIN[vid]}\n"
-    msg += f"\n🧪 *تفاصيل الصلابة (نصف|نصف):*\n"
-    for r in valid:
-        msg += f"• نسخة {r[0]}: {r[5]:.1f}% | {r[6]:.1f}%\n"
+    msg += f"📋 الشرح:\n"
+    msg += f"1) إشارة 1س + انتهاء 30د + باند 2.0 ← *طلبك*\n"
+    msg += f"2) إشارة 1س + انتهاء 60د + باند 2.0\n"
+    msg += f"3) إشارة 1س + انتهاء 120د + باند 2.0\n"
+    msg += f"4) إشارة 1س + انتهاء 30د + باند 2.5\n"
+    msg += f"5) إشارة 1س + انتهاء 60د + باند 2.5\n"
 
-    msg += f"\n📏 *قراءة الحساسية:*\n"
-    msg += f"• الأساس: *{base[3]}%*\n"
-    msg += f"• الفارق بين النسخ: *{spread:.1f} نقطة*\n"
-    if spread <= 3.0:
-        msg += f"• الحكم: 🏔️ *هضبة* — الحافة لا تعتمد على الأرقام الدقيقة = حقيقية\n"
+    msg += f"\n🧪 صلابة (نصف|نصف):\n"
+    for r in rows:
+        if r[2] >= 200:
+            msg += f"• تركيبة {r[0]}: {r[5]:.1f}% | {r[6]:.1f}%\n"
+
+    valid = [r for r in rows if r[2] >= MIN_TRADES]
+    msg += f"\n📏 *المقارنة مع مرجع 5 دقائق:*\n"
+    msg += f"• مرجع 5د (البوت الحالي): *56.1%* (~18 فرصة/يوم على 5 أزواج)\n"
+    if valid:
+        best = max(valid, key=lambda x: x[3])
+        msg += f"• أفضل تركيبة ساعة: *{best[3]}%* ({best[2]} صفقة، {best[8]}/يوم)\n"
+        if best[3] >= 58.1 and best[4]:
+            msg += f"\n🏆 *تركيبة الساعة تتفوق بوضوح* — مرشحة لديمو خاصة بعد ديمو الأساس\n"
+        elif best[3] >= BREAKEVEN and best[4]:
+            msg += f"\n🟡 *تركيبة الساعة رابحة لكن أضعف أو مساوية لمرجع 5د* — نُبقي 5د\n"
+        else:
+            msg += f"\n🔴 *تركيبة الساعة غير صلبة* — نُبقي 5د\n"
     else:
-        msg += f"• الحكم: ⚠️ *حساسة* — الأرقام تؤثر بقوة = ندرس المرشحات\n"
+        msg += f"\n⚠️ *صفقات الساعة قليلة (<300)* — النتيجة استرشادية فقط لا تُعتمد\n"
 
-    if base_weak:
-        msg += f"\n🚨 *تحذير:* الأساس أضعف من بدائله بفارق >2 نقطة\n"
-    if candidates:
-        msg += f"\n🏆 *مرشحة (فوق الأساس بـ2+ وصلبة):*\n"
-        for r in candidates:
-            msg += f"• نسخة {r[0]}: *{r[3]}%* ({r[2]} صفقة)\n"
-        msg += f"\n⏳ *لا تعتمد الآن* — أنهِ ديمو الحالية أولاً، ثم ديمو خاصة للمرشحة\n"
-    else:
-        msg += f"\n✅ *لا نسخة تتفوق على الأساس بوضوح* — نُبقي القواعد الحالية\n"
-
-    msg += f"\n🔒 البوت الحي يبقى على الأساس طوال فترة الديمو مهما أظهرت المصفوفة\n"
+    msg += f"\n🔒 البوت الحي لا يتغير أثناء الديمو مهما كانت النتيجة\n"
     msg += f"\n⏱️ {time.time()-start:.0f}ث"
     return msg
 
