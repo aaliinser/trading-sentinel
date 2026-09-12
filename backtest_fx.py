@@ -10,7 +10,8 @@ import numpy as np, pandas as pd
 try:
     import yfinance as yf
 except ImportError:
-    print("pip install yfinance"); sys.exit(1)
+    print("pip install yfinance")
+    sys.exit(1)
 
 try:
     from dotenv import load_dotenv
@@ -47,13 +48,13 @@ def fetch(sym, iv, period):
             tk = yf.Ticker(sym)
             df = tk.history(period=period, interval=iv, auto_adjust=False, actions=False, timeout=30)
             if df is None or df.empty:
-                raise ValueError("empty")
+                return None
             df = df.copy()
             if isinstance(df.columns, pd.MultiIndex):
                 df.columns = df.columns.get_level_values(0)
             needed = [c for c in ["Open", "High", "Low", "Close"] if c in df.columns]
             if len(needed) < 4:
-                raise ValueError("missing columns")
+                return None
             df = df[needed]
             df.index = pd.to_datetime(df.index, utc=True, errors="coerce")
             df = df[~df.index.duplicated(keep="last")].sort_index()
@@ -268,153 +269,4 @@ def main():
     send_telegram(report)
 
 if __name__ == "__main__":
-    try:
-        main()
-    except KeyboardInterrupt:
-        print("stopped")
-    except Exception as e:
-        logging.exception(f"fatal: {e}")
-        raise    c = data["c"]
-    rsi = data["rsi20"]
-    k = data["stk_k"]
-    d = data["stk_d"]
-    c15map = data["c15map"]
-    n = len(c)
-    trades = []
-    for i in range(30, n):
-        if np.isnan(rsi[i]) or np.isnan(k[i]) or np.isnan(d[i]):
-            continue
-        if np.isnan(k[i-1]) or np.isnan(d[i-1]):
-            continue
-        T = t[i] + pd.Timedelta(minutes=15)
-        exit_px = c15map.get(T)
-        if exit_px is None:
-            continue
-        if isinstance(exit_px, float) and np.isnan(exit_px):
-            continue
-        entry = c[i]
-        dr = None
-        if rsi[i] <= 20 and k[i-1] < d[i-1] and k[i] > d[i] and k[i] < 20:
-            dr = "CALL"
-        elif rsi[i] >= 80 and k[i-1] > d[i-1] and k[i] < d[i] and k[i] > 80:
-            dr = "PUT"
-        if dr is None:
-            continue
-        if dr == "CALL":
-            win = exit_px > entry
-        else:
-            win = exit_px < entry
-        trades.append((t[i], bool(win)))
-    return trades
-
-def stats(trades):
-    if not trades:
-        return None
-    total = len(trades)
-    wins = sum(1 for _, w in trades if w)
-    wr = round(100 * wins / total, 2)
-    pnl = round(wins * STAKE * PAYOUT - (total - wins) * STAKE, 2)
-    return {"total": total, "wins": wins, "wr": wr, "pnl": pnl}
-
-def robustness(trades):
-    if len(trades) < 200:
-        return False, 0.0, 0.0
-    trades = sorted(trades, key=lambda x: x[0])
-    mid = len(trades) // 2
-    s1 = stats(trades[:mid])
-    s2 = stats(trades[mid:])
-    if not s1 or not s2:
-        return False, 0.0, 0.0
-    ok = s1["wr"] >= BREAKEVEN and s2["wr"] >= BREAKEVEN
-    return ok, s1["wr"], s2["wr"]
-
-def build_report():
-    log.info("بدء اختبار BLW (محصنة v2)")
-    start = time.time()
-    data_by_sym = {}
-    for sym in SYMBOLS:
-        try:
-            data_by_sym[sym] = prepare(sym)
-            cnt = 0
-            if data_by_sym[sym] is not None:
-                cnt = len(data_by_sym[sym]["c"])
-            log.info(f"{sym}: جاهز ({cnt} شمعة)")
-        except Exception as e:
-            log.error(f"{sym}: {e}")
-            data_by_sym[sym] = None
-        time.sleep(1)
-    trades = []
-    for sym, data in data_by_sym.items():
-        if data is None:
-            continue
-        try:
-            trades.extend(evaluate(data))
-        except Exception as e:
-            log.error(f"{sym} evaluate: {e}")
-    st = stats(trades)
-    msg = f"🎥 *اختبار BLW (محصنة v2)*\n(5 أزواج × 60 يوم × 30د × 15د)\n\n"
-    if not st:
-        msg += "❌ *لا صفقات*\n"
-        msg += "القواعد: RSI(20) 80/20 + تقاطع ستوكاستك عند نفس المستوى\n"
-        msg += "النتيجة: الشروط نادرة جداً على فريم 30د\n"
-    else:
-        rob, w1, w2 = robustness(trades)
-        per_day = round(st["total"] / HISTORY_DAYS, 1)
-        msg += "```\n"
-        msg += f"صفقات: {st['total']}\n"
-        msg += f"فوز: {st['wr']}%\n"
-        msg += f"لكل يوم: {per_day}\n"
-        msg += f"صلبة: {'Y' if rob else 'N'}\n"
-        msg += "```\n\n"
-        msg += f"📋 القواعد المختبرة:\n"
-        msg += f"• RSI فترة 20 بمستويات 80/20\n"
-        msg += f"• ستوكاستك 14/3/3\n"
-        msg += f"• CALL: RSI تحت 20 + تقاطع ستوكاستك صعوداً\n"
-        msg += f"• PUT: RSI فوق 80 + تقاطع ستوكاستك هبوطاً\n"
-        if st["total"] >= 200:
-            msg += f"\n🧪 صلابة (نصف|نصف): {w1:.1f}% | {w2:.1f}%\n"
-        msg += f"\n📏 *المقارنة:*\n"
-        msg += f"• مرجع H2: *{REF_H2}%*\n"
-        msg += f"• نتيجة BLW: *{st['wr']}%* على {st['total']} صفقة\n"
-        if st["total"] < 300:
-            msg += f"\n⚠️ عينة قليلة — النتيجة استرشادية فقط\n"
-        elif rob and st["wr"] >= REF_H2 + 2.0:
-            msg += f"\n🏆 *BLW تتفوق على H2* — تستحق ديمو خاصة\n"
-        elif rob and st["wr"] >= BREAKEVEN:
-            msg += f"\n🟡 رابحة لكن أضعف من H2 — لا تستبدل\n"
-        else:
-            msg += f"\n🔴 *فاشلة* — تحت التعادل = خسارة مؤكدة\n"
-    msg += f"\n🔒 H2 والديمو لا تتأثران\n"
-    msg += f"\n⏱️ {time.time()-start:.0f}ث"
-    return msg
-
-def send_telegram(text):
-    if not TG_TOKEN or not TG_CHAT:
-        print(text)
-        return
-    try:
-        url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
-        payload = {"chat_id": TG_CHAT, "text": text, "parse_mode": "Markdown", "disable_web_page_preview": True}
-        r = requests.post(url, json=payload, timeout=15)
-        if r.status_code == 200:
-            log.info("✅ أُرسل")
-        else:
-            log.warning(f"TG {r.status_code}")
-    except Exception as e:
-        log.error(f"TG: {e}")
-
-def main():
-    report = build_report()
-    print("\n" + "=" * 60)
-    print(report)
-    print("=" * 60)
-    send_telegram(report)
-
-if __name__ == "__main__":
-    try:
-        main()
-    except KeyboardInterrupt:
-        print("stopped")
-    except Exception as e:
-        logging.exception(f"fatal: {e}")
-        raise
+    main()
