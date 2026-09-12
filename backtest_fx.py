@@ -1,10 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-غيث — اختبار تكافؤ نافذة البيانات قبل نشر v4
-سؤالان:
-A) هل تغيّر نافذة قصيرة (1د/2د/3د/5د) أي قرار إشارة مقارنة بتاريخ كامل؟
-B) كم شمعة متاحة فجر الاثنين (بعد عطلة الأسبوع) لكل نافذة تقويمية؟
+غيث — اختبار استراتيجية BLW (فيديو يوتيوب)
+RSI(20) 80/20 + ستوكاستك على 30د + انتهاء 15د
 """
 import os, sys, time, logging
 import numpy as np, pandas as pd
@@ -23,13 +21,12 @@ except ImportError:
 import requests
 
 SYMBOLS = ["USDJPY=X", "EURAUD=X", "USDCHF=X", "EURCAD=X", "CADJPY=X"]
-RSI_P = 14
-BB_P = 20
-BB_K = 2.0
-RSI_HI = 75.0
-RSI_LO = 25.0
 
-WINDOWS = [(288, "1د"), (576, "2د"), (864, "3د"), (1440, "5د")]
+HISTORY_DAYS = 60
+STAKE = 6.0
+PAYOUT = 0.90
+BREAKEVEN = 52.63
+REF_H2 = 56.1
 
 TG_TOKEN = os.getenv("TG_TOKEN", "").strip()
 TG_CHAT = os.getenv("TG_CHAT", "").strip()
@@ -40,7 +37,7 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
     handlers=[logging.StreamHandler(sys.stdout)]
 )
-log = logging.getLogger("Equiv")
+log = logging.getLogger("BLW_BT")
 
 def fetch(sym, iv, period):
     for attempt in range(1, 4):
@@ -62,51 +59,198 @@ def fetch(sym, iv, period):
             time.sleep(2 * attempt)
     return None
 
-def indicators_arr(df):
-    c = df["Close"]
+def rsi_ser(c, p):
     d = c.diff()
     g = d.clip(lower=0)
     l = -d.clip(upper=0)
-    ag = g.ewm(alpha=1/RSI_P, min_periods=RSI_P).mean()
-    al = l.ewm(alpha=1/RSI_P, min_periods=RSI_P).mean()
-    rsi = (100 - (100/(1 + ag/al.replace(0, np.nan)))).fillna(50).to_numpy(dtype=float)
-    mid = c.rolling(BB_P).mean().to_numpy(dtype=float)
-    sd = c.rolling(BB_P).std().to_numpy(dtype=float)
-    return rsi, mid + BB_K*sd, mid - BB_K*sd, sd
+    ag = g.ewm(alpha=1/p, min_periods=p).mean()
+    al = l.ewm(alpha=1/p, min_periods=p).mean()
+    return (100 - (100/(1 + ag/al.replace(0, np.nan)))).fillna(50)
 
-def decision(r, cl, bu, bl):
-    if r >= RSI_HI and cl >= bu:
-        return "PUT"
-    if r <= RSI_LO and cl <= bl:
-        return "CALL"
-    return None
+def stochastic(df, k=14, smooth=3, d=3):
+    hs = df["High"]; ls = df["Low"]; cs = df["Close"]
+    ll = ls.rolling(k).min()
+    hh = hs.rolling(k).max()
+    raw_k = 100 * (cs - ll) / (hh - ll).replace(0, np.nan)
+    k_line = raw_k.rolling(smooth).mean()
+    d_line = k_line.rolling(d).mean()
+    return k_line, d_line
+
+def prepare(sym):
+    d15 = fetch(sym, "15m", f"{HISTORY_DAYS}d")
+    d30 = fetch(sym, "30m", f"{HISTORY_DAYS}d")
+    if d15 is None or d30 is None:
+        return None
+    now = pd.Timestamp.now(tz="UTC")
+    d15 = d15[d15.index + pd.Timedelta(minutes=15) <= now]
+    d30 = d30[d30.index + pd.Timedelta(minutes=30) <= now]
+    if len(d30) < 200:
+        return None
+    
+    cs = d30["Close"]
+    rsi20 = rsi_ser(cs, 20).to_numpy(dtype=float)
+    k_line, d_line = stochastic(d30, 14, 3, 3)
+    k = k_line.to_numpy(dtype=float)
+    d = d_line.to_numpy(dtype=float)
+    
+    return {
+        "times": d30.index,
+        "c": cs.to_numpy(dtype=float),
+        "rsi20": rsi20,
+        "stk_k": k,
+        "stk_d": d,
+        "c15map": d15["Close"].to_dict(),
+    }
+
+def evaluate(data):
+    t = data["times"]
+    c = data["c"]
+    rsi = data["rsi20"]
+    k = data["stk_k"]
+    d = data["stk_d"]
+    c15map = data["c15map"]
+    n = len(c)
+    trades = []
+    
+    for i in range(30, n):
+        T = t[i] + pd.Timedelta(minutes=15)
+        exit_px = c15map.get(T)
+        if exit_px is None or (isinstance(exit_px, float) and np.isnan(exit_px)):
+            continue
+        
+        entry = c[i]
+        dr = None
+        
+        # CALL: RSI ≤ 20 + ستوكاستك K يعبر D صعوداً تحت 20
+        if rsi[i] <= 20 and k[i-1] < d[i-1] and k[i] > d[i] and k[i] < 20:
+            dr = "CALL"
+        # PUT: RSI ≥ 80 + ستوكاستك K يعبر D هبوطاً فوق 80
+        elif rsi[i] >= 80 and k[i-1] > d[i-1] and k[i] < d[i] and k[i] > 80:
+            dr = "PUT"
+        
+        if dr is None:
+            continue
+        
+        if dr == "CALL":
+            win = exit_px > entry
+        else:
+            win = exit_px < entry
+        
+        trades.append((t[i], bool(win)))
+    
+    return trades
+
+def stats(trades):
+    if not trades:
+        return None
+    total = len(trades)
+    wins = sum(1 for _, w in trades if w)
+    wr = round(100 * wins / total, 2)
+    pnl = round(wins * STAKE * PAYOUT - (total - wins) * STAKE, 2)
+    return {"total": total, "wins": wins, "wr": wr, "pnl": pnl}
+
+def robustness(trades):
+    if len(trades) < 200:
+        return False, 0.0, 0.0
+    trades = sorted(trades, key=lambda x: x[0])
+    mid = len(trades) // 2
+    s1 = stats(trades[:mid])
+    s2 = stats(trades[mid:])
+    if not s1 or not s2:
+        return False, 0.0, 0.0
+    ok = s1["wr"] >= BREAKEVEN and s2["wr"] >= BREAKEVEN
+    return ok, s1["wr"], s2["wr"]
 
 def build_report():
-    log.info("بدء اختبار التكافؤ")
+    log.info("بدء اختبار استراتيجية BLW (RSI20 + ستوكاستك)")
     start = time.time()
 
-    aggA = {lbl: {"checked": 0, "flips": 0, "maxdr": 0.0} for _, lbl in WINDOWS}
-    aggB = {}
-
+    data_by_sym = {}
     for sym in SYMBOLS:
-        df = fetch(sym, "5m", "15d")
-        if df is None or len(df) < 500:
-            log.error(f"{sym}: بيانات غير كافية")
-            continue
-        now = pd.Timestamp.now(tz="UTC")
-        if not df.empty and df.index[-1] + pd.Timedelta(minutes=5) > now:
-            df = df.iloc[:-1]
-        ref_rsi, ref_bu, ref_bl, ref_sd = indicators_arr(df)
-        cl = df["Close"].to_numpy(dtype=float)
-        n = len(df)
-        i0 = max(80, n - 864)
+        try:
+            data_by_sym[sym] = prepare(sym)
+            log.info(f"{sym}: جاهز")
+        except Exception as e:
+            log.error(f"{sym}: {e}")
+            data_by_sym[sym] = None
+        time.sleep(0.5)
 
-        for W, lbl in WINDOWS:
-            a = aggA[lbl]
-            for i in range(i0, n):
-                s = max(0, i - W + 1)
-                sub = df.iloc[s:i+1]
-                r2, bu2, bl2, sd2 = indicators_arr(sub)
+    trades = []
+    for sym, data in data_by_sym.items():
+        if data is None:
+            continue
+        trades.extend(evaluate(data))
+
+    st = stats(trades)
+    msg = f"🎥 *اختبار استراتيجية BLW (يوتيوب)*\n(5 أزواج × 60 يوماً × 30د × انتهاء 15د)\n\n"
+    
+    if not st:
+        msg += "❌ *لا صفقات*\n"
+        msg += "القواعد: RSI(20) ≤20 أو ≥80 + ستوكاستك يعبر عند نفس المستوى\n"
+        msg += "النتيجة: الاستراتيجية غير قابلة للتطبيق بهذه الشروط\n"
+    else:
+        rob, w1, w2 = robustness(trades)
+        per_day = round(st["total"] / HISTORY_DAYS, 1)
+        msg += "```\n"
+        msg += f"صفقات: {st['total']}\n"
+        msg += f"فوز: {st['wr']}%\n"
+        msg += f"/يوم: {per_day}\n"
+        msg += f"صلب: {'Y' if rob else 'N'}\n"
+        msg += "```\n\n"
+        msg += f"📋 القواعد:\n"
+        msg += f"• RSI(20) مستويات 80/20\n"
+        msg += f"• ستوكاستك (14,3,3)\n"
+        msg += f"• CALL: RSI≤20 + K يعبر D صعوداً تحت 20\n"
+        msg += f"• PUT: RSI≥80 + K يعبر D هبوطاً فوق 80\n"
+        
+        if st["total"] >= 200:
+            msg += f"\n🧪 صلابة: {w1:.1f}% | {w2:.1f}%\n"
+        
+        msg += f"\n📏 *المقارنة:*\n"
+        msg += f"• مرجع H2: *{REF_H2}%*\n"
+        msg += f"• BLW: *{st['wr']}%* ({st['total']} صفقة)\n"
+        
+        if rob and st["wr"] >= REF_H2 + 2.0:
+            msg += f"\n🏆 *BLW تتفوق على H2!* — مرشحة لديمو خاصة\n"
+        elif rob and st["wr"] >= BREAKEVEN:
+            msg += f"\n🟡 رابحة لكن تحت H2 — لا تستحق الاستبدال\n"
+        else:
+            msg += f"\n🔴 *فاشلة* — تحت التعادل = خسارة مؤكدة\n"
+
+    msg += f"\n🔒 H2 والديمو لا تتأثران\n"
+    msg += f"\n⏱️ {time.time()-start:.0f}ث"
+    return msg
+
+def send_telegram(text):
+    if not TG_TOKEN or not TG_CHAT:
+        print(text)
+        return
+    try:
+        url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
+        payload = {"chat_id": TG_CHAT, "text": text, "parse_mode": "Markdown", "disable_web_page_preview": True}
+        r = requests.post(url, json=payload, timeout=15)
+        if r.status_code == 200:
+            log.info("✅ أُرسل")
+        else:
+            log.warning(f"TG {r.status_code}")
+    except Exception as e:
+        log.error(f"TG: {e}")
+
+def main():
+    report = build_report()
+    print("\n" + "=" * 60)
+    print(report)
+    print("=" * 60)
+    send_telegram(report)
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("stopped")
+    except Exception as e:
+        logging.exception(f"fatal: {e}")
+        raise                r2, bu2, bl2, sd2 = indicators_arr(sub)
                 d2 = decision(r2[-1], cl[i], bu2[-1], bl2[-1])
                 d1 = decision(ref_rsi[i], cl[i], ref_bu[i], ref_bl[i])
                 a["checked"] += 1
