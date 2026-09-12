@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-غيث — العشرة الكبار على الفريمات الكبيرة بالتدريج
-فريمات: 1س / 2س / 4س — انتهاء ثابت: 30 دقيقة
+غيث — سلّم تقوية استراتيجية 7 (كيلتنر Squeeze)
+10 فلاتر تدريجية على 1س × 20 زوجاً + مرجع 4س — انتهاء 30د
 """
 import os, sys, time, logging
 import numpy as np, pandas as pd
@@ -20,29 +20,31 @@ except ImportError:
 
 import requests
 
-SYMBOLS = ["USDJPY=X", "EURAUD=X", "USDCHF=X", "EURCAD=X", "CADJPY=X"]
+SYMBOLS = [
+    "USDJPY=X","AUDJPY=X","EURJPY=X","EURUSD=X","GBPUSD=X",
+    "EURGBP=X","CADJPY=X","EURCAD=X","GBPCAD=X","AUDCHF=X",
+    "AUDUSD=X","USDCHF=X","CHFJPY=X","AUDCAD=X","USDCAD=X",
+    "EURAUD=X","EURCHF=X","GBPJPY=X","GBPCHF=X","GBPAUD=X"
+]
 
 HISTORY_DAYS = 60
 STAKE = 6.0
 PAYOUT = 0.90
 BREAKEVEN = 52.63
-MIN_TRADES = 300
 REF_H2 = 56.1
 
-NAMES = {
-    1: "RSI(2) كونورز",
-    2: "عودة داخل الباند %B",
-    3: "ستوكاستك تقاطع متطرف",
-    4: "شريط EMA ارتداد ترند",
-    5: "دايفرجنس RSI",
-    6: "إنغلفينغ عند الباند",
-    7: "انضغاط كيلتنر كسر",
-    8: "CCI متطرف عكسي",
-    9: "ويليامز %R متطرف",
-    10: "هايكين آشي 3 شمعات",
-}
-
-TFS = [("tf60", "1س"), ("tf120", "2س"), ("tf240", "4س")]
+FILTER_NAMES = [
+    "1) الأساس: squeeze + كسر الباند",
+    "2) + جسم شمعة قوي (≥50% من المدى)",
+    "3) + ميل EMA50 مع الاتجاه",
+    "4) + زخم RSI (55+ صعود / 45- هبوط)",
+    "5) + انضغاط ≥3 شمعات متتالية",
+    "6) + كسر يتجاوز الباند بـ0.25 ATR",
+    "7) + جلسات لندن+نيويورك (7-17)",
+    "8) + فتيل معاكس صغير (≤30% جسم)",
+    "9) + شمعة الانضغاط الأخيرة ضيقة",
+    "10) + ADX صاعد (قوة متزايدة)",
+]
 
 TG_TOKEN = os.getenv("TG_TOKEN", "").strip()
 TG_CHAT = os.getenv("TG_CHAT", "").strip()
@@ -53,7 +55,7 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
     handlers=[logging.StreamHandler(sys.stdout)]
 )
-log = logging.getLogger("Top10Big")
+log = logging.getLogger("Keltner10")
 
 def fetch(sym, iv, period):
     for attempt in range(1, 4):
@@ -75,6 +77,11 @@ def fetch(sym, iv, period):
             time.sleep(2 * attempt)
     return None
 
+def atr_ser(h, l, c, p):
+    pc = c.shift(1)
+    tr = pd.concat([h-l, (h-pc).abs(), (l-pc).abs()], axis=1).max(axis=1)
+    return tr.ewm(alpha=1/p, min_periods=p).mean()
+
 def rsi_ser(c, p):
     d = c.diff()
     g = d.clip(lower=0)
@@ -83,54 +90,27 @@ def rsi_ser(c, p):
     al = l.ewm(alpha=1/p, min_periods=p).mean()
     return (100 - (100/(1 + ag/al.replace(0, np.nan)))).fillna(50)
 
-def atr_ser(h, l, c, p=14):
-    pc = c.shift(1)
-    tr = pd.concat([h-l, (h-pc).abs(), (l-pc).abs()], axis=1).max(axis=1)
-    return tr.ewm(alpha=1/p, min_periods=p).mean()
+def adx_ser(h, l, c, p=14):
+    atr = atr_ser(h, l, c, p)
+    um = h.diff()
+    dm = -l.diff()
+    pdm = pd.Series(np.where((um>dm)&(um>0), um, 0.0), index=c.index)
+    mdm = pd.Series(np.where((dm>um)&(dm>0), dm, 0.0), index=c.index)
+    pdi = 100*pdm.ewm(alpha=1/p).mean()/atr.replace(0, np.nan)
+    mdi = 100*mdm.ewm(alpha=1/p).mean()/atr.replace(0, np.nan)
+    dx = 100*(pdi-mdi).abs()/(pdi+mdi).replace(0, np.nan)
+    return dx.ewm(alpha=1/p).mean()
 
-def build_tf(df, tf_min):
-    o = df["Open"].to_numpy(dtype=float)
-    h = df["High"].to_numpy(dtype=float)
-    l = df["Low"].to_numpy(dtype=float)
-    c = df["Close"].to_numpy(dtype=float)
+def keltner_arrays(df):
     cs = df["Close"]; hs = df["High"]; ls = df["Low"]
-    d = {"times": df.index, "tf": tf_min, "o": o, "h": h, "l": l, "c": c}
-    bb_mid = cs.rolling(20).mean()
-    bb_sd = cs.rolling(20).std()
-    d["bb_up"] = (bb_mid + 2*bb_sd).to_numpy(dtype=float)
-    d["bb_lo"] = (bb_mid - 2*bb_sd).to_numpy(dtype=float)
-    d["rsi14"] = rsi_ser(cs, 14).to_numpy(dtype=float)
-    d["rsi2"] = rsi_ser(cs, 2).to_numpy(dtype=float)
-    ll = ls.rolling(14).min()
-    hh = hs.rolling(14).max()
-    k = 100 * (cs - ll) / (hh - ll).replace(0, np.nan)
-    d["stk"] = k.to_numpy(dtype=float)
-    d["std_"] = k.rolling(3).mean().to_numpy(dtype=float)
-    d["willr"] = (-100 * (hh - cs) / (hh - ll).replace(0, np.nan)).to_numpy(dtype=float)
-    tp = (hs + ls + cs) / 3.0
-    ma = tp.rolling(20).mean()
-    md = (tp - ma).abs().rolling(20).mean()
-    d["cci"] = ((tp - ma) / (0.015 * md.replace(0, np.nan))).to_numpy(dtype=float)
     e20 = cs.ewm(span=20, adjust=False).mean()
     at = atr_ser(hs, ls, cs, 10)
     ku = e20 + 2*at
     kl = e20 - 2*at
-    d["ku"] = ku.to_numpy(dtype=float)
-    d["kl"] = kl.to_numpy(dtype=float)
-    d["sqz"] = ((bb_mid + 2*bb_sd < ku) & (bb_mid - 2*bb_sd > kl)).to_numpy(dtype=bool)
-    d["e20"] = e20.to_numpy(dtype=float)
-    d["e50"] = cs.ewm(span=50, adjust=False).mean().to_numpy(dtype=float)
-    d["e100"] = cs.ewm(span=100, adjust=False).mean().to_numpy(dtype=float)
-    ha_c = ((df["Open"]+df["High"]+df["Low"]+df["Close"])/4).to_numpy(dtype=float)
-    n = len(ha_c)
-    ha_o = np.zeros(n)
-    if n > 0:
-        ha_o[0] = (o[0] + c[0]) / 2
-        for i in range(1, n):
-            ha_o[i] = (ha_o[i-1] + ha_c[i-1]) / 2
-    d["ha_o"] = ha_o
-    d["ha_c"] = ha_c
-    return d
+    bb_mid = cs.rolling(20).mean()
+    bb_sd = cs.rolling(20).std()
+    sqz = ((bb_mid + 2*bb_sd < ku) & (bb_mid - 2*bb_sd > kl)).to_numpy(dtype=bool)
+    return ku.to_numpy(dtype=float), kl.to_numpy(dtype=float), sqz
 
 def prepare(sym):
     d30 = fetch(sym, "30m", f"{HISTORY_DAYS}d")
@@ -142,19 +122,76 @@ def prepare(sym):
     d60 = d60[d60.index + pd.Timedelta(hours=1) <= now]
     if len(d60) < 200:
         return None
-    d120 = d60.resample("2h", label="left", closed="left").agg(
-        {"Open":"first","High":"max","Low":"min","Close":"last"}).dropna()
-    d120 = d120[d120.index + pd.Timedelta(hours=2) <= now]
+
+    o = d60["Open"].to_numpy(dtype=float)
+    h = d60["High"].to_numpy(dtype=float)
+    l = d60["Low"].to_numpy(dtype=float)
+    c = d60["Close"].to_numpy(dtype=float)
+    cs = d60["Close"]; hs = d60["High"]; ls = d60["Low"]
+    n = len(c)
+
+    ku, kl, sqz = keltner_arrays(d60)
+    atr14 = atr_ser(hs, ls, cs, 14).to_numpy(dtype=float)
+    rsi14 = rsi_ser(cs, 14).to_numpy(dtype=float)
+    e50 = cs.ewm(span=50, adjust=False).mean().to_numpy(dtype=float)
+    adx14 = adx_ser(hs, ls, cs, 14).to_numpy(dtype=float)
+    hhmm = d60.index.hour * 60 + d60.index.minute
+
+    body = np.abs(c - o)
+    rng = h - l
+    uw = h - np.maximum(o, c)
+    lw = np.minimum(o, c) - l
+
+    base_c = np.zeros(n, dtype=bool)
+    base_p = np.zeros(n, dtype=bool)
+    base_c[1:] = sqz[:-1] & (c[1:] > ku[1:])
+    base_p[1:] = sqz[:-1] & (c[1:] < kl[1:])
+
+    FC = []
+    FP = []
+    FC.append(body >= 0.5*rng);              FP.append(body >= 0.5*rng)
+    e50_up = np.zeros(n, dtype=bool); e50_up[3:] = e50[3:] > e50[:-3]
+    e50_dn = np.zeros(n, dtype=bool); e50_dn[3:] = e50[3:] < e50[:-3]
+    FC.append(e50_up);                       FP.append(e50_dn)
+    FC.append(rsi14 >= 55.0);                FP.append(rsi14 <= 45.0)
+    s3 = np.zeros(n, dtype=bool)
+    s3[3:] = sqz[1:-2] & sqz[2:-1] & sqz[:-3]
+    FC.append(s3);                           FP.append(s3)
+    FC.append((c - ku) >= 0.25*atr14);       FP.append((kl - c) >= 0.25*atr14)
+    sess = (hhmm >= 420) & (hhmm < 1020)
+    FC.append(sess);                         FP.append(sess)
+    FC.append(uw <= 0.3*body);               FP.append(lw <= 0.3*body)
+    tight = np.zeros(n, dtype=bool)
+    tight[1:] = rng[:-1] <= 0.6*atr14[1:]
+    FC.append(tight);                        FP.append(tight)
+    adx_up = np.zeros(n, dtype=bool)
+    adx_up[1:] = adx14[1:] > adx14[:-1]
+    FC.append(adx_up);                       FP.append(adx_up)
+
+    cumC = [np.ones(n, dtype=bool)]
+    cumP = [np.ones(n, dtype=bool)]
+    for j in range(9):
+        cumC.append(cumC[-1] & FC[j])
+        cumP.append(cumP[-1] & FP[j])
+
     d240 = d60.resample("4h", label="left", closed="left").agg(
         {"Open":"first","High":"max","Low":"min","Close":"last"}).dropna()
     d240 = d240[d240.index + pd.Timedelta(hours=4) <= now]
-    if len(d240) < 120:
-        return None
+    ref4 = None
+    if len(d240) >= 100:
+        ku4, kl4, sqz4 = keltner_arrays(d240)
+        c4 = d240["Close"].to_numpy(dtype=float)
+        m = len(c4)
+        b4c = np.zeros(m, dtype=bool)
+        b4p = np.zeros(m, dtype=bool)
+        b4c[1:] = sqz4[:-1] & (c4[1:] > ku4[1:])
+        b4p[1:] = sqz4[:-1] & (c4[1:] < kl4[1:])
+        ref4 = {"times": d240.index, "c": c4, "bc": b4c, "bp": b4p, "tf": 240}
+
     return {
-        "c30map": d30["Close"].to_dict(),
-        "tf60": build_tf(d60, 60),
-        "tf120": build_tf(d120, 120),
-        "tf240": build_tf(d240, 240),
+        "times": d60.index, "c": c, "base_c": base_c, "base_p": base_p,
+        "cumC": cumC, "cumP": cumP, "c30map": d30["Close"].to_dict(),
+        "tf": 60, "ref4": ref4,
     }
 
 def emit(trades, times, i, c, dr, c30map, tf_min):
@@ -169,103 +206,32 @@ def emit(trades, times, i, c, dr, c30map, tf_min):
         win = exit_px < entry
     trades.append((times[i], bool(win)))
 
-def evaluate(data, sid, tfk):
+def evaluate_ladder(data, k):
     c30map = data["c30map"]
-    D = data[tfk]
-    t = D["times"]; o = D["o"]; h = D["h"]; l = D["l"]; c = D["c"]
-    tf = D["tf"]
-    n = len(c)
+    t = data["times"]; c = data["c"]
+    tf = data["tf"]
+    bc = data["base_c"] & data["cumC"][k-1]
+    bp = data["base_p"] & data["cumP"][k-1]
+    idx = np.where(bc | bp)[0]
     trades = []
-    start = 110 if n > 150 else 40
+    for i in idx:
+        if i + 1 >= len(c):
+            continue
+        dr = "CALL" if bc[i] else "PUT"
+        emit(trades, t, i, c, dr, c30map, tf)
+    return trades
 
-    if sid == 1:
-        r2 = D["rsi2"]
-        for i in range(start, n):
-            if r2[i] <= 10:
-                emit(trades, t, i, c, "CALL", c30map, tf)
-            elif r2[i] >= 90:
-                emit(trades, t, i, c, "PUT", c30map, tf)
-    elif sid == 2:
-        bu = D["bb_up"]; bl = D["bb_lo"]
-        for i in range(start, n):
-            if c[i-1] < bl[i-1] and c[i] > bl[i]:
-                emit(trades, t, i, c, "CALL", c30map, tf)
-            elif c[i-1] > bu[i-1] and c[i] < bu[i]:
-                emit(trades, t, i, c, "PUT", c30map, tf)
-    elif sid == 3:
-        k = D["stk"]; kd = D["std_"]
-        for i in range(start, n):
-            if np.isnan(k[i]) or np.isnan(kd[i]) or np.isnan(k[i-1]) or np.isnan(kd[i-1]):
-                continue
-            if k[i-1] < kd[i-1] and k[i] > kd[i] and k[i] < 30:
-                emit(trades, t, i, c, "CALL", c30map, tf)
-            elif k[i-1] > kd[i-1] and k[i] < kd[i] and k[i] > 70:
-                emit(trades, t, i, c, "PUT", c30map, tf)
-    elif sid == 4:
-        e20 = D["e20"]; e50 = D["e50"]; e100 = D["e100"]
-        for i in range(start, n):
-            if e20[i] > e50[i] > e100[i] and l[i] <= e20[i] and c[i] > e20[i] and c[i] > o[i]:
-                emit(trades, t, i, c, "CALL", c30map, tf)
-            elif e20[i] < e50[i] < e100[i] and h[i] >= e20[i] and c[i] < e20[i] and c[i] < o[i]:
-                emit(trades, t, i, c, "PUT", c30map, tf)
-    elif sid == 5:
-        r14 = D["rsi14"]
-        for i in range(start, n):
-            a = max(0, i-15)
-            b = i-5
-            if b <= a:
-                continue
-            p_lo = a + int(np.argmin(l[a:b]))
-            p_hi = a + int(np.argmax(h[a:b]))
-            if l[i] < l[p_lo] and r14[i] > r14[p_lo] and l[i] <= l[i-4:i+1].min():
-                emit(trades, t, i, c, "CALL", c30map, tf)
-            elif h[i] > h[p_hi] and r14[i] < r14[p_hi] and h[i] >= h[i-4:i+1].max():
-                emit(trades, t, i, c, "PUT", c30map, tf)
-    elif sid == 6:
-        bu = D["bb_up"]; bl = D["bb_lo"]
-        for i in range(start, n):
-            eng_c = (c[i] > o[i] and c[i-1] < o[i-1] and c[i] >= o[i-1] and o[i] <= c[i-1])
-            eng_p = (c[i] < o[i] and c[i-1] > o[i-1] and c[i] <= o[i-1] and o[i] >= c[i-1])
-            if eng_c and c[i] < bl[i]:
-                emit(trades, t, i, c, "CALL", c30map, tf)
-            elif eng_p and c[i] > bu[i]:
-                emit(trades, t, i, c, "PUT", c30map, tf)
-    elif sid == 7:
-        ku = D["ku"]; kl = D["kl"]; sq = D["sqz"]
-        for i in range(start, n):
-            if not sq[i-1]:
-                continue
-            if c[i] > ku[i]:
-                emit(trades, t, i, c, "CALL", c30map, tf)
-            elif c[i] < kl[i]:
-                emit(trades, t, i, c, "PUT", c30map, tf)
-    elif sid == 8:
-        cci = D["cci"]
-        for i in range(start, n):
-            if np.isnan(cci[i]):
-                continue
-            if cci[i] <= -200:
-                emit(trades, t, i, c, "CALL", c30map, tf)
-            elif cci[i] >= 200:
-                emit(trades, t, i, c, "PUT", c30map, tf)
-    elif sid == 9:
-        wr = D["willr"]
-        for i in range(start, n):
-            if np.isnan(wr[i]):
-                continue
-            if wr[i] <= -90:
-                emit(trades, t, i, c, "CALL", c30map, tf)
-            elif wr[i] >= -10:
-                emit(trades, t, i, c, "PUT", c30map, tf)
-    elif sid == 10:
-        ho = D["ha_o"]; hc = D["ha_c"]
-        for i in range(start, n):
-            red3 = (hc[i-1] < ho[i-1]) and (hc[i-2] < ho[i-2]) and (hc[i-3] < ho[i-3])
-            grn3 = (hc[i-1] > ho[i-1]) and (hc[i-2] > ho[i-2]) and (hc[i-3] > ho[i-3])
-            if red3 and hc[i] > ho[i]:
-                emit(trades, t, i, c, "CALL", c30map, tf)
-            elif grn3 and hc[i] < ho[i]:
-                emit(trades, t, i, c, "PUT", c30map, tf)
+def evaluate_ref4(data):
+    r = data["ref4"]
+    if r is None:
+        return []
+    c30map = data["c30map"]
+    t = r["times"]; c = r["c"]
+    idx = np.where(r["bc"] | r["bp"])[0]
+    trades = []
+    for i in idx:
+        dr = "CALL" if r["bc"][i] else "PUT"
+        emit(trades, t, i, c, dr, c30map, r["tf"])
     return trades
 
 def stats(trades):
@@ -290,7 +256,7 @@ def robustness(trades):
     return ok, s1["wr"], s2["wr"]
 
 def build_report():
-    log.info("بدء العشرة الكبار على الفريمات الكبيرة (انتهاء 30د)")
+    log.info("بدء سلّم تقوية الكيلتنر (10 درجات)")
     start = time.time()
 
     data_by_sym = {}
@@ -304,56 +270,63 @@ def build_report():
         time.sleep(0.5)
 
     rows = []
-    for sid in range(1, 11):
-        for tfk, tfl in TFS:
-            trades = []
-            for sym, data in data_by_sym.items():
-                if data is None:
-                    continue
-                trades.extend(evaluate(data, sid, tfk))
-            st = stats(trades)
-            if not st:
-                rows.append((sid, tfl, 0, 0.0, False, 0.0, 0.0, 0.0))
+    for k in range(1, 11):
+        trades = []
+        for sym, data in data_by_sym.items():
+            if data is None:
                 continue
-            rob, w1, w2 = robustness(trades)
-            per_day = round(st["total"] / HISTORY_DAYS, 1)
-            rows.append((sid, tfl, st["total"], st["wr"], rob, w1, w2, per_day))
-            log.info(f"استراتيجية {sid} على {tfl}: {st['total']} صفقة {st['wr']}%")
+            trades.extend(evaluate_ladder(data, k))
+        st = stats(trades)
+        if not st:
+            rows.append((k, 0, 0.0, False, 0.0, 0.0))
+            continue
+        rob, w1, w2 = robustness(trades)
+        rows.append((k, st["total"], st["wr"], rob, w1, w2))
+        log.info(f"درجة {k}: {st['total']} صفقة {st['wr']}%")
 
-    msg = f"🔟 *العشرة الكبار — فريمات كبيرة*\n(5 أزواج × 60 يوماً × انتهاء 30د)\n\n"
+    ref_trades = []
+    for sym, data in data_by_sym.items():
+        if data is None:
+            continue
+        ref_trades.extend(evaluate_ref4(data))
+    rst = stats(ref_trades)
+
+    msg = f"🪜 *سلّم تقوية الكيلتنر*\n(20 زوجاً × 60 يوماً × 1س × انتهاء 30د)\n\n"
     msg += "```\n"
-    msg += f"{'#':<4}{'فريم':<6}{'صفقات':>7}{'فوز':>8}{'/يوم':>6}{'صلب':>4}\n"
+    msg += f"{'درجة':<6}{'صفقات':>7}{'فوز':>8}{'صلب':>5}\n"
     for r in rows:
-        mark = "Y" if r[4] else "N"
-        msg += f"{r[0]:<4}{r[1]:<6}{r[2]:>7}{r[3]:>7.1f}%{r[7]:>6}{mark:>4}\n"
+        mark = "Y" if r[3] else "N"
+        msg += f"{r[0]:<6}{r[1]:>7}{r[2]:>7.1f}%{mark:>5}\n"
     msg += "```\n\n"
-    msg += f"📋 الاستراتيجيات:\n"
-    for sid in NAMES:
-        msg += f"{sid}) {NAMES[sid]}\n"
+    msg += f"📋 درجات السلّم:\n"
+    for nm in FILTER_NAMES:
+        msg += f"{nm}\n"
+    if rst:
+        msg += f"\n🔎 مرجع 4س (نفس الأساس): *{rst['wr']}%* على {rst['total']} صفقة"
+        if rst["total"] < 300:
+            msg += f" ⚠️ عينة صغيرة لا تُعتمد\n"
+        else:
+            msg += f"\n"
 
-    msg += f"\n🧪 صلابة (نصف|نصف) للأهم:\n"
-    shown = 0
+    msg += f"\n🧪 صلابة (نصف|نصف):\n"
     for r in rows:
-        if r[2] >= 200 and shown < 12:
-            msg += f"• {r[0]}/{r[1]}: {r[5]:.1f}% | {r[6]:.1f}%\n"
-            shown += 1
+        if r[1] >= 200:
+            msg += f"• درجة {r[0]}: {r[4]:.1f}% | {r[5]:.1f}%\n"
 
-    valid = [r for r in rows if r[2] >= MIN_TRADES]
-    msg += f"\n📏 *المقارنة:*\n"
+    valid = [r for r in rows if r[1] >= 300]
+    msg += f"\n📏 *الحكم المسجّل مسبقاً:*\n"
     msg += f"• مرجع H2: *{REF_H2}%*\n"
     if valid:
-        best = max(valid, key=lambda x: x[3])
-        msg += f"• أفضل تركيبة: *{best[3]}%* (استراتيجية {best[0]} على {best[1]}، {best[2]} صفقة)\n"
-        cands = [r for r in valid if r[4] and r[3] >= REF_H2 + 2.0]
-        if cands:
-            msg += f"\n🏆 *تتفوق على H2 بـ2+ وصلبة:*\n"
-            for r in cands:
-                msg += f"• استراتيجية {r[0]} على {r[1]}: *{r[3]}%*\n"
-            msg += f"\n⏳ H2 تبقى على الديمو — الفائزة تنتظر ديمو خاصة\n"
+        best = max(valid, key=lambda x: x[2])
+        msg += f"• أفضل درجة صالحة: *{best[2]}%* (درجة {best[0]}، {best[1]} صفقة)\n"
+        if best[3] and best[2] >= REF_H2 + 2.0:
+            msg += f"\n🏆 *عائلة الكيلتنر حقيقية ومتفوقة!* — درجة {best[0]} مرشحة لديمو خاصة بعد ديمو H2\n"
+        elif best[3] and best[2] >= BREAKEVEN:
+            msg += f"\n🟡 العائلة رابحة هامشياً لكن تحت H2 — تُحفظ احتياطاً\n"
         else:
-            msg += f"\n✅ *لا تفوق على H2* — الفريمات الكبيرة لا تضيف حافة\n"
+            msg += f"\n🔴 العائلة غير صلبة حتى بعد 10 فلاتر — الـ61.5% على 4س كانت ضجيجاً\n"
     else:
-        msg += f"\n⚠️ صفقات قليلة (<300) — استرشادي فقط\n"
+        msg += f"\n⚠️ لا درجة وصلت 300 صفقة — السلّم استرشادي فقط\n"
 
     msg += f"\n🔒 H2 والديمو لا تتأثران\n"
     msg += f"\n⏱️ {time.time()-start:.0f}ث"
