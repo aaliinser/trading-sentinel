@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-غيث H2-H1 — منطق H2 على فريم الساعة + انتهاءات 30/60/120 دقيقة
+غيث — استراتيجية الذهب (Momentum Breakout) مكيفة للثنائية
+5 أزواج × فريم 30د × انتهاء 15/30/45د
 """
 import os, sys, time, logging
 import numpy as np, pandas as pd
@@ -19,27 +20,23 @@ except ImportError:
 
 import requests
 
-SYMBOLS = [
-    "USDJPY=X","AUDJPY=X","EURJPY=X","EURUSD=X","GBPUSD=X",
-    "EURGBP=X","CADJPY=X","EURCAD=X","GBPCAD=X","AUDCHF=X",
-    "AUDUSD=X","USDCHF=X","CHFJPY=X","AUDCAD=X","USDCAD=X",
-    "EURAUD=X","EURCHF=X","GBPJPY=X","GBPCHF=X","GBPAUD=X"
-]
+SYMBOLS = ["USDJPY=X", "EURAUD=X", "USDCHF=X", "EURCAD=X", "CADJPY=X"]
 
-RSI_P = 14
-BB_P = 20
+GANN_N = 5
+BREAK_LB = 51
 HISTORY_DAYS = 60
 STAKE = 6.0
 PAYOUT = 0.90
 BREAKEVEN = 52.63
 MIN_TRADES = 300
+REF_H2 = 56.1
 
 VARIANTS = [
-    (1, "H1+30m 2.0s",  dict(k=2.0, exp_min=30)),
-    (2, "H1+60m 2.0s",  dict(k=2.0, exp_min=60)),
-    (3, "H1+120m 2.0s", dict(k=2.0, exp_min=120)),
-    (4, "H1+30m 2.5s",  dict(k=2.5, exp_min=30)),
-    (5, "H1+60m 2.5s",  dict(k=2.5, exp_min=60)),
+    (1, "CALL only 15m", dict(call=True,  put=False, exp_min=15)),
+    (2, "PUT only 15m",  dict(call=False, put=True,  exp_min=15)),
+    (3, "BOTH 15m",      dict(call=True,  put=True,  exp_min=15)),
+    (4, "BOTH 30m",      dict(call=True,  put=True,  exp_min=30)),
+    (5, "BOTH 45m",      dict(call=True,  put=True,  exp_min=45)),
 ]
 
 TG_TOKEN = os.getenv("TG_TOKEN", "").strip()
@@ -51,7 +48,7 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
     handlers=[logging.StreamHandler(sys.stdout)]
 )
-log = logging.getLogger("H2_H1")
+log = logging.getLogger("Gold_BT")
 
 def fetch(sym, iv, period):
     for attempt in range(1, 4):
@@ -73,67 +70,80 @@ def fetch(sym, iv, period):
             time.sleep(2 * attempt)
     return None
 
+def gann_hilo(high, low, close, n):
+    length = len(close)
+    act = np.full(length, np.nan)
+    if length < n:
+        return act
+    act[n-1] = np.min(low[:n])
+    for i in range(n, length):
+        prev = act[i-1]
+        c = close[i]
+        if c > prev:
+            act[i] = np.min(low[i-n+1:i+1])
+        elif c < prev:
+            act[i] = np.max(high[i-n+1:i+1])
+        else:
+            act[i] = prev
+    return act
+
 def prepare(sym):
-    df = fetch(sym, "30m", f"{HISTORY_DAYS}d")
-    if df is None or len(df) < 200:
+    d30 = fetch(sym, "30m", f"{HISTORY_DAYS}d")
+    d15 = fetch(sym, "15m", f"{HISTORY_DAYS}d")
+    if d30 is None or d15 is None:
         return None
     now = pd.Timestamp.now(tz="UTC")
-    df = df[df.index + pd.Timedelta(minutes=30) <= now]
-    if len(df) < 200:
+    d30 = d30[d30.index + pd.Timedelta(minutes=30) <= now]
+    d15 = d15[d15.index + pd.Timedelta(minutes=15) <= now]
+    if len(d30) < 150 or len(d15) < 150:
         return None
-    close30 = df["Close"]
-    h1 = df.resample("1h", label="left", closed="left").agg(
-        {"Open":"first","High":"max","Low":"min","Close":"last"}
-    ).dropna()
-    h1 = h1[h1.index + pd.Timedelta(hours=1) <= now]
-    if len(h1) < 120:
-        return None
-    c = h1["Close"]
-    d = c.diff()
-    g = d.clip(lower=0)
-    l = -d.clip(upper=0)
-    ag = g.ewm(alpha=1/RSI_P, min_periods=RSI_P).mean()
-    al = l.ewm(alpha=1/RSI_P, min_periods=RSI_P).mean()
-    rsi = (100 - (100/(1 + ag/al.replace(0, np.nan)))).fillna(50)
-    mid = c.rolling(BB_P).mean()
-    sd = c.rolling(BB_P).std()
+    high = d30["High"].to_numpy(dtype=float)
+    low = d30["Low"].to_numpy(dtype=float)
+    close = d30["Close"].to_numpy(dtype=float)
+    act = gann_hilo(high, low, close, GANN_N)
+    lvl_hi = pd.Series(high).rolling(BREAK_LB).max().shift(1).to_numpy(dtype=float)
+    lvl_lo = pd.Series(low).rolling(BREAK_LB).min().shift(1).to_numpy(dtype=float)
     return {
-        "times": h1.index,
-        "rsi": rsi.to_numpy(dtype=float),
-        "close": c.to_numpy(dtype=float),
-        "mid": mid.to_numpy(dtype=float),
-        "sd": sd.to_numpy(dtype=float),
-        "c30map": close30.to_dict(),
+        "times": d30.index,
+        "close": close,
+        "act": act,
+        "lvl_hi": lvl_hi,
+        "lvl_lo": lvl_lo,
+        "c15map": d15["Close"].to_dict(),
     }
 
 def evaluate(data, cfg):
-    rsi = data["rsi"]
-    cl = data["close"]
-    mid = data["mid"]
-    sd = data["sd"]
     times = data["times"]
-    c30map = data["c30map"]
-    up = mid + cfg["k"] * sd
-    dn = mid - cfg["k"] * sd
-    put = (rsi >= 75.0) & (cl >= up)
-    call = (rsi <= 25.0) & (cl <= dn)
-    off = pd.Timedelta(minutes=30 + cfg["exp_min"])
+    close = data["close"]
+    act = data["act"]
+    lvl_hi = data["lvl_hi"]
+    lvl_lo = data["lvl_lo"]
+    c15map = data["c15map"]
+    off = pd.Timedelta(minutes=15 + cfg["exp_min"])
     trades = []
-    for i in range(len(cl)):
-        if not (put[i] or call[i]):
+    n = len(close)
+    for i in range(BREAK_LB + 1, n):
+        if np.isnan(act[i-1]) or np.isnan(lvl_hi[i]):
             continue
-        if np.isnan(sd[i]):
+        bull_gate = act[i-1] < close[i-1]
+        bear_gate = act[i-1] > close[i-1]
+        dr = None
+        if cfg["call"] and bull_gate and close[i] > lvl_hi[i]:
+            dr = "CALL"
+        elif cfg["put"] and bear_gate and close[i] < lvl_lo[i]:
+            dr = "PUT"
+        if dr is None:
             continue
-        exit_px = c30map.get(times[i] + off)
+        exit_px = c15map.get(times[i] + off)
         if exit_px is None:
             continue
         if isinstance(exit_px, float) and np.isnan(exit_px):
             continue
-        entry = cl[i]
-        if put[i]:
-            win = exit_px < entry
-        else:
+        entry = close[i]
+        if dr == "CALL":
             win = exit_px > entry
+        else:
+            win = exit_px < entry
         trades.append((times[i], bool(win)))
     return trades
 
@@ -159,7 +169,7 @@ def robustness(trades):
     return ok, s1["wr"], s2["wr"]
 
 def build_report():
-    log.info("بدء اختبار فريم الساعة (5 تركيبات)")
+    log.info("بدء اختبار استراتيجية الذهب على الخمس أزواج")
     start = time.time()
 
     data_by_sym = {}
@@ -188,19 +198,17 @@ def build_report():
         rows.append((vid, label, st["total"], st["wr"], rob, w1, w2, st["pnl"], per_day))
         log.info(f"تركيبة {vid}: {st['total']} صفقة {st['wr']}%")
 
-    msg = f"⏰ *H2 على فريم الساعة*\n(20 زوجاً × 60 يوماً)\n\n"
+    msg = f"🥇 *استراتيجية الذهب على الثنائية*\n(5 أزواج × 60 يوماً × فريم 30د)\n\n"
     msg += "```\n"
-    msg += f"{'#':<3}{'التركيبة':<14}{'صفقات':>7}{'فوز':>8}{'/يوم':>6}{'صلب':>5}\n"
+    msg += f"{'#':<3}{'التركيبة':<15}{'صفقات':>7}{'فوز':>8}{'/يوم':>6}{'صلب':>5}\n"
     for r in rows:
         mark = "Y" if r[4] else "N"
-        msg += f"{r[0]:<3}{r[1]:<14}{r[2]:>7}{r[3]:>7.1f}%{r[8]:>6}{mark:>5}\n"
+        msg += f"{r[0]:<3}{r[1]:<15}{r[2]:>7}{r[3]:>7.1f}%{r[8]:>6}{mark:>5}\n"
     msg += "```\n\n"
-    msg += f"📋 الشرح:\n"
-    msg += f"1) إشارة 1س + انتهاء 30د + باند 2.0 ← *طلبك*\n"
-    msg += f"2) إشارة 1س + انتهاء 60د + باند 2.0\n"
-    msg += f"3) إشارة 1س + انتهاء 120د + باند 2.0\n"
-    msg += f"4) إشارة 1س + انتهاء 30د + باند 2.5\n"
-    msg += f"5) إشارة 1س + انتهاء 60د + باند 2.5\n"
+    msg += f"📋 القواعد المطبقة:\n"
+    msg += f"• بوابة Gann HiLo(5): تحت السعر = CALL فقط / فوق = PUT فقط\n"
+    msg += f"• دخول عند كسر قمة/قاع آخر 51 شمعة (عند الإغلاق)\n"
+    msg += f"• الانتهاء حسب التركيبة (15/30/45د)\n"
 
     msg += f"\n🧪 صلابة (نصف|نصف):\n"
     for r in rows:
@@ -208,21 +216,21 @@ def build_report():
             msg += f"• تركيبة {r[0]}: {r[5]:.1f}% | {r[6]:.1f}%\n"
 
     valid = [r for r in rows if r[2] >= MIN_TRADES]
-    msg += f"\n📏 *المقارنة مع مرجع 5 دقائق:*\n"
-    msg += f"• مرجع 5د (البوت الحالي): *56.1%* (~18 فرصة/يوم على 5 أزواج)\n"
+    msg += f"\n📏 *المقارنة:*\n"
+    msg += f"• مرجع H2 الحالي: *{REF_H2}%*\n"
     if valid:
         best = max(valid, key=lambda x: x[3])
-        msg += f"• أفضل تركيبة ساعة: *{best[3]}%* ({best[2]} صفقة، {best[8]}/يوم)\n"
-        if best[3] >= 58.1 and best[4]:
-            msg += f"\n🏆 *تركيبة الساعة تتفوق بوضوح* — مرشحة لديمو خاصة بعد ديمو الأساس\n"
-        elif best[3] >= BREAKEVEN and best[4]:
-            msg += f"\n🟡 *تركيبة الساعة رابحة لكن أضعف أو مساوية لمرجع 5د* — نُبقي 5د\n"
+        msg += f"• أفضل تركيبة ذهب: *{best[3]}%* ({best[2]} صفقة)\n"
+        if best[4] and best[3] >= REF_H2 + 2.0:
+            msg += f"\n🏆 *عائلة جديدة واعدة!* — مرشحة لديمو خاصة بعد انتهاء ديمو H2\n"
+        elif best[4] and best[3] >= BREAKEVEN:
+            msg += f"\n🟡 رابحة لكن أضعف من H2 — تُحفظ كاحتياط ولا تُعتمد\n"
         else:
-            msg += f"\n🔴 *تركيبة الساعة غير صلبة* — نُبقي 5د\n"
+            msg += f"\n🔴 غير صلبة — عائلة الذهب لا تصلح للثنائية على 30د\n"
     else:
-        msg += f"\n⚠️ *صفقات الساعة قليلة (<300)* — النتيجة استرشادية فقط لا تُعتمد\n"
+        msg += f"\n⚠️ صفقات قليلة (<300) — النتيجة استرشادية فقط\n"
 
-    msg += f"\n🔒 البوت الحي لا يتغير أثناء الديمو مهما كانت النتيجة\n"
+    msg += f"\n🔒 بوت H2 الحي لا يتغير مهما كانت النتيجة\n"
     msg += f"\n⏱️ {time.time()-start:.0f}ث"
     return msg
 
