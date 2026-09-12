@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-غيث — مختبر العشرة الكبار: 10 استراتيجيات مشهورة
-فريمات 30د / 1س + انتهاء 15 دقيقة (خيارات ثنائية)
+غيث — العشرة الكبار على الفريمات الكبيرة بالتدريج
+فريمات: 1س / 2س / 4س — انتهاء ثابت: 30 دقيقة
 """
 import os, sys, time, logging
 import numpy as np, pandas as pd
@@ -30,17 +30,19 @@ MIN_TRADES = 300
 REF_H2 = 56.1
 
 NAMES = {
-    1: "RSI(2) كونورز — 30د",
-    2: "عودة داخل الباند %B — 30د",
-    3: "ستوكاستك تقاطع متطرف — 30د",
-    4: "شريط EMA ارتداد ترند — 1س",
-    5: "دايفرجنس RSI — 30د",
-    6: "إنغلفينغ عند الباند — 1س",
-    7: "انضغاط كيلتنر كسر — 30د",
-    8: "CCI متطرف عكسي — 30د",
-    9: "ويليامز %R متطرف — 1س",
-    10: "هايكين آشي 3 شمعات — 30د",
+    1: "RSI(2) كونورز",
+    2: "عودة داخل الباند %B",
+    3: "ستوكاستك تقاطع متطرف",
+    4: "شريط EMA ارتداد ترند",
+    5: "دايفرجنس RSI",
+    6: "إنغلفينغ عند الباند",
+    7: "انضغاط كيلتنر كسر",
+    8: "CCI متطرف عكسي",
+    9: "ويليامز %R متطرف",
+    10: "هايكين آشي 3 شمعات",
 }
+
+TFS = [("tf60", "1س"), ("tf120", "2س"), ("tf240", "4س")]
 
 TG_TOKEN = os.getenv("TG_TOKEN", "").strip()
 TG_CHAT = os.getenv("TG_CHAT", "").strip()
@@ -51,7 +53,7 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
     handlers=[logging.StreamHandler(sys.stdout)]
 )
-log = logging.getLogger("Top10")
+log = logging.getLogger("Top10Big")
 
 def fetch(sym, iv, period):
     for attempt in range(1, 4):
@@ -92,71 +94,72 @@ def build_tf(df, tf_min):
     l = df["Low"].to_numpy(dtype=float)
     c = df["Close"].to_numpy(dtype=float)
     cs = df["Close"]; hs = df["High"]; ls = df["Low"]
-    d = {
-        "times": df.index, "tf": tf_min,
-        "o": o, "h": h, "l": l, "c": c,
-    }
+    d = {"times": df.index, "tf": tf_min, "o": o, "h": h, "l": l, "c": c}
     bb_mid = cs.rolling(20).mean()
     bb_sd = cs.rolling(20).std()
     d["bb_up"] = (bb_mid + 2*bb_sd).to_numpy(dtype=float)
     d["bb_lo"] = (bb_mid - 2*bb_sd).to_numpy(dtype=float)
     d["rsi14"] = rsi_ser(cs, 14).to_numpy(dtype=float)
-    if tf_min == 30:
-        d["rsi2"] = rsi_ser(cs, 2).to_numpy(dtype=float)
-        ll = ls.rolling(14).min()
-        hh = hs.rolling(14).max()
-        k = 100 * (cs - ll) / (hh - ll).replace(0, np.nan)
-        d["stk"] = k.to_numpy(dtype=float)
-        d["std_"] = k.rolling(3).mean().to_numpy(dtype=float)
-        tp = (hs + ls + cs) / 3.0
-        ma = tp.rolling(20).mean()
-        md = (tp - ma).abs().rolling(20).mean()
-        d["cci"] = ((tp - ma) / (0.015 * md.replace(0, np.nan))).to_numpy(dtype=float)
-        e20 = cs.ewm(span=20, adjust=False).mean()
-        at = atr_ser(hs, ls, cs, 10)
-        ku = e20 + 2*at
-        kl = e20 - 2*at
-        d["ku"] = ku.to_numpy(dtype=float)
-        d["kl"] = kl.to_numpy(dtype=float)
-        d["sqz"] = ((bb_mid + 2*bb_sd < ku) & (bb_mid - 2*bb_sd > kl)).to_numpy(dtype=bool)
-        ha_c = ((df["Open"]+df["High"]+df["Low"]+df["Close"])/4).to_numpy(dtype=float)
-        n = len(ha_c)
-        ha_o = np.zeros(n)
+    d["rsi2"] = rsi_ser(cs, 2).to_numpy(dtype=float)
+    ll = ls.rolling(14).min()
+    hh = hs.rolling(14).max()
+    k = 100 * (cs - ll) / (hh - ll).replace(0, np.nan)
+    d["stk"] = k.to_numpy(dtype=float)
+    d["std_"] = k.rolling(3).mean().to_numpy(dtype=float)
+    d["willr"] = (-100 * (hh - cs) / (hh - ll).replace(0, np.nan)).to_numpy(dtype=float)
+    tp = (hs + ls + cs) / 3.0
+    ma = tp.rolling(20).mean()
+    md = (tp - ma).abs().rolling(20).mean()
+    d["cci"] = ((tp - ma) / (0.015 * md.replace(0, np.nan))).to_numpy(dtype=float)
+    e20 = cs.ewm(span=20, adjust=False).mean()
+    at = atr_ser(hs, ls, cs, 10)
+    ku = e20 + 2*at
+    kl = e20 - 2*at
+    d["ku"] = ku.to_numpy(dtype=float)
+    d["kl"] = kl.to_numpy(dtype=float)
+    d["sqz"] = ((bb_mid + 2*bb_sd < ku) & (bb_mid - 2*bb_sd > kl)).to_numpy(dtype=bool)
+    d["e20"] = e20.to_numpy(dtype=float)
+    d["e50"] = cs.ewm(span=50, adjust=False).mean().to_numpy(dtype=float)
+    d["e100"] = cs.ewm(span=100, adjust=False).mean().to_numpy(dtype=float)
+    ha_c = ((df["Open"]+df["High"]+df["Low"]+df["Close"])/4).to_numpy(dtype=float)
+    n = len(ha_c)
+    ha_o = np.zeros(n)
+    if n > 0:
         ha_o[0] = (o[0] + c[0]) / 2
         for i in range(1, n):
             ha_o[i] = (ha_o[i-1] + ha_c[i-1]) / 2
-        d["ha_o"] = ha_o
-        d["ha_c"] = ha_c
-    else:
-        d["e20"] = cs.ewm(span=20, adjust=False).mean().to_numpy(dtype=float)
-        d["e50"] = cs.ewm(span=50, adjust=False).mean().to_numpy(dtype=float)
-        d["e100"] = cs.ewm(span=100, adjust=False).mean().to_numpy(dtype=float)
-        ll = ls.rolling(14).min()
-        hh = hs.rolling(14).max()
-        d["willr"] = (-100 * (hh - cs) / (hh - ll).replace(0, np.nan)).to_numpy(dtype=float)
+    d["ha_o"] = ha_o
+    d["ha_c"] = ha_c
     return d
 
 def prepare(sym):
-    d15 = fetch(sym, "15m", f"{HISTORY_DAYS}d")
     d30 = fetch(sym, "30m", f"{HISTORY_DAYS}d")
     d60 = fetch(sym, "1h", f"{HISTORY_DAYS}d")
-    if d15 is None or d30 is None or d60 is None:
+    if d30 is None or d60 is None:
         return None
     now = pd.Timestamp.now(tz="UTC")
-    d15 = d15[d15.index + pd.Timedelta(minutes=15) <= now]
     d30 = d30[d30.index + pd.Timedelta(minutes=30) <= now]
     d60 = d60[d60.index + pd.Timedelta(hours=1) <= now]
-    if len(d30) < 200 or len(d60) < 150:
+    if len(d60) < 200:
+        return None
+    d120 = d60.resample("2h", label="left", closed="left").agg(
+        {"Open":"first","High":"max","Low":"min","Close":"last"}).dropna()
+    d120 = d120[d120.index + pd.Timedelta(hours=2) <= now]
+    d240 = d60.resample("4h", label="left", closed="left").agg(
+        {"Open":"first","High":"max","Low":"min","Close":"last"}).dropna()
+    d240 = d240[d240.index + pd.Timedelta(hours=4) <= now]
+    if len(d240) < 120:
         return None
     return {
-        "c15map": d15["Close"].to_dict(),
-        "tf30": build_tf(d30, 30),
+        "c30map": d30["Close"].to_dict(),
         "tf60": build_tf(d60, 60),
+        "tf120": build_tf(d120, 120),
+        "tf240": build_tf(d240, 240),
     }
 
-def emit(trades, times, i, c, dr, c15map, tf_min):
+def emit(trades, times, i, c, dr, c30map, tf_min):
     T = times[i] + pd.Timedelta(minutes=tf_min)
-    exit_px = c15map.get(T)
+    exit_px = c30map.get(T)
     if exit_px is None or (isinstance(exit_px, float) and np.isnan(exit_px)):
         return
     entry = c[i]
@@ -166,51 +169,48 @@ def emit(trades, times, i, c, dr, c15map, tf_min):
         win = exit_px < entry
     trades.append((times[i], bool(win)))
 
-def evaluate(data, vid):
-    c15map = data["c15map"]
-    D = data["tf30"] if vid in (1,2,3,5,7,8,10) else data["tf60"]
+def evaluate(data, sid, tfk):
+    c30map = data["c30map"]
+    D = data[tfk]
     t = D["times"]; o = D["o"]; h = D["h"]; l = D["l"]; c = D["c"]
     tf = D["tf"]
     n = len(c)
     trades = []
+    start = 110 if n > 150 else 40
 
-    if vid == 1:
+    if sid == 1:
         r2 = D["rsi2"]
-        for i in range(30, n):
+        for i in range(start, n):
             if r2[i] <= 10:
-                emit(trades, t, i, c, "CALL", c15map, tf)
+                emit(trades, t, i, c, "CALL", c30map, tf)
             elif r2[i] >= 90:
-                emit(trades, t, i, c, "PUT", c15map, tf)
-
-    elif vid == 2:
+                emit(trades, t, i, c, "PUT", c30map, tf)
+    elif sid == 2:
         bu = D["bb_up"]; bl = D["bb_lo"]
-        for i in range(30, n):
+        for i in range(start, n):
             if c[i-1] < bl[i-1] and c[i] > bl[i]:
-                emit(trades, t, i, c, "CALL", c15map, tf)
+                emit(trades, t, i, c, "CALL", c30map, tf)
             elif c[i-1] > bu[i-1] and c[i] < bu[i]:
-                emit(trades, t, i, c, "PUT", c15map, tf)
-
-    elif vid == 3:
+                emit(trades, t, i, c, "PUT", c30map, tf)
+    elif sid == 3:
         k = D["stk"]; kd = D["std_"]
-        for i in range(30, n):
+        for i in range(start, n):
             if np.isnan(k[i]) or np.isnan(kd[i]) or np.isnan(k[i-1]) or np.isnan(kd[i-1]):
                 continue
             if k[i-1] < kd[i-1] and k[i] > kd[i] and k[i] < 30:
-                emit(trades, t, i, c, "CALL", c15map, tf)
+                emit(trades, t, i, c, "CALL", c30map, tf)
             elif k[i-1] > kd[i-1] and k[i] < kd[i] and k[i] > 70:
-                emit(trades, t, i, c, "PUT", c15map, tf)
-
-    elif vid == 4:
+                emit(trades, t, i, c, "PUT", c30map, tf)
+    elif sid == 4:
         e20 = D["e20"]; e50 = D["e50"]; e100 = D["e100"]
-        for i in range(110, n):
+        for i in range(start, n):
             if e20[i] > e50[i] > e100[i] and l[i] <= e20[i] and c[i] > e20[i] and c[i] > o[i]:
-                emit(trades, t, i, c, "CALL", c15map, tf)
+                emit(trades, t, i, c, "CALL", c30map, tf)
             elif e20[i] < e50[i] < e100[i] and h[i] >= e20[i] and c[i] < e20[i] and c[i] < o[i]:
-                emit(trades, t, i, c, "PUT", c15map, tf)
-
-    elif vid == 5:
+                emit(trades, t, i, c, "PUT", c30map, tf)
+    elif sid == 5:
         r14 = D["rsi14"]
-        for i in range(30, n):
+        for i in range(start, n):
             a = max(0, i-15)
             b = i-5
             if b <= a:
@@ -218,60 +218,54 @@ def evaluate(data, vid):
             p_lo = a + int(np.argmin(l[a:b]))
             p_hi = a + int(np.argmax(h[a:b]))
             if l[i] < l[p_lo] and r14[i] > r14[p_lo] and l[i] <= l[i-4:i+1].min():
-                emit(trades, t, i, c, "CALL", c15map, tf)
+                emit(trades, t, i, c, "CALL", c30map, tf)
             elif h[i] > h[p_hi] and r14[i] < r14[p_hi] and h[i] >= h[i-4:i+1].max():
-                emit(trades, t, i, c, "PUT", c15map, tf)
-
-    elif vid == 6:
+                emit(trades, t, i, c, "PUT", c30map, tf)
+    elif sid == 6:
         bu = D["bb_up"]; bl = D["bb_lo"]
-        for i in range(30, n):
+        for i in range(start, n):
             eng_c = (c[i] > o[i] and c[i-1] < o[i-1] and c[i] >= o[i-1] and o[i] <= c[i-1])
             eng_p = (c[i] < o[i] and c[i-1] > o[i-1] and c[i] <= o[i-1] and o[i] >= c[i-1])
             if eng_c and c[i] < bl[i]:
-                emit(trades, t, i, c, "CALL", c15map, tf)
+                emit(trades, t, i, c, "CALL", c30map, tf)
             elif eng_p and c[i] > bu[i]:
-                emit(trades, t, i, c, "PUT", c15map, tf)
-
-    elif vid == 7:
+                emit(trades, t, i, c, "PUT", c30map, tf)
+    elif sid == 7:
         ku = D["ku"]; kl = D["kl"]; sq = D["sqz"]
-        for i in range(110, n):
+        for i in range(start, n):
             if not sq[i-1]:
                 continue
             if c[i] > ku[i]:
-                emit(trades, t, i, c, "CALL", c15map, tf)
+                emit(trades, t, i, c, "CALL", c30map, tf)
             elif c[i] < kl[i]:
-                emit(trades, t, i, c, "PUT", c15map, tf)
-
-    elif vid == 8:
+                emit(trades, t, i, c, "PUT", c30map, tf)
+    elif sid == 8:
         cci = D["cci"]
-        for i in range(30, n):
+        for i in range(start, n):
             if np.isnan(cci[i]):
                 continue
             if cci[i] <= -200:
-                emit(trades, t, i, c, "CALL", c15map, tf)
+                emit(trades, t, i, c, "CALL", c30map, tf)
             elif cci[i] >= 200:
-                emit(trades, t, i, c, "PUT", c15map, tf)
-
-    elif vid == 9:
+                emit(trades, t, i, c, "PUT", c30map, tf)
+    elif sid == 9:
         wr = D["willr"]
-        for i in range(30, n):
+        for i in range(start, n):
             if np.isnan(wr[i]):
                 continue
             if wr[i] <= -90:
-                emit(trades, t, i, c, "CALL", c15map, tf)
+                emit(trades, t, i, c, "CALL", c30map, tf)
             elif wr[i] >= -10:
-                emit(trades, t, i, c, "PUT", c15map, tf)
-
-    elif vid == 10:
+                emit(trades, t, i, c, "PUT", c30map, tf)
+    elif sid == 10:
         ho = D["ha_o"]; hc = D["ha_c"]
-        for i in range(30, n):
+        for i in range(start, n):
             red3 = (hc[i-1] < ho[i-1]) and (hc[i-2] < ho[i-2]) and (hc[i-3] < ho[i-3])
             grn3 = (hc[i-1] > ho[i-1]) and (hc[i-2] > ho[i-2]) and (hc[i-3] > ho[i-3])
             if red3 and hc[i] > ho[i]:
-                emit(trades, t, i, c, "CALL", c15map, tf)
+                emit(trades, t, i, c, "CALL", c30map, tf)
             elif grn3 and hc[i] < ho[i]:
-                emit(trades, t, i, c, "PUT", c15map, tf)
-
+                emit(trades, t, i, c, "PUT", c30map, tf)
     return trades
 
 def stats(trades):
@@ -296,7 +290,7 @@ def robustness(trades):
     return ok, s1["wr"], s2["wr"]
 
 def build_report():
-    log.info("بدء مختبر العشرة الكبار")
+    log.info("بدء العشرة الكبار على الفريمات الكبيرة (انتهاء 30د)")
     start = time.time()
 
     data_by_sym = {}
@@ -310,55 +304,58 @@ def build_report():
         time.sleep(0.5)
 
     rows = []
-    for vid in range(1, 11):
-        trades = []
-        for sym, data in data_by_sym.items():
-            if data is None:
+    for sid in range(1, 11):
+        for tfk, tfl in TFS:
+            trades = []
+            for sym, data in data_by_sym.items():
+                if data is None:
+                    continue
+                trades.extend(evaluate(data, sid, tfk))
+            st = stats(trades)
+            if not st:
+                rows.append((sid, tfl, 0, 0.0, False, 0.0, 0.0, 0.0))
                 continue
-            trades.extend(evaluate(data, vid))
-        st = stats(trades)
-        if not st:
-            rows.append((vid, 0, 0.0, False, 0.0, 0.0, 0.0))
-            continue
-        rob, w1, w2 = robustness(trades)
-        per_day = round(st["total"] / HISTORY_DAYS, 1)
-        rows.append((vid, st["total"], st["wr"], rob, w1, w2, per_day))
-        log.info(f"استراتيجية {vid}: {st['total']} صفقة {st['wr']}%")
+            rob, w1, w2 = robustness(trades)
+            per_day = round(st["total"] / HISTORY_DAYS, 1)
+            rows.append((sid, tfl, st["total"], st["wr"], rob, w1, w2, per_day))
+            log.info(f"استراتيجية {sid} على {tfl}: {st['total']} صفقة {st['wr']}%")
 
-    msg = f"🔟 *مختبر العشرة الكبار*\n(5 أزواج × 60 يوماً × انتهاء 15د)\n\n"
+    msg = f"🔟 *العشرة الكبار — فريمات كبيرة*\n(5 أزواج × 60 يوماً × انتهاء 30د)\n\n"
     msg += "```\n"
-    msg += f"{'#':<4}{'صفقات':>7}{'فوز':>8}{'/يوم':>7}{'صلب':>5}\n"
+    msg += f"{'#':<4}{'فريم':<6}{'صفقات':>7}{'فوز':>8}{'/يوم':>6}{'صلب':>4}\n"
     for r in rows:
-        mark = "Y" if r[3] else "N"
-        msg += f"{r[0]:<4}{r[1]:>7}{r[2]:>7.1f}%{r[6]:>7}{mark:>5}\n"
+        mark = "Y" if r[4] else "N"
+        msg += f"{r[0]:<4}{r[1]:<6}{r[2]:>7}{r[3]:>7.1f}%{r[7]:>6}{mark:>4}\n"
     msg += "```\n\n"
     msg += f"📋 الاستراتيجيات:\n"
-    for vid in NAMES:
-        msg += f"{vid}) {NAMES[vid]}\n"
+    for sid in NAMES:
+        msg += f"{sid}) {NAMES[sid]}\n"
 
-    msg += f"\n🧪 صلابة (نصف|نصف):\n"
+    msg += f"\n🧪 صلابة (نصف|نصف) للأهم:\n"
+    shown = 0
     for r in rows:
-        if r[1] >= 200:
-            msg += f"• استراتيجية {r[0]}: {r[4]:.1f}% | {r[5]:.1f}%\n"
+        if r[2] >= 200 and shown < 12:
+            msg += f"• {r[0]}/{r[1]}: {r[5]:.1f}% | {r[6]:.1f}%\n"
+            shown += 1
 
-    valid = [r for r in rows if r[1] >= MIN_TRADES]
+    valid = [r for r in rows if r[2] >= MIN_TRADES]
     msg += f"\n📏 *المقارنة:*\n"
-    msg += f"• مرجع H2 (ديمو جارية): *{REF_H2}%*\n"
+    msg += f"• مرجع H2: *{REF_H2}%*\n"
     if valid:
-        best = max(valid, key=lambda x: x[2])
-        msg += f"• أفضل العشرة: *{best[2]}%* (استراتيجية {best[0]}، {best[1]} صفقة)\n"
-        cands = [r for r in valid if r[3] and r[2] >= REF_H2 + 2.0]
+        best = max(valid, key=lambda x: x[3])
+        msg += f"• أفضل تركيبة: *{best[3]}%* (استراتيجية {best[0]} على {best[1]}، {best[2]} صفقة)\n"
+        cands = [r for r in valid if r[4] and r[3] >= REF_H2 + 2.0]
         if cands:
             msg += f"\n🏆 *تتفوق على H2 بـ2+ وصلبة:*\n"
             for r in cands:
-                msg += f"• استراتيجية {r[0]}: *{r[2]}%*\n"
-            msg += f"\n⏳ تبقى H2 على الديمو — الفائزة الجديدة تنتظر ديمو خاصة بها\n"
+                msg += f"• استراتيجية {r[0]} على {r[1]}: *{r[3]}%*\n"
+            msg += f"\n⏳ H2 تبقى على الديمو — الفائزة تنتظر ديمو خاصة\n"
         else:
-            msg += f"\n✅ *لا شيء يتفوق على H2* — قرارك بالبقاء عليها صحيح بالأرقام\n"
+            msg += f"\n✅ *لا تفوق على H2* — الفريمات الكبيرة لا تضيف حافة\n"
     else:
         msg += f"\n⚠️ صفقات قليلة (<300) — استرشادي فقط\n"
 
-    msg += f"\n🔒 H2 حية والديمو مستمرة — هذا مختبر منفصل\n"
+    msg += f"\n🔒 H2 والديمو لا تتأثران\n"
     msg += f"\n⏱️ {time.time()-start:.0f}ث"
     return msg
 
