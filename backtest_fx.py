@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# غيث — خماسي AlgoTrade Pro على الثنائية
+# غيث — PurpleCloud × 10 تركيبات × 20 زوجاً
 # فريم 30د + انتهاء 15د / 30د
-# بناء بأسطر قصيرة ضد تلف اللصق
 import os, sys, time, logging
 import numpy as np, pandas as pd
-from numpy.lib.stride_tricks import sliding_window_view as swv
 
 try:
     import yfinance as yf
@@ -21,25 +19,38 @@ except ImportError:
 
 import requests
 
-SYMBOLS = ["USDJPY=X", "EURAUD=X", "USDCHF=X",
-           "EURCAD=X", "CADJPY=X"]
+SYMBOLS = ["USDJPY=X", "AUDJPY=X", "EURJPY=X",
+           "EURUSD=X", "GBPUSD=X", "EURGBP=X",
+           "CADJPY=X", "EURCAD=X", "GBPCAD=X",
+           "AUDCHF=X", "AUDUSD=X", "USDCHF=X",
+           "CHFJPY=X", "AUDCAD=X", "USDCAD=X",
+           "EURAUD=X", "EURCHF=X", "GBPJPY=X",
+           "GBPCHF=X", "GBPAUD=X"]
 HISTORY_DAYS = 60
 STAKE = 6.0
 PAYOUT = 0.90
 BREAKEVEN = 52.63
 REF_H2 = 56.1
 
-INDS = [(1, "NoSureThing"), (2, "GaussChan"),
-        (3, "STrendFusion"), (4, "ZeroLag"),
-        (5, "PurpleCloud")]
-EXPS = [(15, "15m"), (30, "30m")]
+VARIANTS = [
+    (1, "ST20 p0.2 15m", "st20", 0.2, 15),
+    (2, "ST20 p0.2 30m", "st20", 0.2, 30),
+    (3, "ST20 p0.1 15m", "st20", 0.1, 15),
+    (4, "ST20 p0.3 15m", "st20", 0.3, 15),
+    (5, "ST10 p0.2 15m", "st10", 0.2, 15),
+    (6, "ST10 p0.2 30m", "st10", 0.2, 30),
+    (7, "ST20 p0.1 30m", "st20", 0.1, 30),
+    (8, "ST20 p0.3 30m", "st20", 0.3, 30),
+    (9, "ST10 p0.1 15m", "st10", 0.1, 15),
+    (10, "ST10 p0.3 15m", "st10", 0.3, 15),
+]
 
 TG_TOKEN = os.getenv("TG_TOKEN", "").strip()
 TG_CHAT = os.getenv("TG_CHAT", "").strip()
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s | %(message)s")
-log = logging.getLogger("ATP5")
+log = logging.getLogger("PC10")
 
 def fetch(sym, iv, period):
     for attempt in range(1, 5):
@@ -70,10 +81,10 @@ def fetch(sym, iv, period):
             return df
         except Exception as e:
             log.warning(f"{sym} {iv} try {attempt}: {e}")
-            time.sleep(3 * attempt)
+            time.sleep(2 * attempt)
     return None
 
-def wilder_atr(h, l, c, p=14):
+def wilder_atr(h, l, c, p):
     pc = c.shift(1)
     a = (h - pc).abs()
     b = (l - pc).abs()
@@ -115,26 +126,6 @@ def supertrend(h, l, c, period, mult):
             dr[i] = dr[i - 1]
     return dr
 
-def choppiness(h, l, c, n=100):
-    a1 = wilder_atr(h, l, c, 1)
-    sa = a1.rolling(n).sum()
-    hh = h.rolling(n).max()
-    ll = l.rolling(n).min()
-    v = 100 * np.log10(sa / (hh - ll))
-    v = v / np.log10(n)
-    return v.to_numpy(dtype=float)
-
-def gauss_mid(ca, window=90, sigma=15.0):
-    n = len(ca)
-    x = np.arange(window) / sigma
-    w = np.exp(-0.5 * x * x)
-    w = w / w.sum()
-    mid = np.full(n, np.nan)
-    if n >= window:
-        wins = swv(ca, window)
-        mid[window - 1:] = wins @ w[::-1]
-    return mid
-
 def prepare(sym):
     d15 = fetch(sym, "15m", f"{HISTORY_DAYS}d")
     d30 = fetch(sym, "30m", f"{HISTORY_DAYS}d")
@@ -151,26 +142,8 @@ def prepare(sym):
     c = d30["Close"]
     ca = c.to_numpy(dtype=float)
     n = len(ca)
-    r20 = 100 * (c / c.shift(20) - 1)
-    r25 = 100 * (c / c.shift(25) - 1)
-    r30 = 100 * (c / c.shift(30) - 1)
-    r40 = 100 * (c / c.shift(40) - 1)
-    main4 = (r20 + r25 + r30 + r40) / 4
-    main_a = main4.to_numpy(dtype=float)
-    sig_a = main4.rolling(14).mean().to_numpy(dtype=float)
-    gm = gauss_mid(ca, 90, 15.0)
-    st10 = supertrend(h, l, c, 10, 3.0)
-    chop = choppiness(h, l, c, 100)
-    mom = (c - c.shift(1)).ewm(span=13, adjust=False).mean()
-    mom_a = mom.to_numpy(dtype=float)
-    lag = 39
-    adj = 2 * c - c.shift(lag)
-    z = adj.ewm(span=80, adjust=False).mean()
-    sd20 = c.rolling(20).std()
-    za = z.to_numpy(dtype=float)
-    bu = (z + 1.4 * sd20).to_numpy(dtype=float)
-    bl = (z - 1.4 * sd20).to_numpy(dtype=float)
     st20 = supertrend(h, l, c, 20, 2.0)
+    st10 = supertrend(h, l, c, 10, 3.0)
     rng = (h - l).replace(0, np.nan)
     bp = ((c - o).clip(lower=0) / rng)
     sp = ((o - c).clip(lower=0) / rng)
@@ -178,95 +151,27 @@ def prepare(sym):
     sp = sp.ewm(span=20, adjust=False).mean()
     net = (bp - sp).to_numpy(dtype=float)
     return {"times": d30.index, "c": ca, "n": n,
-            "main": main_a, "sig": sig_a, "gm": gm,
-            "st10": st10, "chop": chop, "mom": mom_a,
-            "za": za, "bu": bu, "bl": bl,
-            "st20": st20, "net": net,
+            "st20": st20, "st10": st10, "net": net,
             "c15map": d15["Close"].to_dict()}
 
-def signals(D, iid):
-    n = D["n"]
-    call = np.zeros(n, dtype=bool)
-    put = np.zeros(n, dtype=bool)
-    if iid == 1:
-        m = D["main"]
-        s = D["sig"]
-        for i in range(45, n):
-            if np.isnan(m[i]) or np.isnan(s[i]):
-                continue
-            if np.isnan(m[i-1]) or np.isnan(s[i-1]):
-                continue
-            if m[i-1] <= s[i-1] and m[i] > s[i]:
-                call[i] = True
-            elif m[i-1] >= s[i-1] and m[i] < s[i]:
-                put[i] = True
-    elif iid == 2:
-        gm = D["gm"]
-        for i in range(92, n):
-            if np.isnan(gm[i]):
-                continue
-            if np.isnan(gm[i-1]) or np.isnan(gm[i-2]):
-                continue
-            gn = gm[i] > gm[i-1]
-            gp = gm[i-1] > gm[i-2]
-            if gn and not gp:
-                call[i] = True
-            elif not gn and gp:
-                put[i] = True
-    elif iid == 3:
-        st = D["st10"]
-        ch = D["chop"]
-        mo = D["mom"]
-        for i in range(105, n):
-            if np.isnan(ch[i]) or np.isnan(mo[i]):
-                continue
-            up = st[i] == 1.0 and st[i-1] == -1.0
-            dn = st[i] == -1.0 and st[i-1] == 1.0
-            if up and ch[i] < 50.0 and mo[i] > 0:
-                call[i] = True
-            elif dn and ch[i] < 50.0 and mo[i] < 0:
-                put[i] = True
-    elif iid == 4:
-        za = D["za"]
-        bu = D["bu"]
-        bl = D["bl"]
-        cc = D["c"]
-        for i in range(105, n):
-            if np.isnan(za[i]) or np.isnan(za[i-1]):
-                continue
-            if np.isnan(za[i-2]):
-                continue
-            un = za[i] > za[i-1]
-            upv = za[i-1] > za[i-2]
-            if un and not upv and cc[i] > bu[i]:
-                call[i] = True
-            elif not un and upv and cc[i] < bl[i]:
-                put[i] = True
-    elif iid == 5:
-        st = D["st20"]
-        nt = D["net"]
-        for i in range(60, n):
-            if np.isnan(nt[i]) or np.isnan(nt[i-1]):
-                continue
-            nb = st[i] == 1.0 and nt[i] > 0.2
-            pb = st[i-1] == 1.0 and nt[i-1] > 0.2
-            ns = st[i] == -1.0 and nt[i] < -0.2
-            ps = st[i-1] == -1.0 and nt[i-1] < -0.2
-            if nb and not pb:
-                call[i] = True
-            elif ns and not ps:
-                put[i] = True
-    return call, put
-
-def evaluate(D, iid, exp_min):
+def evaluate(D, st_key, thr, exp_min):
     t = D["times"]
     c = D["c"]
     n = D["n"]
-    call, put = signals(D, iid)
+    st = D[st_key]
+    nt = D["net"]
     c15 = D["c15map"]
     trades = []
-    for i in range(n):
-        if not (call[i] or put[i]):
+    for i in range(30, n):
+        if np.isnan(nt[i]) or np.isnan(nt[i - 1]):
+            continue
+        nb = st[i] == 1.0 and nt[i] > thr
+        pb = st[i - 1] == 1.0 and nt[i - 1] > thr
+        ns = st[i] == -1.0 and nt[i] < -thr
+        ps = st[i - 1] == -1.0 and nt[i - 1] < -thr
+        call = nb and not pb
+        put = ns and not ps
+        if not (call or put):
             continue
         if exp_min == 30:
             if i + 1 >= n:
@@ -281,7 +186,7 @@ def evaluate(D, iid, exp_min):
             if np.isnan(exit_px):
                 continue
         entry = c[i]
-        if call[i]:
+        if call:
             win = exit_px > entry
         else:
             win = exit_px < entry
@@ -313,63 +218,73 @@ def robustness(trades):
     return ok, s1["wr"], s2["wr"]
 
 def build_report():
-    log.info("بدء اختبار خماسي AlgoTrade")
+    log.info("بدء PurpleCloud × 10 × 20 زوجاً")
     start = time.time()
     data_by_sym = {}
+    okc = 0
     for sym in SYMBOLS:
         try:
             data_by_sym[sym] = prepare(sym)
-            log.info(sym + ": جاهز")
+            if data_by_sym[sym] is not None:
+                okc += 1
         except Exception as e:
             log.error(sym + ": " + str(e))
             data_by_sym[sym] = None
-        time.sleep(1)
+        time.sleep(0.4)
+    log.info("أزواج جاهزة: " + str(okc))
     rows = []
-    for iid, ilab in INDS:
-        for exp_min, elab in EXPS:
-            trades = []
-            for sym, D in data_by_sym.items():
-                if D is None:
-                    continue
-                trades.extend(evaluate(D, iid, exp_min))
-            st = stats(trades)
-            if not st:
-                rows.append((iid, ilab, elab, 0,
-                             0.0, False))
+    for vid, lab, stk, thr, exp in VARIANTS:
+        trades = []
+        for sym, D in data_by_sym.items():
+            if D is None:
                 continue
-            rob, w1, w2 = robustness(trades)
-            rows.append((iid, ilab, elab,
-                         st["total"], st["wr"], rob))
-            log.info(ilab + " " + elab + ": "
-                     + str(st["total"]) + " "
-                     + str(st["wr"]) + "%")
-    msg = "🏆 *خماسي AlgoTrade على الثنائية*\n"
-    msg += "(5 أزواج × 60 يوم × فريم 30د)\n\n"
+            trades.extend(evaluate(D, stk, thr, exp))
+        st = stats(trades)
+        if not st:
+            rows.append((vid, lab, 0, 0.0, False,
+                         0.0, 0.0))
+            continue
+        rob, w1, w2 = robustness(trades)
+        rows.append((vid, lab, st["total"], st["wr"],
+                     rob, w1, w2))
+        log.info(lab + ": " + str(st["total"])
+                 + " " + str(st["wr"]) + "%")
+    msg = "🟣 *PurpleCloud × 10 تركيبات*\n"
+    msg += "(20 زوجاً × 60 يوماً × فريم 30د)\n\n"
     msg += "```\n"
-    msg += "#  المؤشر         انتهاء  صفقات   فوز   صلب\n"
+    msg += "#   التركيبة        صفقات   فوز    صلب\n"
     for r in rows:
-        mk = "Y" if r[5] else "N"
-        msg += (str(r[0]) + "  " + r[1] + "  " + r[2]
-                + "  " + str(r[3]) + "  "
-                + str(r[4]) + "%  " + mk + "\n")
+        mk = "Y" if r[4] else "N"
+        msg += (str(r[0]) + "   " + r[1] + "  "
+                + str(r[2]) + "  "
+                + str(r[3]) + "%  " + mk + "\n")
     msg += "```\n\n"
-    valid = [r for r in rows if r[3] >= 300]
-    msg += "📏 *المقارنة:*\n"
+    msg += "🧪 صلابة (نصف|نصف):\n"
+    for r in rows:
+        if r[2] >= 200:
+            msg += ("• " + r[1] + ": "
+                    + str(r[5]) + "% | "
+                    + str(r[6]) + "%\n")
+    valid = [r for r in rows if r[2] >= 300]
+    msg += "\n📏 *الحكم المسجل مسبقاً:*\n"
     msg += "• مرجع H2: *" + str(REF_H2) + "%*\n"
+    msg += "• عتبة الترشيح: صلبة + ≥58.1% + ≥300 صفقة\n"
     if valid:
-        best = max(valid, key=lambda x: x[4])
-        msg += "• أفضل تركيبة: *" + str(best[4])
-        msg += "%* (" + best[1] + " " + best[2] + ")\n"
+        best = max(valid, key=lambda x: x[3])
+        msg += "• أفضل تركيبة: *" + str(best[3])
+        msg += "%* (" + best[1] + ")\n"
         cands = [r for r in valid
-                 if r[5] and r[4] >= REF_H2 + 2.0]
+                 if r[4] and r[3] >= REF_H2 + 2.0]
         if cands:
-            msg += "\n🏆 *مؤشر متفوق وصلب:*\n"
+            msg += "\n🏆 *عائلة ثانية حقيقية!*\n"
             for r in cands:
-                msg += "• " + r[1] + " " + r[2]
-                msg += ": *" + str(r[4]) + "%*\n"
-            msg += "\n⏳ يستحق ديمو خاصة بعد ديمو H2\n"
+                msg += ("• " + r[1] + ": *"
+                        + str(r[3]) + "%*\n")
+            msg += "\n⏳ ديمو خاصة بها بعد ديمو H2\n"
+        elif best[4] and best[3] >= 54.0:
+            msg += "\n🟡 واعدة لكن تحت العتبة — احتياط\n"
         else:
-            msg += "\n✅ *لا تفوق على H2*\n"
+            msg += "\n🔴 الـ56.6% كانت ضجيج عينة صغيرة\n"
     else:
         msg += "\n⚠️ لا تركيبة بلغت 300 صفقة\n"
     msg += "\n🔒 H2 والديمو لا تتأثران\n"
