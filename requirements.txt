@@ -1,3 +1,4 @@
-pandas
-numpy
-yfinance
+   pandas
+   numpy
+   yfinance
+   requests
