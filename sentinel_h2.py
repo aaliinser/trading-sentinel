@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-غيث H2 — بوت إشارات حي (v5.7 Anti-Freeze)
+غيث H2 — بوت إشارات حي (v5.7.1 Reporting)
 الاستراتيجية دون أي تغيير: RSI(14) Wilder + BB(20,2.0) ddof=0 | 5m / 15m
-v5.7: حماية من "التبريد المتجمد" — timeout + fallback + state cleanup
+v5.7.1: إضافة تقارير أسبوعية (أوقات اليوم / أفضل زوج / أنماط الخسارة)
+        تعديل عرضي فقط داخل send_week_summary — لا تغيير في المنطق
 """
 import os, sys, time, json, logging
 from datetime import datetime, timedelta, timezone
@@ -39,7 +40,7 @@ BLACKOUT_END_H = 3
 MONTH_START = "2026-09-15"
 BREAKEVEN_WR = 52.63
 
-# ─── v5.7: Anti-freeze timeouts ───
+# ─── Anti-freeze timeouts ───
 PENDING_SOFT_TIMEOUT_MIN = 35    # محاولة حسم عادية
 PENDING_HARD_TIMEOUT_MIN = 60    # حذف قسري إذا فشل الحسم
 STATE_CLEANUP_HOURS = 2          # حذف الإشارات الأقدم من ساعتين عند التحميل
@@ -88,7 +89,7 @@ def load_state():
         try:
             with open(p, encoding="utf-8") as f:
                 st = json.load(f)
-            # ─── v5.7: State cleanup on load ───
+            # ─── State cleanup on load ───
             pend = st.get("pending", [])
             if isinstance(pend, list) and pend:
                 now = datetime.now(timezone.utc)
@@ -239,7 +240,7 @@ def calc_urgency(cl, band, sdv, direction):
         else:
             return "far", "skip", "🚫", "تخطّ — السعر ابتعد عن الباند"
 
-# ─── v5.7: Robust resolve_pending with fallback + hard timeout ───
+# ─── Robust resolve_pending with fallback + hard timeout ───
 def resolve_pending(st):
     pend = safe_list(st, "pending")
     if not pend:
@@ -260,14 +261,14 @@ def resolve_pending(st):
 
         age_min = (now - exp).total_seconds() / 60.0
 
-        # ─── v5.7 Hard Timeout: force cleanup stale signals ───
+        # Hard Timeout: force cleanup stale signals
         if age_min > PENDING_HARD_TIMEOUT_MIN:
             log.warning(f"{p.get('sym')}: hard timeout ({age_min:.0f}m) — forced cleanup")
             done.append(p)
             forced_count += 1
             continue
 
-        # ─── Not yet time to resolve ───
+        # Not yet time to resolve
         if age_min < 1.0:
             continue
 
@@ -276,19 +277,15 @@ def resolve_pending(st):
         exit_px = None
 
         if df is not None and not df.empty:
-            # Try exact target first
             if target in df.index:
                 exit_px = float(df.loc[target, "Close"])
             else:
-                # ─── v5.7 Fallback: use nearest candle before target ───
                 earlier = df[df.index <= target]
                 if not earlier.empty:
                     exit_px = float(earlier["Close"].iloc[-1])
                     log.info(f"{p['sym']}: target {target} missing, using fallback at {earlier.index[-1]}")
 
-        # ─── Decide based on what we found ───
         if exit_px is None:
-            # Still couldn't resolve, wait up to SOFT timeout
             if age_min > PENDING_SOFT_TIMEOUT_MIN:
                 log.warning(f"void pending {p['sym']} (no data after {age_min:.0f}m)")
                 done.append(p)
@@ -398,6 +395,7 @@ def send_day_summary(st, day_str):
            f"📌 التعادل: {BREAKEVEN_WR}%")
     tg_send(txt)
 
+# ─── v5.7.1: Weekly summary with time-of-day / best pair / loss patterns ───
 def send_week_summary(st, days):
     sim = [x for x in safe_list(st, "sim") if x["dl"] in days]
     if not sim:
@@ -425,13 +423,60 @@ def send_week_summary(st, days):
         dw = sum(1 for x in ds if x["win"])
         dwr = round(100*dw/dn, 1) if dn else 0.0
         txt += f"• {ar_day(dstr)} {dstr}: {dn} إشارة | {dwr}%\n"
+
+    # ─── Time-of-day breakdown (morning / afternoon / evening) ───
+    buckets = [
+        ("صباحاً (09-14)", lambda h: 9 <= h < 14),
+        ("عصراً (14-19)", lambda h: 14 <= h < 19),
+        ("مساءً (19-24)", lambda h: h >= 19),
+    ]
+    txt += f"\n⏰ *تفصيل أوقات اليوم:*\n"
+    bucket_stats = []
+    for name, cond in buckets:
+        bs = [x for x in sim if cond(int(x.get("hl", -1)))]
+        bn = len(bs)
+        bw = sum(1 for x in bs if x["win"])
+        bwr = round(100*bw/bn, 1) if bn else 0.0
+        bucket_stats.append((name, bn, bwr))
+        txt += f"• {name}: {bn} إشارة | {bwr}%\n"
+    active = [b for b in bucket_stats if b[1] > 0]
+    if active:
+        best_b = max(active, key=lambda b: b[2])
+        txt += f"🏆 أفضل وقت: {best_b[0]} ({best_b[2]}%)\n"
+
     txt += f"\n🧩 *تفصيل الأزواج:*\n"
+    pair_stats = []
     for sym in sorted({x["sym"] for x in sim}):
         ss = [x for x in sim if x["sym"] == sym]
         sn = len(ss)
         sw = sum(1 for x in ss if x["win"])
         swr = round(100*sw/sn, 1) if sn else 0.0
+        pair_stats.append((sym, sn, swr, sn - sw))
         txt += f"• {fmt_sym(sym)}: {sn} | {swr}%\n"
+    if pair_stats:
+        best_p = max(pair_stats, key=lambda p: p[2])
+        txt += f"🏆 أفضل زوج: {fmt_sym(best_p[0])} ({best_p[2]}%)\n"
+
+    # ─── Loss pattern analysis ───
+    max_streak = 0
+    cur = 0
+    for x in sim:
+        if not x["win"]:
+            cur += 1
+            if cur > max_streak:
+                max_streak = cur
+        else:
+            cur = 0
+    txt += f"\n🔁 *تحليل أنماط الخسارة:*\n"
+    txt += f"• أطول سلسلة خسائر متتالية: {max_streak}\n"
+    if pair_stats:
+        worst_p = max(pair_stats, key=lambda p: p[3])
+        if worst_p[3] > 0:
+            txt += f"• أكثر الأزواج خسارة: {fmt_sym(worst_p[0])} ({worst_p[3]} خسائر)\n"
+    if active:
+        worst_b = min(active, key=lambda b: b[2])
+        txt += f"• أضعف وقت: {worst_b[0]} ({worst_b[2]}%)\n"
+
     pnl = round(w * win_payout - l * stake, 2)
     txt += (f"\n• إجمالي الإشارات: *{n}*\n"
             f"• تلقائي: فوز {w} / خسارة {l} | *{round(wr,1)}%*\n"
@@ -550,13 +595,13 @@ def scan(st):
     lastmap = safe_dict(st, "last_sig")
     pend = safe_list(st, "pending")
 
-    # ─── v5.7: Debug log — show how many symbols are in cooldown ───
+    # Debug log — show how many symbols are in cooldown
     cooldown_symbols = {p.get("sym") for p in pend if p.get("sym")}
     if cooldown_symbols:
         log.info(f"cooldown active: {sorted(cooldown_symbols)}")
 
     for sym in SYMBOLS:
-        # ─── v5.5 Cooldown: no new signal while same symbol unresolved ───
+        # Cooldown: no new signal while same symbol unresolved
         if sym in cooldown_symbols:
             log.info(f"{sym}: تبريد نشط — تخطي")
             continue
@@ -575,7 +620,7 @@ def scan(st):
         entry_loc = entry_loc + timedelta(hours=USER_TZ_OFFSET_H)
         current_hour = entry_loc.hour
 
-        # ─── v5.6 Night Blackout: no signals between 00:00 and 09:00 ───
+        # Night Blackout: no signals between 00:00 and 09:00
         if current_hour < WIN_START_H:
             log.info(f"{sym}: حظر ليلي ({current_hour:02d}:00) — تخطي")
             lastmap[sym] = key
@@ -684,7 +729,7 @@ def main():
     d = day_obj(st)
     if st.get("boot_date") != d["date"]:
         st["boot_date"] = d["date"]
-        tg_send(f"🚀 بوت H2 بدأ (v5.7 Anti-Freeze)\n"
+        tg_send(f"🚀 بوت H2 بدأ (v5.7.1 Reporting)\n"
                 f"• أزواج: {len(SYMBOLS)}\n"
                 f"• بدون سقف تنبيهات — لن تضيع إشارة\n"
                 f"• تبريد لكل زوج: إشارة واحدة حتى حسم النتيجة\n"
@@ -692,7 +737,7 @@ def main():
                 f"• حماية ضد التجميد: timeout {PENDING_HARD_TIMEOUT_MIN}د\n"
                 f"• تسجيل تلقائي + رد تلقائي بالنتيجة\n"
                 f"• ملخص يومي عند منتصف الليل\n"
-                f"• ملخص أسبوعي السبت\n"
+                f"• ملخص أسبوعي السبت (أيام + أوقات + أزواج + أنماط خسارة)\n"
                 f"• ملخص شهري أول كل شهر\n"
                 f"• الحماية: 3 خسائر متتالية = 4 ساعات")
     listen(st)
