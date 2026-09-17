@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-غيث H2 — بوت إشارات حي (v5.5 Cooldown)
+غيث H2 — بوت إشارات حي (v5.7 Anti-Freeze)
 الاستراتيجية دون أي تغيير: RSI(14) Wilder + BB(20,2.0) ddof=0 | 5m / 15m
-v5.5: تبريد لكل زوج — لا إشارة جديدة لنفس الزوج قبل حسم السابقة
+v5.7: حماية من "التبريد المتجمد" — timeout + fallback + state cleanup
 """
 import os, sys, time, json, logging
 from datetime import datetime, timedelta, timezone
@@ -39,6 +39,11 @@ BLACKOUT_END_H = 3
 MONTH_START = "2026-09-15"
 BREAKEVEN_WR = 52.63
 
+# ─── v5.7: Anti-freeze timeouts ───
+PENDING_SOFT_TIMEOUT_MIN = 35    # محاولة حسم عادية
+PENDING_HARD_TIMEOUT_MIN = 60    # حذف قسري إذا فشل الحسم
+STATE_CLEANUP_HOURS = 2          # حذف الإشارات الأقدم من ساعتين عند التحميل
+
 AR_DAYS = ["الاثنين","الثلاثاء","الأربعاء","الخميس",
            "الجمعة","السبت","الأحد"]
 AR_MONTHS = ["يناير","فبراير","مارس","أبريل","مايو","يونيو",
@@ -50,11 +55,10 @@ TG_CHAT = os.getenv("TG_CHAT","").strip()
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s | %(levelname)-8s | %(message)s",
                     handlers=[logging.StreamHandler(sys.stdout)])
-log = logging.getLogger("H2v55")
+log = logging.getLogger("H2v57")
 
 # ─── Safe accessors ───
 def safe_list(st, key):
-    """Return list; replace None/corrupt values with empty list."""
     val = st.get(key)
     if not isinstance(val, list):
         st[key] = []
@@ -62,7 +66,6 @@ def safe_list(st, key):
     return val
 
 def safe_dict(st, key):
-    """Return dict; replace None/corrupt values with empty dict."""
     val = st.get(key)
     if not isinstance(val, dict):
         st[key] = {}
@@ -84,7 +87,27 @@ def load_state():
     if p.exists():
         try:
             with open(p, encoding="utf-8") as f:
-                return json.load(f)
+                st = json.load(f)
+            # ─── v5.7: State cleanup on load ───
+            pend = st.get("pending", [])
+            if isinstance(pend, list) and pend:
+                now = datetime.now(timezone.utc)
+                fresh = []
+                dropped = 0
+                for p in pend:
+                    try:
+                        exp = datetime.fromisoformat(p["exp"])
+                        age_min = (now - exp).total_seconds() / 60.0
+                        if age_min <= STATE_CLEANUP_HOURS * 60:
+                            fresh.append(p)
+                        else:
+                            dropped += 1
+                    except Exception:
+                        dropped += 1
+                st["pending"] = fresh
+                if dropped:
+                    log.info(f"state cleanup: dropped {dropped} stale pending signal(s)")
+            return st
         except Exception:
             return {}
     return {}
@@ -128,10 +151,6 @@ def tg_send(text, reply_to=None):
 
 # ─── Flatten yfinance MultiIndex columns ───
 def flatten_columns(df):
-    """
-    Normalise yfinance columns regardless of MultiIndex layout.
-    Handles both: ('Open', 'USDJPY=X') and ('USDJPY=X', 'Open')
-    """
     OHLC = ("Open", "High", "Low", "Close")
     if not isinstance(df.columns, pd.MultiIndex):
         df.columns = [str(c) for c in df.columns]
@@ -220,38 +239,73 @@ def calc_urgency(cl, band, sdv, direction):
         else:
             return "far", "skip", "🚫", "تخطّ — السعر ابتعد عن الباند"
 
+# ─── v5.7: Robust resolve_pending with fallback + hard timeout ───
 def resolve_pending(st):
     pend = safe_list(st, "pending")
     if not pend:
         return
     now = datetime.now(timezone.utc)
     done = []
+    resolved_count = 0
+    voided_count = 0
+    forced_count = 0
+
     for p in pend:
         try:
             exp = datetime.fromisoformat(p["exp"])
         except Exception:
             done.append(p)
+            forced_count += 1
             continue
-        if now < exp + timedelta(seconds=60):
+
+        age_min = (now - exp).total_seconds() / 60.0
+
+        # ─── v5.7 Hard Timeout: force cleanup stale signals ───
+        if age_min > PENDING_HARD_TIMEOUT_MIN:
+            log.warning(f"{p.get('sym')}: hard timeout ({age_min:.0f}m) — forced cleanup")
+            done.append(p)
+            forced_count += 1
             continue
+
+        # ─── Not yet time to resolve ───
+        if age_min < 1.0:
+            continue
+
         df = fetch5m(p["sym"])
         target = exp - timedelta(minutes=5)
         exit_px = None
-        if df is not None and target in df.index:
-            exit_px = float(df.loc[target, "Close"])
+
+        if df is not None and not df.empty:
+            # Try exact target first
+            if target in df.index:
+                exit_px = float(df.loc[target, "Close"])
+            else:
+                # ─── v5.7 Fallback: use nearest candle before target ───
+                earlier = df[df.index <= target]
+                if not earlier.empty:
+                    exit_px = float(earlier["Close"].iloc[-1])
+                    log.info(f"{p['sym']}: target {target} missing, using fallback at {earlier.index[-1]}")
+
+        # ─── Decide based on what we found ───
         if exit_px is None:
-            if now > exp + timedelta(minutes=35):
-                log.warning(f"void pending {p['sym']}")
+            # Still couldn't resolve, wait up to SOFT timeout
+            if age_min > PENDING_SOFT_TIMEOUT_MIN:
+                log.warning(f"void pending {p['sym']} (no data after {age_min:.0f}m)")
                 done.append(p)
+                voided_count += 1
             continue
+
         entry = float(p["px"])
         if exit_px == entry:
             log.info(f"tie void {p['sym']}")
             done.append(p)
+            voided_count += 1
             continue
+
         win = exit_px > entry if p["dr"] == "CALL" else exit_px < entry
         sent = datetime.fromisoformat(p["sent"])
         loc = sent + timedelta(hours=USER_TZ_OFFSET_H)
+
         sim_list = safe_list(st, "sim")
         sim_list.append({
             "dl": loc.strftime("%Y-%m-%d"),
@@ -263,7 +317,10 @@ def resolve_pending(st):
         })
         if len(sim_list) > 2000:
             st["sim"] = sim_list[-2000:]
+
         log.info(f"auto-resolved {p['sym']} {p['dr']} win={win}")
+        resolved_count += 1
+
         rid = p.get("mid")
         try:
             rid = int(rid) if rid is not None else None
@@ -276,9 +333,13 @@ def resolve_pending(st):
                f"• ضمن V4: {'✅' if p.get('v4') else '➖'}")
         tg_send(txt, reply_to=rid)
         done.append(p)
+
     for p in done:
         if p in pend:
             pend.remove(p)
+
+    if resolved_count or voided_count or forced_count:
+        log.info(f"resolve_pending: resolved={resolved_count} voided={voided_count} forced={forced_count} remaining={len(pend)}")
 
 def send_report(st):
     sim = safe_list(st, "sim")
@@ -488,9 +549,15 @@ def scan(st):
         return
     lastmap = safe_dict(st, "last_sig")
     pend = safe_list(st, "pending")
+
+    # ─── v5.7: Debug log — show how many symbols are in cooldown ───
+    cooldown_symbols = {p.get("sym") for p in pend if p.get("sym")}
+    if cooldown_symbols:
+        log.info(f"cooldown active: {sorted(cooldown_symbols)}")
+
     for sym in SYMBOLS:
         # ─── v5.5 Cooldown: no new signal while same symbol unresolved ───
-        if any(p.get("sym") == sym for p in pend):
+        if sym in cooldown_symbols:
             log.info(f"{sym}: تبريد نشط — تخطي")
             continue
         df = fetch5m(sym)
@@ -506,10 +573,14 @@ def scan(st):
             continue
         entry_loc = ct + timedelta(minutes=5)
         entry_loc = entry_loc + timedelta(hours=USER_TZ_OFFSET_H)
-        if entry_loc.weekday() == 0 and entry_loc.hour < BLACKOUT_END_H:
-            log.info(f"{sym}: blackout افتتاح الأسبوع — تخطي")
+        current_hour = entry_loc.hour
+
+        # ─── v5.6 Night Blackout: no signals between 00:00 and 09:00 ───
+        if current_hour < WIN_START_H:
+            log.info(f"{sym}: حظر ليلي ({current_hour:02d}:00) — تخطي")
             lastmap[sym] = key
             continue
+
         r = float(rsi.iloc[i])
         cl = float(df["Close"].iloc[i])
         bu = float(bbu.iloc[i])
@@ -573,6 +644,7 @@ def scan(st):
             "exp": (ct + timedelta(minutes=5 + EXPIRY_MIN)).isoformat(),
             "sent": (ct + timedelta(minutes=5)).isoformat(),
         })
+        cooldown_symbols.add(sym)
         save_state(st)
         time.sleep(0.5)
 
@@ -612,15 +684,16 @@ def main():
     d = day_obj(st)
     if st.get("boot_date") != d["date"]:
         st["boot_date"] = d["date"]
-        tg_send(f"🚀 بوت H2 بدأ (v5.5 Cooldown)\n"
+        tg_send(f"🚀 بوت H2 بدأ (v5.7 Anti-Freeze)\n"
                 f"• أزواج: {len(SYMBOLS)}\n"
                 f"• بدون سقف تنبيهات — لن تضيع إشارة\n"
                 f"• تبريد لكل زوج: إشارة واحدة حتى حسم النتيجة\n"
+                f"• حظر ليلي: لا إشارات من 12 إلى 9 صباحاً\n"
+                f"• حماية ضد التجميد: timeout {PENDING_HARD_TIMEOUT_MIN}د\n"
                 f"• تسجيل تلقائي + رد تلقائي بالنتيجة\n"
                 f"• ملخص يومي عند منتصف الليل\n"
-                f"• ملخص أسبوعي السبت (بالأيام والتواريخ والأزواج)\n"
-                f"• ملخص شهري أول كل شهر (العد من {MONTH_START})\n"
-                f"• حظر إشارات الاثنين قبل {BLACKOUT_END_H:02d}:00\n"
+                f"• ملخص أسبوعي السبت\n"
+                f"• ملخص شهري أول كل شهر\n"
                 f"• الحماية: 3 خسائر متتالية = 4 ساعات")
     listen(st)
     resolve_pending(st)
