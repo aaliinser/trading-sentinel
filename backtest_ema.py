@@ -2,8 +2,12 @@
 # -*- coding: utf-8 -*-
 """
 EMA 9/21/50 Crossover — Binary Options Backtest (clean engine, no look-ahead)
+Round 2: 15m signal timeframe (user-requested configuration)
+V4: 15m signal / 15m expiry (1 candle)
+V5: 15m signal / 30m expiry (2 candles)
+V6: 15m signal / 45m expiry (3 candles)
 Signal on CLOSED candle i: EMA9 x EMA21 cross + close vs EMA50 filter.
-Entry = close[i], Exit = close[i+k]. Ties skipped. Wilder-free (standard EMA).
+Entry = close[i], Exit = close[i+k]. Ties skipped. Standard EMA (span).
 """
 import numpy as np
 import pandas as pd
@@ -16,9 +20,9 @@ STAKE, PAYOUT = 6.0, 0.90
 BREAKEVEN = 1.0 / (1.0 + PAYOUT) * 100.0
 
 VARIANTS = [
-    ("V1: 5m signal / 15m expiry", "60d", "5m", 3),
-    ("V2: 5m signal / 5m expiry",  "60d", "5m", 1),
-    ("V3: 1h signal / 60m expiry", "60d", "60m", 1),
+    ("V4: 15m signal / 15m expiry", "60d", "15m", 1),
+    ("V5: 15m signal / 30m expiry", "60d", "15m", 2),
+    ("V6: 15m signal / 45m expiry", "60d", "15m", 3),
 ]
 
 def flatten_columns(df):
@@ -100,7 +104,7 @@ def stats(trades):
 
 def main():
     print("=" * 70)
-    print("EMA 9/21/50 CROSSOVER | binary-adapted | clean engine")
+    print("EMA 9/21/50 CROSSOVER | ROUND 2: 15m timeframe | clean engine")
     print("=" * 70)
     for name, period, interval, k in VARIANTS:
         trades = run_variant(name, period, interval, k)
