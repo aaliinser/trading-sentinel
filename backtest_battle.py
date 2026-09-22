@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-4 Popular Binary Options Strategies — Clean Backtest Engine (FIXED)
+4 Popular Binary Options Strategies — Clean Backtest Engine (FIXED v2)
 5m timeframe, 15m expiry (3 candles), same assets, same data.
 Signal on CLOSED candle i, entry = close[i], exit = close[i+3].
 Ties skipped. No look-ahead.
@@ -116,8 +116,11 @@ def strategy_S3(df):
     high14 = high.rolling(14).max()
     denom = high14 - low14
     raw_k = 100 * (c - low14) / denom.replace(0, np.nan)
-    K = raw_k.rolling(3).mean().fillna(50).values
-    D = K.rolling(3).mean().fillna(50).values
+    # FIX: keep pandas Series until both K and D are computed
+    K_s = raw_k.rolling(3).mean().fillna(50)
+    D_s = K_s.rolling(3).mean().fillna(50)
+    K = K_s.values
+    D = D_s.values
     c_vals = c.values
     for i in range(20, len(df) - EXPIRY_CANDLES):
         if K[i-1] <= D[i-1] and K[i] > D[i] and K[i] < 20:
