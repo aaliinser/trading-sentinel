@@ -1,0 +1,19 @@
+name: Auto Strategy Generator
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30 # Increased timeout for larger search space
+    steps:
+    - uses: actions/checkout@v4
+    - name: Setup Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+    - name: Install Deps
+      run: pip install numpy pandas yfinance scipy
+    - name: Run Generator
+      run: python auto_strategy_generator.py
