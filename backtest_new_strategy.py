@@ -9,13 +9,13 @@ warnings.filterwarnings('ignore')
 # CONFIGURATION & CONSTANTS
 # ==========================================
 SYMBOLS = ["USDJPY=X", "EURAUD=X", "USDCHF=X", "EURCAD=X", "CADJPY=X"]
-TIMEFRAME = "15m"
-PERIOD_LIMIT = "60d"  # Max for 15m data in yfinance usually
+TIMEFRAME = "1h"          # Changed to 1 Hour
+PERIOD_LIMIT = "1y"       # Request 1 year of hourly data for better sample size
 STAKE = 6.0
 PAYOUT_RATE = 0.90
-BREAK_EVEN_WR = 0.5263  # ~52.63% needed for 90% payout
+BREAK_EVEN_WR = 0.5263    # ~52.63% needed for 90% payout
 
-# Indicator Parameters
+# Indicator Parameters (Standard settings work well for H1 too)
 EMA_FAST_PERIOD = 9
 EMA_SLOW_PERIOD = 21
 EMA_TREND_PERIOD = 50
@@ -43,8 +43,12 @@ def get_data(symbol, period=PERIOD_LIMIT, interval=TIMEFRAME):
     """Fetch and clean data."""
     try:
         ticker = yf.Ticker(symbol)
+        # Note: For 1h data, 'max' might fetch more than we want or fail if too old. 
+        # '1y' is a safe bet for recent reliable data.
         df = ticker.history(period=period, interval=interval)
+        
         if df.empty:
+            print(f"No data returned for {symbol} with period={period}, interval={interval}")
             return None
         
         df = flatten_columns(df)
@@ -65,14 +69,8 @@ def get_data(symbol, period=PERIOD_LIMIT, interval=TIMEFRAME):
 
 # ==========================================
 # STRATEGY IMPLEMENTATIONS
-# Each returns a list of tuples: (timestamp, direction, win_bool)
-# Direction: 1 for CALL, -1 for PUT
-# Win Bool: True if Close[i+1] > Open[i+1] (for CALL logic simplified to next candle close vs entry close)
-# Note: In Binary Options backtesting with OHLC, typically we assume entry at Close[i].
-# Expiry is Close[i+1]. 
-# CALL wins if Close[i+1] > Close[i].
-# PUT wins if Close[i+1] < Close[i].
-# Ties (Close[i+1] == Close[i]) are discarded.
+# Same logic as before, but applied to H1 candles.
+# Entry at Close[i], Exit at Close[i+1].
 # ==========================================
 
 def calculate_indicators(df):
@@ -88,17 +86,17 @@ def calculate_indicators(df):
     delta = pd.Series(c).diff()
     gain = delta.where(delta > 0, 0)
     loss = -delta.where(delta < 0, 0)
+    
+    # Initial SMA seed
     avg_gain = gain.rolling(window=RSI_PERIOD, min_periods=RSI_PERIOD).mean()
     avg_loss = loss.rolling(window=RSI_PERIOD, min_periods=RSI_PERIOD).mean()
     
-    # Apply Wilder's smoothing manually after initial SMA seed or use ewm with alpha=1/n
-    # Standard approach for strict Wilder's:
-    rsi_vals = []
-    current_avg_gain = avg_gain.iloc[RSI_PERIOD-1]
-    current_avg_loss = avg_loss.iloc[RSI_PERIOD-1]
-    
     rs_series = pd.Series(index=df.index, dtype=float)
     rs_series[:RSI_PERIOD-1] = np.nan
+    
+    # Wilder's smoothing loop
+    current_avg_gain = avg_gain.iloc[RSI_PERIOD-1]
+    current_avg_loss = avg_loss.iloc[RSI_PERIOD-1]
     
     for i in range(RSI_PERIOD, len(c)):
         g = max(0, delta.iloc[i])
@@ -181,9 +179,6 @@ def run_backtest_logic(indicators, strategy_func):
     """Generic runner to apply strategy rules and generate trades."""
     trades = []
     n = len(indicators['close'])
-    # We need at least 2 candles ahead for safety checks, but strictly speaking:
-    # Signal at i, Entry at Close[i], Exit at Close[i+1].
-    # So loop up to n-2 to ensure i+1 exists.
     
     for i in range(n - 2):
         direction = strategy_func(i, indicators)
@@ -209,23 +204,19 @@ def run_backtest_logic(indicators, strategy_func):
         })
     return trades
 
-# --- Strategy Definitions ---
+# --- Strategy Definitions (Same as before) ---
 
 def strat_1_ema_cross(i, ind):
-    """EMA 9 crosses above/below EMA 21, filtered by Trend EMA 50"""
     ef, es, et = ind['ema_fast'][i], ind['ema_slow'][i], ind['ema_trend'][i]
     prev_ef, prev_es = ind['ema_fast'][i-1], ind['ema_slow'][i-1]
     
-    # Golden Cross + Above Trend
     if prev_ef <= prev_es and ef > es and ind['close'][i] > et:
         return 1
-    # Death Cross + Below Trend
     if prev_ef >= prev_es and ef < es and ind['close'][i] < et:
         return -1
     return 0
 
 def strat_2_rsi_reversion(i, ind):
-    """RSI < 30 Buy, RSI > 70 Sell"""
     rsi_val = ind['rsi'][i]
     if np.isnan(rsi_val): return 0
     if rsi_val < 30: return 1
@@ -233,17 +224,13 @@ def strat_2_rsi_reversion(i, ind):
     return 0
 
 def strat_3_bollinger_bounce(i, ind):
-    """Price touches Lower Band -> Call, Upper Band -> Put"""
     c, lb, ub = ind['close'][i], ind['bb_lower'][i], ind['bb_upper'][i]
     if np.isnan(lb) or np.isnan(ub): return 0
-    
-    # Strict touch/close below lower band
     if c <= lb: return 1
     if c >= ub: return -1
     return 0
 
 def strat_4_macd_cross(i, ind):
-    """MACD line crosses Signal Line"""
     m, s = ind['macd'][i], ind['signal'][i]
     pm, ps = ind['macd'][i-1], ind['signal'][i-1]
     
@@ -252,49 +239,33 @@ def strat_4_macd_cross(i, ind):
     return 0
 
 def strat_5_stoch_extremes(i, ind):
-    """Stoch K crosses D while oversold/overbought"""
     k, d = ind['stoch_k'][i], ind['stoch_d'][i]
     pk, pd = ind['stoch_k'][i-1], ind['stoch_d'][i-1]
     
     if np.isnan(k) or np.isnan(d): return 0
-    
-    # Bullish crossover in oversold zone (<20)
     if pk <= pd and k > d and k < 20: return 1
-    # Bearish crossover in overbought zone (>80)
     if pk >= pd and k < d and k > 80: return -1
     return 0
 
 def strat_6_price_action_hammer(i, ind):
-    """Simple Hammer/Shooting Star detection near EMA20"""
     o, h, l, c = ind['open'][i], ind['high'][i], ind['low'][i], ind['close'][i]
-    ema20 = ind['ema_trend'][i] # Using EMA50 as proxy for dynamic support/resistance level here for simplicity, or recalculate EMA20 if needed. Let's stick to available.
-    # Actually, let's use the calculated EMA fast/slow context. 
-    # For this specific strategy derived from Video 3, it used EMA20. 
-    # Since I didn't pre-calc EMA20 specifically in the dict, I'll approximate using EMA Fast (9) or add it.
-    # To keep code clean without recalculating everything, I will use a simple body/wick ratio check relative to recent volatility.
-    
     body = abs(c - o)
     upper_wick = h - max(o, c)
     lower_wick = min(o, c) - l
     
-    if body == 0: return 0 # Doji ignored
+    if body == 0: return 0 
     
-    # Hammer: Small body, long lower wick (at least 2x body), small upper wick
-    # Condition: Closing in top half of range? Not strictly necessary for basic hammer.
     if lower_wick > 2 * body and upper_wick < body and c > o:
-        # Check if price is relatively low compared to previous few candles (simple mean reversion context)
-        if c < ind['sma_bb'][i]: # Below middle band suggests potential bottom
+        if c < ind['sma_bb'][i]: 
              return 1
              
-    # Shooting Star: Small body, long upper wick, closes red
     if upper_wick > 2 * body and lower_wick < body and c < o:
-        if c > ind['sma_bb'][i]: # Above middle band suggests potential top
+        if c > ind['sma_bb'][i]: 
              return -1
              
     return 0
 
 def strat_7_adx_trend(i, ind):
-    """Trade with trend only if ADX > 25"""
     adx_val = ind['adx'][i]
     pdi, mdi = ind['plus_di'][i], ind['minus_di'][i]
     
@@ -305,9 +276,8 @@ def strat_7_adx_trend(i, ind):
     return 0
 
 def strat_8_donchian_breakout(i, ind):
-    """Breakout of 20-period High/Low"""
     c = ind['close'][i]
-    dh, dl = ind['don_high'][i-1], ind['don_low'][i-1] # Use previous channel values
+    dh, dl = ind['don_high'][i-1], ind['don_low'][i-1] 
     
     if np.isnan(dh) or np.isnan(dl): return 0
     
@@ -316,26 +286,18 @@ def strat_8_donchian_breakout(i, ind):
     return 0
 
 def strat_9_williams_r(i, ind):
-    """Williams %R Reversal (-80/-20 levels)"""
     wr_val = ind['wr'][i]
     if np.isnan(wr_val): return 0
-    
-    # Oversold (< -80) -> Buy
     if wr_val < -80: return 1
-    # Overbought (> -20) -> Sell
     if wr_val > -20: return -1
     return 0
 
 def strat_10_momentum_sma(i, ind):
-    """ROC Momentum combined with SMA Trend"""
     roc_val = ind['roc'][i]
     c, sma = ind['close'][i], ind['sma_roc'][i]
     
     if np.isnan(roc_val) or np.isnan(sma): return 0
-    
-    # Positive momentum AND Price above SMA
     if roc_val > 0 and c > sma: return 1
-    # Negative momentum AND Price below SMA
     if roc_val < 0 and c < sma: return -1
     return 0
 
@@ -357,19 +319,12 @@ STRATEGIES = [
 # ==========================================
 
 def calculate_stats(trades_list):
-    """Calculate WR, Z-Score, and Split Sample Robustness."""
     if not trades_list:
         return {'count': 0, 'wr': 0, 'z_score': 0, 'robust': 'N/A'}
     
     wins = sum(1 for t in trades_list if t['win'])
     total = len(trades_list)
     wr = wins / total
-    
-    # Expected Wins under Null Hypothesis (Fair Coin Flip adjusted for Payout?)
-    # Usually Z-score tests against probability p. Here we test against Breakeven Probability.
-    # But standard statistical significance often compares against 0.5 or theoretical edge.
-    # Let's compare against Breakeven WR (0.5263) to see if edge is significant.
-    # H0: p = 0.5263. HA: p > 0.5263.
     
     p_null = BREAK_EVEN_WR
     q_null = 1 - p_null
@@ -380,7 +335,6 @@ def calculate_stats(trades_list):
     if std_dev > 0:
         z_score = (wins - expected_wins) / std_dev
         
-    # Split Sample (First Half vs Second Half)
     mid = total // 2
     first_half = trades_list[:mid]
     second_half = trades_list[mid:]
@@ -395,7 +349,7 @@ def calculate_stats(trades_list):
     robust_status = "FAIL"
     if wr_1 >= BREAK_EVEN_WR and wr_2 >= BREAK_EVEN_WR:
         robust_status = "OK"
-    elif total < 10: # Insufficient data for split
+    elif total < 10:
         robust_status = "INSUFFICIENT_DATA"
         
     return {
@@ -409,19 +363,18 @@ def calculate_stats(trades_list):
 
 def main():
     print("="*60)
-    print("QUANTITATIVE BACKTEST ENGINE - BINARY OPTIONS")
+    print("QUANTITATIVE BACKTEST ENGINE - BINARY OPTIONS (H1)")
     print(f"Timeframe: {TIMEFRAME} | Duration: 1 Candle ({TIMEFRAME})")
     print(f"Payout: {PAYOUT_RATE*100}% | Stake: ${STAKE}")
     print("="*60)
     
     all_results = {}
     
-    # Fetch Data Once per Symbol
     symbol_data = {}
     for sym in SYMBOLS:
         print(f"Fetching data for {sym}...")
         df = get_data(sym)
-        if df is not None and len(df) > 50: # Minimum history
+        if df is not None and len(df) > 50: 
             symbol_data[sym] = df
         else:
             print(f"Skipping {sym} due to insufficient data.")
@@ -430,7 +383,6 @@ def main():
         print("No valid data found. Exiting.")
         return
 
-    # Run Strategies
     for strat_name, strat_func in STRATEGIES:
         print(f"\nTesting Strategy: {strat_name}")
         global_trades = []
@@ -441,33 +393,27 @@ def main():
             ind = calculate_indicators(df)
             trades = run_backtest_logic(ind, strat_func)
             
-            # Tag trades with symbol
             for t in trades:
                 t['symbol'] = sym
                 global_trades.append(t)
                 
-                # Asset breakdown
                 if sym not in asset_breakdown:
                     asset_breakdown[sym] = []
                 asset_breakdown[sym].append(t)
                 
-                # Direction analysis
                 if t['direction'] == 1:
                     dir_analysis['CALL'].append(t)
                 else:
                     dir_analysis['PUT'].append(t)
                     
-        # Calculate Stats
         overall_stats = calculate_stats(global_trades)
         
-        # Store results
         all_results[strat_name] = {
             'overall': overall_stats,
             'assets': asset_breakdown,
             'directions': dir_analysis
         }
         
-        # Print Summary for this strategy immediately
         print("-"*40)
         print(f"Total Trades: {overall_stats['count']}")
         if overall_stats['count'] > 0:
@@ -477,7 +423,6 @@ def main():
             print(f"Significance: {sig}")
             print(f"Robustness:   {overall_stats['robust']} (H1:{overall_stats.get('wr_first',0)*100:.1f}% H2:{overall_stats.get('wr_second',0)*100:.1f}%)")
             
-            # Verdict Logic
             verdict = "FAILING"
             if overall_stats['wr'] >= 0.56 and overall_stats['z_score'] > 1.96 and overall_stats['robust'] == "OK":
                 verdict = "EXCELLENT"
@@ -492,9 +437,8 @@ def main():
         else:
             print("No trades generated.")
             
-    # Final Consolidated Report
     print("\n\n" + "="*60)
-    print("FINAL CONSOLIDATED REPORT")
+    print("FINAL CONSOLIDATED REPORT (H1)")
     print("="*60)
     
     header = f"{'Strategy':<20} | {'Trades':>6} | {'WR%':>6} | {'Z-Score':>7} | {'Robust':>8} | {'Verdict':>10}"
@@ -529,7 +473,6 @@ def main():
         print("\n⚠️ No strategies achieved 'EXCELLENT' status based on strict criteria.")
         
     print("\nNote: Results depend on market conditions during the fetched period.")
-    print("Ensure you review the raw logs for any data gaps.")
 
 if __name__ == "__main__":
     main()
