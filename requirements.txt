@@ -1,4 +1,6 @@
-   pandas
-   numpy
-   yfinance
-   requests
+yfinance
+pandas
+numpy
+requests
+python-dotenv
+websockets
