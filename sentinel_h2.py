@@ -1,18 +1,21 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-غيث H2 — بوت إشارات حي (v5.7.1 Deriv Real-Time Edition)
-الاستراتيجية: RSI(14) Wilder + BB(20,2.0) ddof=0 | 5m / 15m
-المصدر الأساسي: Deriv API (LIVE TICKS)
-المصدر الاحتياطي: Yahoo Finance (Fallback)
-الإصلاح النهائي: توحيد قائمة الرموز لضمان عمل Deriv بدون أخطاء "Symbol Not Found".
+غيث H2 — بوت إشارات حي (v7.0 Master Hybrid Edition - EXACT FORMAT)
+الاستراتيجية: BB(15,2.3) + EMA200 Trend Filter + Storm Filter (ADX/ATR)
+الفريم: 5 دقائق / الانتهاء: 15 دقيقة
+التنسيق: مطابق تماماً للإشارة القديمة (RSI removed from text, Sigma kept).
 """
-import os, sys, time, json, logging, asyncio
+import os, sys, time, json, logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import numpy as np, pandas as pd
 import requests
-import websockets # مكتبة Deriv للاتصال اللحظي
+
+try:
+    import yfinance as yf
+except ImportError:
+    print("pip install yfinance"); sys.exit(1)
 
 try:
     from dotenv import load_dotenv
@@ -21,34 +24,22 @@ except ImportError:
     pass
 
 # ─── Configuration ──────────────────────────────────────
-# ⚠️ مهم جداً: هذه هي رموز Deriv الدقيقة. لا تستخدم رموز ياهو هنا.
-# إذا أردت تغيير الأزواج، عدّل هذه القائمة فقط.
-DEFAULT_DERIV_SYMBOLS = [
-    "frxUSDJPY",   # USD/JPY
-    "frxEURAUD",   # EUR/AUD
-    "frxUSDCHF",   # USD/CHF
-    "frxEURCAD",   # EUR/CAD
-    "frxCADJPY"    # CAD/JPY
-]
+SYMBOLS = os.getenv("SYMBOLS_H2", "USDJPY=X,EURAUD=X,USDCHF=X,EURCAD=X,CADJPY=X,GBPUSD=X,USDCAD=X,AUDNZD=X,EURGBP=X").split(",")
 
-# قراءة الرموز من متغير البيئة أو استخدام الافتراضي
-SYMBOLS_RAW = os.getenv("DERIV_SYMBOLS_LIST", ",".join(DEFAULT_DERIV_SYMBOLS))
-SYMBOLS = [s.strip() for s in SYMBOLS_RAW.split(",") if s.strip()]
+# إعدادات المؤشرات للاستراتيجية الهجينة
+BB_P = 15          # فترة البولينجر
+BB_K = 2.3         # انحراف معياري
+EMA_TREND_P = 200  # فلتر الاتجاه طويل المدى
+EXPIRY_MIN = 15    # مدة الانتهاء (بالدقائق)
+INTERVAL = "5m"    # الفريم الزمني للعمل
 
-# إعدادات المؤشرات الفنية (كما هي في الاستراتيجية الأصلية)
-RSI_P = 14
-BB_P = 20
-BB_K = 2.0
-RSI_HI = 75.0
-RSI_LO = 25.0
-EXPIRY_MIN = 15
 STOP_AFTER_LOSSES = 3
 STOP_HOURS = 4
 STATE_FILE = "state_h2.json"
 
 USER_TZ_OFFSET_H = 3
-WIN_START_H = 9
-BLACKOUT_END_H = 3
+WIN_START_H = 9    
+BLACKOUT_END_H = 3 
 MONTH_START = "2026-09-15"
 BREAKEVEN_WR = 52.63
 
@@ -56,6 +47,13 @@ BREAKEVEN_WR = 52.63
 PENDING_SOFT_TIMEOUT_MIN = 35
 PENDING_HARD_TIMEOUT_MIN = 60
 STATE_CLEANUP_HOURS = 2
+
+# Storm Filter Parameters
+STORM_ATR_MULT = 1.5      
+STORM_ADX_LIMIT = 28.0    
+STORM_LOOKBACK = 20       
+ATR_PERIOD = 14
+ADX_PERIOD = 14
 
 AR_DAYS = ["الاثنين","الثلاثاء","الأربعاء","الخميس",
            "الجمعة","السبت","الأحد"]
@@ -65,14 +63,10 @@ AR_MONTHS = ["يناير","فبراير","مارس","أبريل","مايو","ي�
 TG_TOKEN = os.getenv("TG_TOKEN","").strip()
 TG_CHAT = os.getenv("TG_CHAT","").strip()
 
-# --- DERIV CONFIGURATION ---
-DERIV_APP_ID = os.getenv("DERIV_APP_ID", "1089")
-DERIV_API_TOKEN = os.getenv("DERIV_API_TOKEN", "").strip() 
-
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s | %(levelname)-8s | %(message)s",
                     handlers=[logging.StreamHandler(sys.stdout)])
-log = logging.getLogger("H2v57-Deriv-Fixed")
+log = logging.getLogger("H2v70-Master-FinalFormat")
 
 # ─── Safe accessors ──────────────────────────────────────
 def safe_list(st, key):
@@ -166,78 +160,6 @@ def tg_send(text, reply_to=None):
             log.warning(f"tg attempt {a}: {e}")
     return None
 
-# ─── NEW: Robust Deriv Data Fetcher ──────────────────────
-async def _fetch_deriv_async(symbol, count=220):
-    """
-    يجلب الشموع من Deriv API.
-    الرمز يجب أن يكون بصيغة Deriv (مثل frxUSDJPY).
-    """
-    uri = f"wss://ws.binaryws.com/websockets/v3?app_id={DERIV_APP_ID}"
-    
-    try:
-        async with websockets.connect(uri, ping_interval=20, close_timeout=5) as ws:
-            # 1. Authorization (Optional but good practice)
-            if DERIV_API_TOKEN:
-                auth_msg = {"authorize": DERIV_API_TOKEN}
-                await ws.send(json.dumps(auth_msg))
-                resp_auth = json.loads(await ws.recv())
-                if 'error' in resp_auth:
-                    log.warning(f"Deriv Auth Warning: {resp_auth['error'].get('message')}")
-            
-            # 2. Request History
-            req_msg = {
-                "ticks_history": symbol,
-                "style": "candles",
-                "granularity": 300, # 5 minutes
-                "count": count,
-                "end": "latest"
-            }
-            await ws.send(json.dumps(req_msg))
-            
-            # Receive data
-            raw_data = json.loads(await ws.recv())
-            
-            if 'error' in raw_data:
-                err_msg = raw_data['error'].get('message', 'Unknown Error')
-                raise ValueError(f"Deriv API Error [{symbol}]: {err_msg}")
-                
-            candles = raw_data.get('candles', [])
-            if not candles:
-                return None
-                
-            # Convert to Pandas DataFrame
-            df = pd.DataFrame(candles)
-            df.rename(columns={'open':'Open','high':'High','low':'Low','close':'Close'}, inplace=True)
-            df['epoch'] = pd.to_datetime(df['epoch'], unit='s')
-            df.set_index('epoch', inplace=True)
-            df.sort_index(inplace=True)
-            
-            # Ensure numeric types
-            for col in ['Open', 'High', 'Low', 'Close']:
-                df[col] = pd.to_numeric(df[col], errors='coerce')
-                
-            return df[['Open','High','Low','Close']].dropna()
-
-    except Exception as e:
-        log.error(f"Websocet Connection/Error for {symbol}: {e}")
-        return None
-
-def fetch_data_deriv(symbol):
-    """Sync wrapper for async Deriv call"""
-    if not DERIV_API_TOKEN:
-        log.warning("DERIV_API_TOKEN is empty. Skipping Deriv.")
-        return None
-        
-    try:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        result = loop.run_until_complete(_fetch_deriv_async(symbol))
-        loop.close()
-        return result
-    except Exception as e:
-        log.error(f"Async Wrapper Error for {symbol}: {e}")
-        return None
-
 def flatten_columns(df):
     OHLC = ("Open", "High", "Low", "Close")
     if not isinstance(df.columns, pd.MultiIndex):
@@ -257,78 +179,86 @@ def flatten_columns(df):
     return df
 
 def fetch5m(sym):
-    """
-    يحاول أولاً Deriv (Live). إذا فشل، يعود لـ yfinance (Delayed).
-    sym هنا يجب أن يكون رمز Deriv (مثل frxUSDJPY).
-    لتحويله لياهو نحتاج لإزالة frx وإضافة =X
-    """
-    # 1. Try Deriv First
-    df_deriv = fetch_data_deriv(sym)
-    if df_deriv is not None and len(df_deriv) >= 60:
-        log.info(f"✅ Loaded {len(df_deriv)} candles from Deriv for {sym}")
-        return df_deriv
-        
-    # 2. Fallback to yfinance
-    log.warning(f"⚠️ Deriv failed for {sym}. Trying yfinance fallback...")
-    try:
-        import yfinance as yf
-        # Transform Deriv Symbol to Yahoo Symbol: frxUSDJPY -> USDJPY=X
-        yf_sym = sym.replace("frx", "") + "=X"
-        
-        for a in range(3):
-            try:
-                df = yf.Ticker(yf_sym).history(period="3d", interval="5m",
-                                            auto_adjust=False, actions=False, timeout=20)
-                if df is None or df.empty:
-                    raise ValueError("empty")
-                df = flatten_columns(df)
-                required = ["Open", "High", "Low", "Close"]
-                missing = [c for c in required if c not in df.columns]
-                if missing:
-                    raise ValueError(f"missing columns: {missing}")
-                df = df[required]
-                df.index = pd.to_datetime(df.index, utc=True)
-                df = df[~df.index.duplicated(keep="last")].sort_index().dropna()
-                now = pd.Timestamp.now(tz="UTC")
-                df = df[df.index <= now]
-                if not df.empty and df.index[-1] + pd.Timedelta(minutes=5) > now:
-                    df = df.iloc[:-1]
-                if not df.empty:
-                     log.info(f"✅ Loaded {len(df)} candles from yfinance for {yf_sym}")
-                     return df
-            except Exception as e:
-                log.warning(f"{yf_sym} yf fetch {a}: {e}")
-                time.sleep(2*a+1)
-    except ImportError:
-        log.error("yfinance not installed for fallback.")
-    except Exception as e:
-        log.error(f"Fallback process error: {e}")
-        
+    for a in range(3):
+        try:
+            df = yf.Ticker(sym).history(period="3d", interval=INTERVAL,
+                                        auto_adjust=False,
+                                        actions=False, timeout=20)
+            if df is None or df.empty:
+                raise ValueError("empty")
+            df = flatten_columns(df)
+            required = ["Open", "High", "Low", "Close"]
+            missing = [c for c in required if c not in df.columns]
+            if missing:
+                raise ValueError(f"missing columns: {missing}")
+            df = df[required]
+            df.index = pd.to_datetime(df.index, utc=True)
+            df = df[~df.index.duplicated(keep="last")].sort_index().dropna()
+            now = pd.Timestamp.now(tz="UTC")
+            df = df[df.index <= now]
+            if not df.empty and df.index[-1] + pd.Timedelta(minutes=5) > now:
+                df = df.iloc[:-1]
+            return df
+        except Exception as e:
+            log.warning(f"{sym} fetch {a}: {e}")
+            time.sleep(2*a+1)
     return None
 
-def indicators(df):
+# ─── Core Indicators for v7.0 Hybrid ─────────────────────
+def calculate_indicators_v7(df):
+    """
+    يحسب BB(15, 2.3), EMA(200), ATR, ADX
+    """
     c = df["Close"]
-    delta = c.diff()
-    gain = delta.clip(lower=0.0)
-    loss = (-delta).clip(lower=0.0)
-    alpha = 1.0 / RSI_P
-    avg_gain = gain.ewm(alpha=alpha, adjust=False, min_periods=RSI_P).mean()
-    avg_loss = loss.ewm(alpha=alpha, adjust=False, min_periods=RSI_P).mean()
-    denom = avg_gain + avg_loss
-    rsi = 100.0 * avg_gain / denom
-    rsi = rsi.where(denom > 0, 50.0)
+    
+    # 1. Bollinger Bands (15, 2.3)
     mid = c.rolling(BB_P, min_periods=BB_P).mean()
-    sd = c.rolling(BB_P, min_periods=BB_P).std(ddof=0)
+    sd = c.rolling(BB_P, min_periods=BB_P).std(ddof=0) 
     bu = mid + BB_K * sd
     bl = mid - BB_K * sd
-    return rsi, bu, bl, sd
+    
+    # 2. EMA 200 Trend Filter
+    ema200 = c.ewm(span=EMA_TREND_P, adjust=False).mean()
+    
+    # 3. ATR for Storm Filter
+    high = df['High']
+    low = df['Low']
+    tr1 = high - low
+    tr2 = (high - c.shift()).abs()
+    tr3 = (low - c.shift()).abs()
+    true_range = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+    atr = true_range.rolling(window=ATR_PERIOD).mean()
+    
+    # 4. ADX for Storm Filter
+    up_move = high.diff()
+    down_move = -low.diff()
+    plus_dm = np.where((up_move > down_move) & (up_move > 0), up_move, 0)
+    minus_dm = np.where((down_move > up_move) & (down_move > 0), down_move, 0)
+    plus_dm_s = pd.Series(plus_dm, index=df.index)
+    minus_dm_s = pd.Series(minus_dm, index=df.index)
+    
+    atr_smooth = true_range.rolling(window=ADX_PERIOD).mean()
+    plus_dm_smooth = plus_dm_s.rolling(window=ADX_PERIOD).mean()
+    minus_dm_smooth = minus_dm_s.rolling(window=ADX_PERIOD).mean()
+    
+    atr_safe = atr_smooth.replace(0, np.nan)
+    plus_di = 100 * (plus_dm_smooth / atr_safe)
+    minus_di = 100 * (minus_dm_smooth / atr_safe)
+    plus_di = plus_di.fillna(0)
+    minus_di = minus_di.fillna(0)
+    
+    di_sum = plus_di + minus_di
+    dx_numerator = (plus_di - minus_di).abs()
+    dx_denominator = di_sum.replace(0, np.nan)
+    dx = 100 * (dx_numerator / dx_denominator)
+    dx = dx.fillna(0)
+    adx = dx.rolling(window=ADX_PERIOD).mean()
+    
+    return bl, bu, ema200, atr, adx, sd
 
 def fmt_sym(s):
-    # Display nicely: frxUSDJPY -> USD/JPY
-    clean = s.replace("frx", "")
-    if len(clean) == 6:
-        return f"{clean[:3]}/{clean[3:]}"
-    return s
+    b = s.replace("=X","")
+    return f"{b[:3]}/{b[3:]}" if len(b) == 6 else s
 
 def fmt_px(v):
     v = float(v)
@@ -382,21 +312,18 @@ def resolve_pending(st):
         if now < exp + timedelta(seconds=60):
             continue
 
-        # Fetch latest price to determine win/loss
-        # Note: We use the same symbol logic. If it was stored as frx..., we keep it.
-        df = fetch5m(p["sym"]) 
+        df = fetch5m(p["sym"])
+        target = exp - timedelta(minutes=5)
         exit_px = None
 
         if df is not None and not df.empty:
-            # Find the candle closest to expiry time
-            target_time = exp - timedelta(minutes=5) # Approximate alignment for 5m candles
-            # Get last closed candle before or at target
-            candidates = df[df.index <= target_time]
-            if not candidates.empty:
-                exit_px = float(candidates["Close"].iloc[-1])
+            if target in df.index:
+                exit_px = float(df.loc[target, "Close"])
             else:
-                # Fallback to very last available if target is too far back/new
-                 exit_px = float(df["Close"].iloc[-1])
+                earlier = df[df.index <= target]
+                if not earlier.empty:
+                    exit_px = float(earlier["Close"].iloc[-1])
+                    log.info(f"{p['sym']}: target {target} missing, using fallback at {earlier.index[-1]}")
 
         if exit_px is None:
             if age_min > PENDING_SOFT_TIMEOUT_MIN:
@@ -461,7 +388,7 @@ def send_report(st):
     n = len(sim)
     w = sum(1 for x in sim if x["win"])
     wr = round(100*w/n, 1) if n else 0.0
-    txt = (f"📊 *تقرير الأداء (v5.7.1 Deriv)*\n\n"
+    txt = (f"📊 *تقرير الأداء (v7.0 Hybrid)*\n\n"
            f"*إشارات:* *{n}* | فوز *{wr}%*\n\n"
            f"📌 التعادل: {BREAKEVEN_WR}%")
     tg_send(txt)
@@ -469,17 +396,139 @@ def send_report(st):
 def send_day_summary(st, day_str):
     sim = [x for x in safe_list(st, "sim") if x["dl"] == day_str]
     win_sig = [x for x in sim if x["hl"] >= WIN_START_H]
+    out_sig = [x for x in sim if x["hl"] < WIN_START_H]
+    man = [x for x in safe_list(st, "log") if x.get("date") == day_str]
     n = len(win_sig)
     w = sum(1 for x in win_sig if x["win"])
     l = n - w
     wr = round(100*w/n, 1) if n else 0.0
+    mn = len(man)
+    mw = sum(1 for x in man if x["win"])
+    mwr = round(100*mw/mn, 1) if mn else 0.0
     win_payout = 6.0 * 0.90
     stake = 6.0
     pnl = round(w * win_payout - l * stake, 2)
     txt = (f"🌙 *ملخص يوم {ar_day(day_str)} {day_str}*\n"
+           f"(نافذة العد: {WIN_START_H}:00 – 24:00 بتوقيتك)\n\n"
            f"• إشارات النافذة: *{n}*\n"
-           f"• فوز {w} / خسارة {l} | *{wr}%*\n"
-           f"• صافي تقديري: {pnl:+.2f}$\n\n"
+           f"• تلقائي: فوز {w} / خسارة {l} | *{wr}%*\n"
+           f"• صافي تقديري: {pnl:+.2f}$\n"
+           f"• إشارات خارج النافذة: {len(out_sig)}\n"
+           f"• ردودك اليدوية: {mn} | {mwr}%\n\n"
+           f"📌 التعادل: {BREAKEVEN_WR}%")
+    tg_send(txt)
+
+def send_week_summary(st, days):
+    sim = [x for x in safe_list(st, "sim") if x["dl"] in days]
+    if not sim:
+        return
+    n = len(sim)
+    w = sum(1 for x in sim if x["win"])
+    l = n - w
+    wr = 100*w/n
+    p_star = 1.0/1.9
+    se = (p_star*(1-p_star)/n) ** 0.5
+    z = (wr/100 - p_star)/se if se > 0 else 0.0
+    man = [x for x in safe_list(st, "log") if x.get("date") in days]
+    mn = len(man)
+    mw = sum(1 for x in man if x["win"])
+    mwr = round(100*mw/mn, 1) if mn else 0.0
+    win_payout = 6.0 * 0.90
+    stake = 6.0
+    txt = (f"📅 *ملخص أسبوع التداول (v7.0 Hybrid)*\n"
+           f"({ar_day(days[0])} {days[0]} → "
+           f"{ar_day(days[-1])} {days[-1]})\n\n"
+           f"📆 *تفصيل الأيام:*\n")
+    for dstr in days:
+        ds = [x for x in sim if x["dl"] == dstr]
+        dn = len(ds)
+        dw = sum(1 for x in ds if x["win"])
+        dwr = round(100*dw/dn, 1) if dn else 0.0
+        txt += f"• {ar_day(dstr)} {dstr}: {dn} إشارة | {dwr}%\n"
+
+    buckets = [
+        ("صباحاً (09-14)", lambda h: 9 <= h < 14),
+        ("عصراً (14-19)", lambda h: 14 <= h < 19),
+        ("مساءً (19-24)", lambda h: h >= 19),
+    ]
+    txt += f"\n⏰ *تفصيل أوقات اليوم:*\n"
+    bucket_stats = []
+    for name, cond in buckets:
+        bs = [x for x in sim if cond(int(x.get("hl", -1)))]
+        bn = len(bs)
+        bw = sum(1 for x in bs if x["win"])
+        bwr = round(100*bw/bn, 1) if bn else 0.0
+        bucket_stats.append((name, bn, bwr))
+        txt += f"• {name}: {bn} إشارة | {bwr}%\n"
+    active = [b for b in bucket_stats if b[1] > 0]
+    if active:
+        best_b = max(active, key=lambda b: b[2])
+        txt += f"🏆 أفضل وقت: {best_b[0]} ({best_b[2]}%)\n"
+
+    txt += f"\n🧩 *تفصيل الأزواج:*\n"
+    pair_stats = []
+    for sym in sorted({x["sym"] for x in sim}):
+        ss = [x for x in sim if x["sym"] == sym]
+        sn = len(ss)
+        sw = sum(1 for x in ss if x["win"])
+        swr = round(100*sw/sn, 1) if sn else 0.0
+        pair_stats.append((sym, sn, swr, sn - sw))
+        txt += f"• {fmt_sym(sym)}: {sn} | {swr}%\n"
+    if pair_stats:
+        best_p = max(pair_stats, key=lambda p: p[2])
+        txt += f"🏆 أفضل زوج: {fmt_sym(best_p[0])} ({best_p[2]}%)\n"
+
+    max_streak = 0
+    cur = 0
+    for x in sim:
+        if not x["win"]:
+            cur += 1
+            if cur > max_streak:
+                max_streak = cur
+        else:
+            cur = 0
+    txt += f"\n🔁 *تحليل أنماط الخسارة:*\n"
+    txt += f"• أطول سلسلة خسائر متتالية: {max_streak}\n"
+    if pair_stats:
+        worst_p = max(pair_stats, key=lambda p: p[3])
+        if worst_p[3] > 0:
+            txt += f"• أكثر الأزواج خسارة: {fmt_sym(worst_p[0])} ({worst_p[3]} خسائر)\n"
+    if active:
+        worst_b = min(active, key=lambda b: b[2])
+        txt += f"• أضعف وقت: {worst_b[0]} ({worst_b[2]}%)\n"
+
+    pnl = round(w * win_payout - l * stake, 2)
+    txt += (f"\n• إجمالي الإشارات: *{n}*\n"
+            f"• تلقائي: فوز {w} / خسارة {l} | *{round(wr,1)}%*\n"
+            f"• صافي تقديري: {pnl:+.2f}$\n"
+            f"• Z-score: {z:+.2f} "
+            f"{'✅ دلالة حقيقية' if z > 1.96 else '⚠️ ضمن الضجيج'}\n"
+            f"• ردودك اليدوية: {mn} | {mwr}%\n\n"
+            f"📌 التعادل: {BREAKEVEN_WR}%")
+    tg_send(txt)
+
+def send_month_summary(st, y, m):
+    prefix = f"{y:04d}-{m:02d}"
+    sim = [x for x in safe_list(st, "sim")
+           if x["dl"].startswith(prefix) and x["dl"] >= MONTH_START]
+    if not sim:
+        tg_send(f"🗓️ *ملخص شهر {ar_month(m)} {y}*\nلا إشارات مسجلة")
+        return
+    n = len(sim)
+    w = sum(1 for x in sim if x["win"])
+    l = n - w
+    wr = 100*w/n
+    p_star = 1.0/1.9
+    se = (p_star*(1-p_star)/n) ** 0.5
+    z = (wr/100 - p_star)/se if se > 0 else 0.0
+    win_payout = 6.0 * 0.90
+    stake = 6.0
+    pnl = round(w * win_payout - l * stake, 2)
+    txt = (f"🗓️ *ملخص شهر {ar_month(m)} {y}*\n"
+           f"• إجمالي الإشارات: *{n}*\n"
+           f"• فوز {w} / خسارة {l} | *{round(wr,1)}%*\n"
+           f"• صافي تقديري: {pnl:+.2f}$\n"
+           f"• Z-score: {z:+.2f}\n\n"
            f"📌 التعادل: {BREAKEVEN_WR}%")
     tg_send(txt)
 
@@ -565,11 +614,10 @@ def scan(st):
             continue
             
         df = fetch5m(sym)
-        if df is None or len(df) < 60:
-            log.warning(f"No sufficient data for {sym}")
+        if df is None or len(df) < 220: 
             continue
         
-        rsi, bbu, bbl, sd = indicators(df)
+        bl, bu, ema200, atr, adx, sd = calculate_indicators_v7(df)
         
         i = len(df) - 1
         ct = df.index[i]
@@ -578,7 +626,8 @@ def scan(st):
         if lastmap.get(sym) == key:
             continue
             
-        if np.isnan(sd.iloc[i]):
+        if np.isnan(bl.iloc[i]) or np.isnan(bu.iloc[i]) or np.isnan(ema200.iloc[i]) or \
+           np.isnan(atr.iloc[i]) or np.isnan(adx.iloc[i]) or np.isnan(sd.iloc[i]):
             continue
             
         entry_loc = ct + timedelta(minutes=5) + timedelta(hours=USER_TZ_OFFSET_H)
@@ -589,41 +638,91 @@ def scan(st):
             lastmap[sym] = key
             continue
 
-        r = float(rsi.iloc[i])
         cl = float(df["Close"].iloc[i])
-        bu = float(bbu.iloc[i])
-        bl = float(bbl.iloc[i])
+        bl_val = float(bl.iloc[i])
+        bu_val = float(bu.iloc[i])
+        ema_val = float(ema200.iloc[i])
+        current_atr = float(atr.iloc[i])
+        current_adx = float(adx.iloc[i])
         sdv = float(sd.iloc[i])
         
+        # ─── STORM FILTER CHECK ───
+        storm_detected = False
+        reason = ""
+        
+        lookback_slice = atr.iloc[max(0, i-STORM_LOOKBACK):i] 
+        valid_lookback = lookback_slice.dropna()
+        
+        if len(valid_lookback) >= 5:
+            baseline_atr = float(valid_lookback.mean())
+        else:
+            baseline_atr = current_atr 
+            
+        if baseline_atr > 0 and current_atr > (baseline_atr * STORM_ATR_MULT) and current_atr > 0.0001:
+            storm_detected = True
+            reason = f"ATR Spike ({current_atr:.5f} vs Base {baseline_atr:.5f})"
+            
+        elif current_adx > STORM_ADX_LIMIT:
+            storm_detected = True
+            reason = f"Strong Trend (ADX={current_adx:.1f} > {STORM_ADX_LIMIT})"
+            
+        if storm_detected:
+            log.warning(f"🌪️ STORM FILTER ACTIVATED FOR {sym}: {reason}. Signal SKIPPED.")
+            lastmap[sym] = key 
+            continue
+
+        # ─── CORE LOGIC: BB + EMA200 TREND FILTER ───
         dr = None
         band_ref = None
-        if r >= RSI_HI and cl >= bu:
-            dr = "PUT"; band_ref = bu
-        elif r <= RSI_LO and cl <= bl:
-            dr = "CALL"; band_ref = bl
+        
+        # CALL Condition: Price touches/crosses Lower Band BUT stays ABOVE EMA200
+        if cl <= bl_val and cl >= ema_val:
+            dr = "CALL"
+            band_ref = bl_val
+            
+        # PUT Condition: Price touches/crosses Upper Band BUT stays BELOW EMA200
+        elif cl >= bu_val and cl <= ema_val:
+            dr = "PUT"
+            band_ref = bu_val
             
         if dr is None:
             continue
             
         over = abs(cl - band_ref) / sdv if sdv > 0 else 0.0
-        v4 = over >= 0.5
+        v4 = over >= 0.5 
         
         zone, urgency, emoji, urg_text = calc_urgency(cl, band_ref, sdv, dr)
         if urgency == "skip":
             lastmap[sym] = key
             continue
+        
+        # Define Entry Zones
+        if dr == "CALL":
+            strong_entry = bl_val
+            mid_entry = (cl + bl_val) / 2
+        else:
+            strong_entry = bu_val
+            mid_entry = (cl + bu_val) / 2
             
         exp = ct + timedelta(minutes=EXPIRY_MIN + 5)
         sent = ct
         arrow = "🔴 PUT (هبوط)" if dr == "PUT" else "🟢 CALL (صعود)"
         sym_copy = fmt_sym(sym)
         
-        txt = (f"🎯 *إشارة H2 v5.7.1 (Deriv Live)*\n\n"
+        # ═══════════════════════════════════════════════
+        # TEXT FORMAT MATCHING OLD STYLE EXACTLY
+        # Removed RSI mention, kept Sigma logic visible
+        # ═══════════════════════════════════════════════
+        txt = (f"🎯 *إشارة H2 v7.0 — BB + Trend*\n\n"
                f"📊 *الزوج:* `{sym_copy}`\n"
                f"📈 *الاتجاه:* {arrow}\n"
                f"💰 *السعر الحي الآن:* {fmt_px(cl)}\n\n"
-               f"📌 *السبب:* RSI {r:.1f} + السعر "
-               f"{'تحت' if dr=='CALL' else 'فوق'} الباند بـ {over:.1f}σ\n"
+               f"🎯 *مناطق الدخول:*\n"
+               f"• قوية (عند الباند): {fmt_px(strong_entry)}\n"
+               f"• وسطى (مقبولة): {fmt_px(mid_entry)}\n\n"
+               f"⏱️ *التعليمات:*\n"
+               f"{emoji} {urg_text}\n\n"
+               f"📌 *السبب:* السعر {'تحت' if dr=='CALL' else 'فوق'} الباند بـ {over:.1f}σ\n"
                f"🏷️ ضمن V4: {'✅' if v4 else '➖'}\n\n"
                f"⌛ الانتهاء: 15 دقيقة (حتى {(ct + timedelta(minutes=EXPIRY_MIN)).strftime('%H:%M')} UTC)\n"
                f"💰 شرط الـ payout: 85% فأعلى فقط\n\n"
@@ -664,14 +763,43 @@ def main():
         send_day_summary(st, prev)
         st["last_daily"] = today_local
 
+    if st.get("last_month") is None:
+        st["last_month"] = loc.strftime("%Y-%m")
+    if loc.day == 1 and st.get("last_month") != loc.strftime("%Y-%m"):
+        if loc.month > 1:
+            py, pm = loc.year, loc.month - 1
+        else:
+            py, pm = loc.year - 1, 12
+        send_month_summary(st, py, pm)
+        st["last_month"] = loc.strftime("%Y-%m")
+
+    now_utc = datetime.now(timezone.utc)
+    iso = loc.isocalendar()
+    wk = f"{iso[0]}-W{iso[1]}"
+    if now_utc.weekday() == 5 and st.get("last_week") != wk:
+        monday = loc - timedelta(days=loc.weekday())
+        days = [(monday + timedelta(days=i)).strftime("%Y-%m-%d")
+                for i in range(5)]
+        send_week_summary(st, days)
+        st["last_week"] = wk
+
     d = day_obj(st)
     if st.get("boot_date") != d["date"]:
         st["boot_date"] = d["date"]
-        tg_send(f"🚀 بوت H2 بدأ (v5.7.1 Deriv Real-Time)\n"
-                f"• المصدر: Deriv API (LIVE)\n"
-                f"• أزواج: {len(SYMBOLS)}\n"
-                f"• المنطق: RSI(14) + BB(20,2.0)\n"
-                f"• الحماية: 3 خسائر متتالية = 4 ساعات توقف")
+        tg_send(f"🚀 بوت H2 بدأ (v7.0 Master Hybrid - FINAL FORMAT)\n"
+                f"• أزواج: {len(SYMBOLS)} (تم التوسع)\n"
+                f"• المنطق: BB(15,2.3) + EMA200 Filter\n"
+                f"• الحماية: Storm Filter (ADX/ATR) نشط\n"
+                f"• الفريم: 5 دقائق / الانتهاء: 15 دقيقة\n"
+                f"• ✨ بدون سقف تنبيهات — لن تضيع إشارة\n"
+                f"• ❄️ تبريد لكل زوج: إشارة واحدة حتى حسم النتيجة\n"
+                f"• 🌙 حظر ليلي: لا إشارات من 12 إلى 9 صباحا\n"
+                f"• ⏳ حماية ضد التجميد: timeout {PENDING_HARD_TIMEOUT_MIN}د\n"
+                f"• 🤖 تسجيل تلقائي + رد تلقائي بالنتيجة\n"
+                f"• 📊 ملخص يومي عند منتصف الليل\n"
+                f"• 📅 ملخص أسبوعي السبت (أيام + أوقات + أزواج + أنماط خسارة)\n"
+                f"• 🗓️ ملخص شهري أول كل شهر\n"
+                f"• 🛡️ الحماية: 3 خسائر متتالية = 4 ساعات توقف")
                 
     listen(st)
     resolve_pending(st)
