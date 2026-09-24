@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-غيث H2 — بوت إشارات حي (v7.0 Master Hybrid Edition - EXACT FORMAT)
-الاستراتيجية: BB(15,2.3) + EMA200 Trend Filter + Storm Filter (ADX/ATR)
-الفريم: 5 دقائق / الانتهاء: 15 دقيقة
+غيث H2 — بوت إشارات حي (v7.0 Master Hybrid Edition - FINAL STABLE)
+الإصلاح الحاسم: منع تكرار إرسال الملخصات اليومية (Anti-Spam Logic).
+الاستراتيجية: BB(15,2.3) + EMA200 Trend Filter + Storm Filter (ADX/ATR).
+الفريم: 5 دقائق / الانتهاء: 15 دقيقة.
 التنسيق: مطابق تماماً للإشارة القديمة (RSI removed from text, Sigma kept).
 """
 import os, sys, time, json, logging
@@ -66,7 +67,7 @@ TG_CHAT = os.getenv("TG_CHAT","").strip()
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s | %(levelname)-8s | %(message)s",
                     handlers=[logging.StreamHandler(sys.stdout)])
-log = logging.getLogger("H2v70-Master-FinalFormat")
+log = logging.getLogger("H2v70-NoSpam")
 
 # ─── Safe accessors ──────────────────────────────────────
 def safe_list(st, key):
@@ -755,16 +756,29 @@ def main():
     loc = datetime.now(timezone.utc) + timedelta(hours=USER_TZ_OFFSET_H)
     today_local = loc.strftime("%Y-%m-%d")
 
+    # ─── FIX: Daily Summary Logic (Prevent Spamming) ───
     last_daily = st.get("last_daily")
-    if last_daily is None:
+    
+    # Only send summary if we have a previous day recorded AND it's different from today
+    # AND we haven't already sent today's summary marker
+    if last_daily is not None and last_daily != today_local:
+        prev_day_str = last_daily # Use the stored date as 'prev'
+        send_day_summary(st, prev_day_str)
+        
+        # Immediately update state to prevent re-triggering in next run within same minute
         st["last_daily"] = today_local
-    elif last_daily != today_local:
-        prev = (loc - timedelta(days=1)).strftime("%Y-%m-%d")
-        send_day_summary(st, prev)
+        save_state(st) # Force save here
+        
+    elif last_daily is None:
+        # First ever run, just set the date without sending summary
         st["last_daily"] = today_local
+        save_state(st)
 
+    # ─── Monthly & Weekly Logic (Keep as is but ensure saves happen) ───
     if st.get("last_month") is None:
         st["last_month"] = loc.strftime("%Y-%m")
+        save_state(st)
+        
     if loc.day == 1 and st.get("last_month") != loc.strftime("%Y-%m"):
         if loc.month > 1:
             py, pm = loc.year, loc.month - 1
@@ -772,21 +786,23 @@ def main():
             py, pm = loc.year - 1, 12
         send_month_summary(st, py, pm)
         st["last_month"] = loc.strftime("%Y-%m")
+        save_state(st)
 
     now_utc = datetime.now(timezone.utc)
     iso = loc.isocalendar()
     wk = f"{iso[0]}-W{iso[1]}"
+    
     if now_utc.weekday() == 5 and st.get("last_week") != wk:
         monday = loc - timedelta(days=loc.weekday())
-        days = [(monday + timedelta(days=i)).strftime("%Y-%m-%d")
-                for i in range(5)]
+        days = [(monday + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(5)]
         send_week_summary(st, days)
         st["last_week"] = wk
+        save_state(st)
 
     d = day_obj(st)
     if st.get("boot_date") != d["date"]:
         st["boot_date"] = d["date"]
-        tg_send(f"🚀 بوت H2 بدأ (v7.0 Master Hybrid - FINAL FORMAT)\n"
+        tg_send(f"🚀 بوت H2 بدأ (v7.0 Master Hybrid - NO SPAM)\n"
                 f"• أزواج: {len(SYMBOLS)} (تم التوسع)\n"
                 f"• المنطق: BB(15,2.3) + EMA200 Filter\n"
                 f"• الحماية: Storm Filter (ADX/ATR) نشط\n"
