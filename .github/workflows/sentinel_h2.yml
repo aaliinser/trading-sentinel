@@ -1,62 +1,51 @@
-name: Sentinel_H2
+name: Sentinel H2 Trading Bot
 
 on:
-  workflow_dispatch:
   schedule:
-    - cron: "*/5 * * * *"
-
-concurrency:
-  group: h2-live
-  cancel-in-progress: false
+    # تشغيل كل 5 دقائق (توافق الفريم الزمني للتحليل)
+    - cron: '*/5 * * * *'
+  workflow_dispatch: # للسماح بالتشغيل اليدوي للاختبار
 
 jobs:
-  scan:
+  scan-and-alert:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
-    permissions:
-      contents: write
+    timeout-minutes: 10
+    
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-          persist-credentials: true
 
-      - name: Set up Python
+      - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: '3.11'
 
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
-      - name: Run H2 Sentinel
-        run: python sentinel_h2.py
+      - name: Run H2 Sentinel Script
         env:
+          # ─── Telegram Configuration ───
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
           TG_CHAT: ${{ secrets.TG_CHAT }}
+          
+          # ─── Deriv API Configuration (NEW) ───
+          DERIV_API_TOKEN: ${{ secrets.DERIV_API_TOKEN }}
+          DERIV_APP_ID: "1089" # المعرف الافتراضي العام لـ Deriv
+          
+          # ─── Strategy Symbols (Optional Override) ───
+          # إذا أردت تغيير الأزواج دون تعديل الكود، ضعها هنا مفصولة بفواصل
+          # SYMBOLS_H2: "USDJPY=X,EURAUD=X,USDCHF=X,EURCAD=X,CADJPY=X"
+          
+        run: python sentinel_h2.py
 
-      - name: Save state to repository
+      - name: Save State File to Repository
+        if: always() # حتى لو فشل السكربت، نحاول حفظ الحالة لتجنب فقدان البيانات
         run: |
-          set -e
-          git config user.email "action@github.com"
-          git config user.name "GitHub Action"
-          git add state_h2.json 2>/dev/null || true
-          if git diff --staged --quiet; then
-            echo "✅ No state changes to commit"
-            exit 0
-          fi
-          git commit -m "Update state [skip ci]"
-          for attempt in 1 2 3; do
-            git pull --rebase origin ${{ github.ref }} 2>/dev/null || git rebase --abort 2>/dev/null || true
-            if git push origin HEAD:${{ github.ref }} 2>/dev/null; then
-              echo "✅ State pushed successfully (attempt $attempt)"
-              exit 0
-            fi
-            echo "⚠️ Push failed, retrying in 5 seconds (attempt $attempt/3)..."
-            sleep 5
-          done
-          echo "❌ Failed to push state after 3 attempts (non-fatal)"
-          exit 0
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add state_h2.json || true
+          git commit -m "Auto-update bot state $(date +'%Y-%m-%d %H:%M')" || echo "No changes to commit"
+          git push origin main || true
