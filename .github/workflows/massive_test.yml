@@ -1,0 +1,19 @@
+name: Massive Sample Size Test
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30 # Increased time for 20 symbols download
+    steps:
+    - uses: actions/checkout@v4
+    - name: Setup Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+    - name: Install Deps
+      run: pip install numpy pandas yfinance scipy
+    - name: Run Massive Test
+      run: python massive_sample_test.py
