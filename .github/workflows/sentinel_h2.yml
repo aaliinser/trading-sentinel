@@ -31,21 +31,35 @@ jobs:
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
           TG_CHAT: ${{ secrets.TG_CHAT }}
           
-          # ─── Deriv API Configuration (NEW) ───
+          # ─── Deriv API Configuration ───
           DERIV_API_TOKEN: ${{ secrets.DERIV_API_TOKEN }}
-          DERIV_APP_ID: "1089" # المعرف الافتراضي العام لـ Deriv
+          DERIV_APP_ID: "1089" 
           
-          # ─── Strategy Symbols (Optional Override) ───
-          # إذا أردت تغيير الأزواج دون تعديل الكود، ضعها هنا مفصولة بفواصل
-          # SYMBOLS_H2: "USDJPY=X,EURAUD=X,USDCHF=X,EURCAD=X,CADJPY=X"
+          # ─── Strategy Symbols Override ───
+          # نستخدم الرموز الافتراضية داخل الكود، لكن يمكننا تمريرها هنا لو أردنا تغييرها دون تعديل الكود
+          SYMBOLS_H2: "USDJPY=X,EURAUD=X,USDCHF=X,EURCAD=X,CADJPY=X,GBPUSD=X,USDCAD=X,AUDNZD=X,EURGBP=X"
           
         run: python sentinel_h2.py
 
-      - name: Save State File to Repository
+      - name: Save State File to Repository (Robust Mode)
         if: always() # حتى لو فشل السكربت، نحاول حفظ الحالة لتجنب فقدان البيانات
         run: |
           git config user.name github-actions
           git config user.email github-actions@github.com
+          
+          # إضافة التغييرات
           git add state_h2.json || true
-          git commit -m "Auto-update bot state $(date +'%Y-%m-%d %H:%M')" || echo "No changes to commit"
-          git push origin main || true
+          
+          # محاولة الالتزام (Commit) فقط إذا كان هناك تغييرات فعلية
+          if ! git diff --cached --quiet; then
+            echo "Changes detected in state file. Committing..."
+            git commit -m "Auto-update bot state $(date +'%Y-%m-%d %H:%M')"
+            
+            # سحب آخر التغييرات من الفرع الرئيسي أولاً لتجنب التعارضات (Merge Conflicts)
+            git pull origin main --rebase || true
+            
+            # الدفع للمستودع
+            git push origin main || true
+          else
+            echo "No changes to commit."
+          fi
