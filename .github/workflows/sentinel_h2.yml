@@ -1,10 +1,10 @@
-name: Sentinel H2 Trading Bot
+name: Sentinel H2 Trading Bot (Fast Mode)
 
 on:
   schedule:
     # تشغيل كل 5 دقائق (توافق الفريم الزمني للتحليل)
     - cron: '*/5 * * * *'
-  workflow_dispatch: # للسماح بالتشغيل اليدوي للاختبار
+  workflow_dispatch: # للسماح بالتشغيل اليدوي للاختبار الفوري
 
 jobs:
   scan-and-alert:
@@ -25,13 +25,14 @@ jobs:
           pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
-      - name: Run H2 Sentinel Script
+      - name: Run H2 Sentinel Script (FAST VERSION)
         env:
           # ─── Telegram Configuration ───
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
           TG_CHAT: ${{ secrets.TG_CHAT }}
           
-          # ─── Deriv API Configuration ───
+          # ─── Deriv API Configuration (Optional for future use) ───
+          # حتى لو لم تستخدمه الآن، وجوده لا يضر إذا كان فارغاً أو خاطئاً
           DERIV_API_TOKEN: ${{ secrets.DERIV_API_TOKEN }}
           DERIV_APP_ID: "1089" 
           
@@ -39,7 +40,9 @@ jobs:
           # نستخدم الرموز الافتراضية داخل الكود، لكن يمكننا تمريرها هنا لو أردنا تغييرها دون تعديل الكود
           SYMBOLS_H2: "USDJPY=X,EURAUD=X,USDCHF=X,EURCAD=X,CADJPY=X,GBPUSD=X,USDCAD=X,AUDNZD=X,EURGBP=X"
           
-        run: python sentinel_h2.py
+        # ⭐⭐⭐ التغيير الجوهري هنا ⭐⭐⭐
+        # بدلاً من sentinel_h2.py القديم، نشغل النسخة السريعة الجديدة
+        run: python sentinel_h2_fast.py
 
       - name: Save State File to Repository (Robust Mode)
         if: always() # حتى لو فشل السكربت، نحاول حفظ الحالة لتجنب فقدان البيانات
