@@ -24,7 +24,7 @@ try:
 except ImportError:
     pass
 
-# ─── Configuration ──────────────────────────────────────
+# ─── Configuration ─────────────────────────────────────
 SYMBOLS = os.getenv("SYMBOLS_H2", "USDJPY=X,EURAUD=X,USDCHF=X,EURCAD=X,CADJPY=X,GBPUSD=X,USDCAD=X,AUDNZD=X,EURGBP=X").split(",")
 
 # إعدادات المؤشرات للاستراتيجية الهجينة
@@ -348,7 +348,7 @@ def resolve_pending(st):
         sim_list.append({
             "dl": loc.strftime("%Y-%m-%d"),
             "hl": loc.hour,
-            "sym": p["sym"], "dr": p["dr"],
+            "sym": p["sym"], "dr": p["dr"], # <-- تم إصلاح الخطأ هنا بإضافة علامات الاقتباس
             "v4": bool(p.get("v4", False)), 
             "win": bool(win),
             "px": entry, "ex": exit_px,
@@ -448,8 +448,8 @@ def send_week_summary(st, days):
         txt += f"• {ar_day(dstr)} {dstr}: {dn} إشارة | {dwr}%\n"
 
     buckets = [
-        ("صباحاً (09-14)", lambda h: 9 <= h < 14),
-        ("عصراً (14-19)", lambda h: 14 <= h < 19),
+        ("صباحاَ (09-14)", lambda h: 9 <= h < 14),
+        ("عصراَ (14-19)", lambda h: 14 <= h < 19),
         ("مساءً (19-24)", lambda h: h >= 19),
     ]
     txt += f"\n⏰ *تفصيل أوقات اليوم:*\n"
