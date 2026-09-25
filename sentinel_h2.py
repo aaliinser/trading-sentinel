@@ -1,14 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-غيث H2 — بوت إشارات حي (v7.0 Master Hybrid Edition - ULTIMATE STABLE)
-الإصلاحات الأخيرة:
-1. حماية رياضية صارمة ضد القسمة على صفر/أرقام صغيرة جداً.
-2. حفظ فوري للحالة بعد كل حسم لصفقة (Anti-data-loss).
-3. استخدام pd.isna() للتحقق من القيم المفقودة.
-4. تحسينات Logging للتشخيص الدقيق.
+غيث H2 — بوت إشارات حي (v7.1 Fast Edition - No Deriv Key Needed)
+الإصلاح الحاسم: تحقيق سرعة شبه لحظية باستخدام yfinance Tick Data وبناء الشموع الديناميكية.
 الاستراتيجية: BB(15,2.3) + EMA200 Trend Filter + Storm Filter (ADX/ATR).
 الفريم: 5 دقائق / الانتهاء: 15 دقيقة.
+الميزة: لا يحتاج لمفتاح Deriv. يعمل مباشرة عبر Yahoo Finance بتحديثات كل 5 دقائق.
 """
 import os, sys, time, json, logging
 from datetime import datetime, timedelta, timezone
@@ -70,7 +67,7 @@ TG_CHAT = os.getenv("TG_CHAT","").strip()
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s | %(levelname)-8s | %(message)s",
                     handlers=[logging.StreamHandler(sys.stdout)])
-log = logging.getLogger("H2v70-UltimateStable")
+log = logging.getLogger("H2v71-FastNoDeriv")
 
 # ─── Safe accessors ──────────────────────────────────────
 def safe_list(st, key):
@@ -182,31 +179,89 @@ def flatten_columns(df):
     df = df.loc[:, ~pd.Index(df.columns).duplicated(keep="first")]
     return df
 
-def fetch5m(sym):
+# ═══════════════════════════════════════════════
+# ★ NEW FEATURE: FAST DATA FETCHER USING TICKS ★
+# ═══════════════════════════════════════════════
+def fetch5m_fast(sym):
+    """
+    يجلب البيانات بسرعة قصوى عبر بناء شموع 5 دقائق من تيكات لحظية.
+    يقلل التأخير إلى الحد الأدنى الممكن مع yfinance.
+    """
+    ticker = yf.Ticker(sym)
+    
+    # 1. جلب آخر 3 أيام من الشموع الأساسية (للحسابات التاريخية مثل EMA200)
+    hist_df = None
     for a in range(3):
         try:
-            df = yf.Ticker(sym).history(period="3d", interval=INTERVAL,
-                                        auto_adjust=False,
-                                        actions=False, timeout=20)
-            if df is None or df.empty:
-                raise ValueError("empty")
-            df = flatten_columns(df)
-            required = ["Open", "High", "Low", "Close"]
-            missing = [c for c in required if c not in df.columns]
-            if missing:
-                raise ValueError(f"missing columns: {missing}")
-            df = df[required]
-            df.index = pd.to_datetime(df.index, utc=True)
-            df = df[~df.index.duplicated(keep="last")].sort_index().dropna()
-            now = pd.Timestamp.now(tz="UTC")
-            df = df[df.index <= now]
-            if not df.empty and df.index[-1] + pd.Timedelta(minutes=5) > now:
-                df = df.iloc[:-1]
-            return df
+            hist_df = ticker.history(period="3d", interval=INTERVAL,
+                                     auto_adjust=False, actions=False, timeout=20)
+            if hist_df is not None and not hist_df.empty:
+                break
         except Exception as e:
-            log.warning(f"{sym} fetch {a}: {e}")
+            log.warning(f"{sym} history fetch {a}: {e}")
             time.sleep(2*a+1)
-    return None
+            
+    if hist_df is None or hist_df.empty:
+        return None
+        
+    hist_df = flatten_columns(hist_df)
+    required_cols = ["Open", "High", "Low", "Close"]
+    missing = [c for c in required_cols if c not in hist_df.columns]
+    if missing:
+        raise ValueError(f"missing columns: {missing}")
+        
+    hist_df = hist_df[required_cols].copy()
+    hist_df.index = pd.to_datetime(hist_df.index, utc=True)
+    hist_df = hist_df[~hist_df.index.duplicated(keep="last")].sort_index().dropna()
+    
+    # 2. جلب التيكات اللحظية لآخر ساعة لبناء الشمعة الحالية بدقة عالية
+    ticks_df = None
+    for a in range(3):
+        try:
+            # نطلب تيكات لمدة ساعة واحدة فقط لتقليل حجم البيانات وتسريع الجلب
+            ticks_df = ticker.history(period="1h", interval="1m", 
+                                      auto_adjust=False, actions=False, timeout=15)
+            if ticks_df is not None and not ticks_df.empty:
+                break
+        except Exception as e:
+            log.debug(f"{sym} tick fetch {a}: {e}")
+            time.sleep(a+1)
+            
+    if ticks_df is not None and not ticks_df.empty:
+        ticks_df = flatten_columns(ticks_df)
+        ticks_df.index = pd.to_datetime(ticks_df.index, utc=True)
+        
+        # تحديد وقت بداية الشمعة الخمسية الحالية
+        last_closed_candle_time = hist_df.index[-1]
+        current_candle_start = last_closed_candle_time + pd.Timedelta(minutes=5)
+        
+        # تصفية التيكات التي تقع ضمن الشمعة الحالية
+        current_ticks = ticks_df[ticks_df.index >= current_candle_start]
+        
+        if not current_ticks.empty:
+            # بناء الشمعة الحالية من التيكات
+            new_candle_data = {
+                'Open': current_ticks['Open'].iloc[0],
+                'High': current_ticks['High'].max(),
+                'Low': current_ticks['Low'].min(),
+                'Close': current_ticks['Close'].iloc[-1]
+            }
+            new_candle_idx = pd.DatetimeIndex([current_candle_start])
+            new_candle_df = pd.DataFrame([new_candle_data], index=new_candle_idx)
+            
+            # دمج الشمعة الجديدة مع التاريخ السابق
+            final_df = pd.concat([hist_df, new_candle_df]).sort_index()
+        else:
+            final_df = hist_df
+    else:
+        final_df = hist_df
+        
+    # إزالة الشمعة غير المكتملة إذا كانت موجودة في النهاية
+    now = pd.Timestamp.now(tz="UTC")
+    if not final_df.empty and final_df.index[-1] + pd.Timedelta(minutes=5) > now:
+        final_df = final_df.iloc[:-1]
+        
+    return final_df
 
 # ─── Core Indicators for v7.0 Hybrid ─────────────────────
 def calculate_indicators_v7(df):
@@ -269,7 +324,7 @@ def fmt_px(v):
     return f"{v:.3f}" if v > 50 else f"{v:.5f}"
 
 def calc_urgency(cl, band, sdv, direction):
-    if sdv <= 0.0001: # حماية إضافية هنا أيضاً
+    if sdv <= 0.0001:
         return "unknown", "unknown", "⚠️", "خطأ في حساب الانحراف"
     if direction == "CALL":
         if cl <= band * 1.0003:
@@ -317,7 +372,7 @@ def resolve_pending(st):
         if now < exp + timedelta(seconds=60):
             continue
 
-        df = fetch5m(p["sym"])
+        df = fetch5m_fast(p["sym"]) # Use fast version here too
         target = exp - timedelta(minutes=5)
         exit_px = None
 
@@ -338,7 +393,7 @@ def resolve_pending(st):
             continue
 
         entry = float(p["px"])
-        if abs(exit_px - entry) < 0.00001: # Tie handling
+        if abs(exit_px - entry) < 0.00001:
             log.info(f"tie void {p['sym']}")
             done.append(p)
             voided_count += 1
@@ -358,13 +413,11 @@ def resolve_pending(st):
             "px": entry, "ex": exit_px,
         }
         sim_list.append(new_record)
-        
-        # ─── FIX: Immediate Save After Record Addition ───
         save_state(st) 
 
         if len(sim_list) > 2000:
             st["sim"] = sim_list[-2000:]
-            save_state(st) # حفظ مرة أخرى إذا تم القص
+            save_state(st)
 
         log.info(f"auto-resolved {p['sym']} {p['dr']} win={win} | Entry:{entry:.5f} Exit:{exit_px:.5f}")
         resolved_count += 1
@@ -399,7 +452,7 @@ def send_report(st):
     n = len(sim)
     w = sum(1 for x in sim if x["win"])
     wr = round(100*w/n, 1) if n else 0.0
-    txt = (f"📊 *تقرير الأداء (v7.0 Hybrid)*\n\n"
+    txt = (f"📊 *تقرير الأداء (v7.1 Fast)*\n\n"
            f"*إشارات:* *{n}* | فوز *{wr}%*\n\n"
            f"📌 التعادل: {BREAKEVEN_WR}%")
     tg_send(txt)
@@ -446,7 +499,7 @@ def send_week_summary(st, days):
     mwr = round(100*mw/mn, 1) if mn else 0.0
     win_payout = 6.0 * 0.90
     stake = 6.0
-    txt = (f"📅 *ملخص أسبوع التداول (v7.0 Hybrid)*\n"
+    txt = (f"📅 *ملخص أسبوع التداول (v7.1 Fast)*\n"
            f"({ar_day(days[0])} {days[0]} → "
            f"{ar_day(days[-1])} {days[-1]})\n\n"
            f"📆 *تفصيل الأيام:*\n")
@@ -624,7 +677,8 @@ def scan(st):
         if sym in cooldown_symbols:
             continue
             
-        df = fetch5m(sym)
+        # ★ USE THE NEW FAST FETCHER HERE ★
+        df = fetch5m_fast(sym)
         if df is None or len(df) < 220: 
             continue
         
@@ -637,7 +691,6 @@ def scan(st):
         if lastmap.get(sym) == key:
             continue
             
-        # ─── FIX: Use pd.isna() for robust NaN checking ───
         if pd.isna(bl.iloc[i]) or pd.isna(bu.iloc[i]) or pd.isna(ema200.iloc[i]) or \
            pd.isna(atr.iloc[i]) or pd.isna(adx.iloc[i]) or pd.isna(sd.iloc[i]):
             continue
@@ -670,7 +723,6 @@ def scan(st):
         else:
             baseline_atr = current_atr 
             
-        # ─── FIX: Robust check for ATR spike with safety guards ───
         if not pd.isna(current_atr) and not pd.isna(baseline_atr):
              if baseline_atr > 0.0001 and current_atr > (baseline_atr * STORM_ATR_MULT):
                 storm_detected = True
@@ -689,12 +741,10 @@ def scan(st):
         dr = None
         band_ref = None
         
-        # CALL Condition: Price touches/crosses Lower Band BUT stays ABOVE EMA200
         if cl <= bl_val and cl >= ema_val:
             dr = "CALL"
             band_ref = bl_val
             
-        # PUT Condition: Price touches/crosses Upper Band BUT stays BELOW EMA200
         elif cl >= bu_val and cl <= ema_val:
             dr = "PUT"
             band_ref = bu_val
@@ -702,10 +752,9 @@ def scan(st):
         if dr is None:
             continue
             
-        # ─── FIX POINT 4: Safe Division Check ───
         over = 0.0
         v4 = False
-        if sdv > 0.0001: # منع القسمة على أرقام صغيرة جداً أو صفر
+        if sdv > 0.0001:
             over = abs(cl - band_ref) / sdv
             v4 = over >= 0.5 
         
@@ -714,7 +763,6 @@ def scan(st):
             lastmap[sym] = key
             continue
         
-        # Define Entry Zones
         if dr == "CALL":
             strong_entry = bl_val
             mid_entry = (cl + bl_val) / 2
@@ -727,11 +775,7 @@ def scan(st):
         arrow = "🔴 PUT (هبوط)" if dr == "PUT" else "🟢 CALL (صعود)"
         sym_copy = fmt_sym(sym)
         
-        # ═══════════════════════════════════════════════
-        # TEXT FORMAT MATCHING OLD STYLE EXACTLY
-        # Removed RSI mention, kept Sigma logic visible
-        # ═══════════════════════════════════════════════
-        txt = (f"🎯 *إشارة H2 v7.0 — BB + Trend*\n\n"
+        txt = (f"🎯 *إشارة H2 v7.1 Fast — BB + Trend*\n\n"
                f"📊 *الزوج:* `{sym_copy}`\n"
                f"📈 *الاتجاه:* {arrow}\n"
                f"💰 *السعر الحي الآن:* {fmt_px(cl)}\n\n"
@@ -773,25 +817,18 @@ def main():
     loc = datetime.now(timezone.utc) + timedelta(hours=USER_TZ_OFFSET_H)
     today_local = loc.strftime("%Y-%m-%d")
 
-    # ─── FIX: Daily Summary Logic (Prevent Spamming) ───
     last_daily = st.get("last_daily")
     
-    # Only send summary if we have a previous day recorded AND it's different from today
-    # AND we haven't already sent today's summary marker
     if last_daily is not None and last_daily != today_local:
-        prev_day_str = last_daily # Use the stored date as 'prev'
+        prev_day_str = last_daily
         send_day_summary(st, prev_day_str)
-        
-        # Immediately update state to prevent re-triggering in next run within same minute
         st["last_daily"] = today_local
-        save_state(st) # Force save here
+        save_state(st)
         
     elif last_daily is None:
-        # First ever run, just set the date without sending summary
         st["last_daily"] = today_local
         save_state(st)
 
-    # ─── Monthly & Weekly Logic (Keep as is but ensure saves happen) ───
     if st.get("last_month") is None:
         st["last_month"] = loc.strftime("%Y-%m")
         save_state(st)
@@ -819,11 +856,13 @@ def main():
     d = day_obj(st)
     if st.get("boot_date") != d["date"]:
         st["boot_date"] = d["date"]
-        tg_send(f"🚀 بوت H2 بدأ (v7.0 Master Hybrid - ULTIMATE STABLE)\n"
+        tg_send(f"🚀 بوت H2 بدأ (v7.1 Master Hybrid - FAST MODE)\n"
                 f"• أزواج: {len(SYMBOLS)} (تم التوسع)\n"
                 f"• المنطق: BB(15,2.3) + EMA200 Filter\n"
                 f"• الحماية: Storm Filter (ADX/ATR) نشط\n"
                 f"• الفريم: 5 دقائق / الانتهاء: 15 دقيقة\n"
+                f"• ⚡ الوضع السريع: يعتمد على بناء شموع ديناميكية من التيكات\n"
+                f"• 🔑 لا يحتاج لمفتاح Deriv\n"
                 f"• ✨ بدون سقف تنبيهات — لن تضيع إشارة\n"
                 f"• ❄️ تبريد لكل زوج: إشارة واحدة حتى حسم النتيجة\n"
                 f"• 🌙 حظر ليلي: لا إشارات من 12 إلى 9 صباحا\n"
