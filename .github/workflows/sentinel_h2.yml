@@ -32,7 +32,7 @@ jobs:
           TG_CHAT: ${{ secrets.TG_CHAT }}
           
           # ─── Deriv API Configuration (Optional for future use) ───
-          # حتى لو لم تستخدمه الآن، وجوده لا يضر إذا كان فارغاً أو خاطئاً
+          # حتى لو لم تستخدمه الآن، وجوده لا يضر إذا كان فارغا أو خاطئا
           DERIV_API_TOKEN: ${{ secrets.DERIV_API_TOKEN }}
           DERIV_APP_ID: "1089" 
           
@@ -41,7 +41,7 @@ jobs:
           SYMBOLS_H2: "USDJPY=X,EURAUD=X,USDCHF=X,EURCAD=X,CADJPY=X,GBPUSD=X,USDCAD=X,AUDNZD=X,EURGBP=X"
           
         # ⭐⭐⭐ التغيير الجوهري هنا ⭐⭐⭐
-        # بدلاً من sentinel_h2.py القديم، نشغل النسخة السريعة الجديدة
+        # بدلا من sentinel_h2.py القديم، نشغل النسخة السريعة الجديدة
         run: python sentinel_h2_fast.py
 
       - name: Save State File to Repository (Robust Mode)
@@ -58,7 +58,7 @@ jobs:
             echo "Changes detected in state file. Committing..."
             git commit -m "Auto-update bot state $(date +'%Y-%m-%d %H:%M')"
             
-            # سحب آخر التغييرات من الفرع الرئيسي أولاً لتجنب التعارضات (Merge Conflicts)
+            # سحب آخر التغييرات من الفرع الرئيسي أولا لتجنب التعارضات (Merge Conflicts)
             git pull origin main --rebase || true
             
             # الدفع للمستودع
