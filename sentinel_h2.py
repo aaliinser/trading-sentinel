@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-غيث H2 — بوت إشارات حي (v7.1 Fast Edition - No Deriv Key Needed)
-الإصلاح الحاسم: تحقيق سرعة شبه لحظية باستخدام yfinance Tick Data وبناء الشموع الديناميكية.
+غيث H2 — بوت إشارات حي (v7.1 Master Hybrid - FAST MODE)
+الإصلاح الحاسم: سرعة شبه لحظية عبر بناء شموع ديناميكية + حماية رياضية صارمة.
 الاستراتيجية: BB(15,2.3) + EMA200 Trend Filter + Storm Filter (ADX/ATR).
 الفريم: 5 دقائق / الانتهاء: 15 دقيقة.
-الميزة: لا يحتاج لمفتاح Deriv. يعمل مباشرة عبر Yahoo Finance بتحديثات كل 5 دقائق.
+الميزة: لا يحتاج لمفتاح Deriv. يعمل مباشرة عبر Yahoo Finance بتحديثات فورية.
 """
 import os, sys, time, json, logging
 from datetime import datetime, timedelta, timezone
@@ -67,7 +67,7 @@ TG_CHAT = os.getenv("TG_CHAT","").strip()
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s | %(levelname)-8s | %(message)s",
                     handlers=[logging.StreamHandler(sys.stdout)])
-log = logging.getLogger("H2v71-FastNoDeriv")
+log = logging.getLogger("H2v71-FastMode")
 
 # ─── Safe accessors ──────────────────────────────────────
 def safe_list(st, key):
