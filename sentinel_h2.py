@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-غيث H2 — بوت إشارات حي (v7.0 Master Hybrid Edition - FINAL STABLE)
-الإصلاح الحاسم: منع تكرار إرسال الملخصات اليومية (Anti-Spam Logic).
+غيث H2 — بوت إشارات حي (v7.0 Master Hybrid Edition - ULTIMATE STABLE)
+الإصلاحات الأخيرة:
+1. حماية رياضية صارمة ضد القسمة على صفر/أرقام صغيرة جداً.
+2. حفظ فوري للحالة بعد كل حسم لصفقة (Anti-data-loss).
+3. استخدام pd.isna() للتحقق من القيم المفقودة.
+4. تحسينات Logging للتشخيص الدقيق.
 الاستراتيجية: BB(15,2.3) + EMA200 Trend Filter + Storm Filter (ADX/ATR).
 الفريم: 5 دقائق / الانتهاء: 15 دقيقة.
-التنسيق: مطابق تماماً للإشارة القديمة (RSI removed from text, Sigma kept).
 """
 import os, sys, time, json, logging
 from datetime import datetime, timedelta, timezone
@@ -67,7 +70,7 @@ TG_CHAT = os.getenv("TG_CHAT","").strip()
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s | %(levelname)-8s | %(message)s",
                     handlers=[logging.StreamHandler(sys.stdout)])
-log = logging.getLogger("H2v70-NoSpam")
+log = logging.getLogger("H2v70-UltimateStable")
 
 # ─── Safe accessors ──────────────────────────────────────
 def safe_list(st, key):
@@ -266,7 +269,7 @@ def fmt_px(v):
     return f"{v:.3f}" if v > 50 else f"{v:.5f}"
 
 def calc_urgency(cl, band, sdv, direction):
-    if sdv <= 0:
+    if sdv <= 0.0001: # حماية إضافية هنا أيضاً
         return "unknown", "unknown", "⚠️", "خطأ في حساب الانحراف"
     if direction == "CALL":
         if cl <= band * 1.0003:
@@ -297,7 +300,8 @@ def resolve_pending(st):
     for p in pend:
         try:
             exp = datetime.fromisoformat(p["exp"])
-        except Exception:
+        except Exception as e:
+            log.error(f"Pending parse error for {p.get('sym')}: {e}")
             done.append(p)
             forced_count += 1
             continue
@@ -345,18 +349,24 @@ def resolve_pending(st):
         loc = sent + timedelta(hours=USER_TZ_OFFSET_H)
 
         sim_list = safe_list(st, "sim")
-        sim_list.append({
+        new_record = {
             "dl": loc.strftime("%Y-%m-%d"),
             "hl": loc.hour,
-            "sym": p["sym"], "dr": p["dr"], # <-- تم إصلاح الخطأ هنا بإضافة علامات الاقتباس
+            "sym": p["sym"], "dr": p["dr"],
             "v4": bool(p.get("v4", False)), 
             "win": bool(win),
             "px": entry, "ex": exit_px,
-        })
+        }
+        sim_list.append(new_record)
+        
+        # ─── FIX: Immediate Save After Record Addition ───
+        save_state(st) 
+
         if len(sim_list) > 2000:
             st["sim"] = sim_list[-2000:]
+            save_state(st) # حفظ مرة أخرى إذا تم القص
 
-        log.info(f"auto-resolved {p['sym']} {p['dr']} win={win}")
+        log.info(f"auto-resolved {p['sym']} {p['dr']} win={win} | Entry:{entry:.5f} Exit:{exit_px:.5f}")
         resolved_count += 1
 
         rid = p.get("mid")
@@ -377,7 +387,7 @@ def resolve_pending(st):
             pend.remove(p)
 
     if resolved_count or voided_count or forced_count:
-        log.info(f"resolve_pending: resolved={resolved_count} voided={voided_count} forced={forced_count} remaining={len(pend)}")
+        log.info(f"resolve_pending summary: resolved={resolved_count} voided={voided_count} forced={forced_count} remaining={len(pend)}")
 
 # ─── Reporting Functions ─────────────────────────────────
 def send_report(st):
@@ -627,8 +637,9 @@ def scan(st):
         if lastmap.get(sym) == key:
             continue
             
-        if np.isnan(bl.iloc[i]) or np.isnan(bu.iloc[i]) or np.isnan(ema200.iloc[i]) or \
-           np.isnan(atr.iloc[i]) or np.isnan(adx.iloc[i]) or np.isnan(sd.iloc[i]):
+        # ─── FIX: Use pd.isna() for robust NaN checking ───
+        if pd.isna(bl.iloc[i]) or pd.isna(bu.iloc[i]) or pd.isna(ema200.iloc[i]) or \
+           pd.isna(atr.iloc[i]) or pd.isna(adx.iloc[i]) or pd.isna(sd.iloc[i]):
             continue
             
         entry_loc = ct + timedelta(minutes=5) + timedelta(hours=USER_TZ_OFFSET_H)
@@ -659,11 +670,13 @@ def scan(st):
         else:
             baseline_atr = current_atr 
             
-        if baseline_atr > 0 and current_atr > (baseline_atr * STORM_ATR_MULT) and current_atr > 0.0001:
-            storm_detected = True
-            reason = f"ATR Spike ({current_atr:.5f} vs Base {baseline_atr:.5f})"
-            
-        elif current_adx > STORM_ADX_LIMIT:
+        # ─── FIX: Robust check for ATR spike with safety guards ───
+        if not pd.isna(current_atr) and not pd.isna(baseline_atr):
+             if baseline_atr > 0.0001 and current_atr > (baseline_atr * STORM_ATR_MULT):
+                storm_detected = True
+                reason = f"ATR Spike ({current_atr:.5f} vs Base {baseline_atr:.5f})"
+                
+        elif not pd.isna(current_adx) and current_adx > STORM_ADX_LIMIT:
             storm_detected = True
             reason = f"Strong Trend (ADX={current_adx:.1f} > {STORM_ADX_LIMIT})"
             
@@ -689,8 +702,12 @@ def scan(st):
         if dr is None:
             continue
             
-        over = abs(cl - band_ref) / sdv if sdv > 0 else 0.0
-        v4 = over >= 0.5 
+        # ─── FIX POINT 4: Safe Division Check ───
+        over = 0.0
+        v4 = False
+        if sdv > 0.0001: # منع القسمة على أرقام صغيرة جداً أو صفر
+            over = abs(cl - band_ref) / sdv
+            v4 = over >= 0.5 
         
         zone, urgency, emoji, urg_text = calc_urgency(cl, band_ref, sdv, dr)
         if urgency == "skip":
@@ -802,7 +819,7 @@ def main():
     d = day_obj(st)
     if st.get("boot_date") != d["date"]:
         st["boot_date"] = d["date"]
-        tg_send(f"🚀 بوت H2 بدأ (v7.0 Master Hybrid - NO SPAM)\n"
+        tg_send(f"🚀 بوت H2 بدأ (v7.0 Master Hybrid - ULTIMATE STABLE)\n"
                 f"• أزواج: {len(SYMBOLS)} (تم التوسع)\n"
                 f"• المنطق: BB(15,2.3) + EMA200 Filter\n"
                 f"• الحماية: Storm Filter (ADX/ATR) نشط\n"
