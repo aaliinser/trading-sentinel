@@ -1,10 +1,10 @@
 {
-  "last_daily": "2026-09-25",
+  "last_daily": "2026-09-26",
   "last_month": "2026-09",
   "last_week": null,
-  "boot_date": "2026-09-25",
+  "boot_date": "2026-09-26",
   "day": {
-    "date": "2026-09-25",
+    "date": "2026-09-26",
     "alerts": 0,
     "trades": 0,
     "wins": 0,
@@ -18,5 +18,5 @@
   "last_sig": {},
   "tg_offset": 0,
   "stop_until": 0,
-  "last_run": 1758772200.0
+  "last_run": 1758852000.0
 }
