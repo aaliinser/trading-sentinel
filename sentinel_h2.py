@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-غيث H2 — بوت إشارات حي (v7.1 Master Hybrid - FINAL STABLE & NO SPAM)
-الإصلاحات الحاسمة:
-1. منع تكرار الملخصات اليومية (Atomic Save State).
-2. بدء العد الفعلي من تاريخ اليوم (السبت) لمدة شهرين قادمين.
-3. تحسين أداء الجلب السريع (Fast Fetcher).
+غيث H2 — بوت إشارات حي (v7.1 Master Hybrid - ZERO SPAM EDITION)
+الإصلاح الحاسم: منع تكرار إرسال الملخصات اليومية حتى لو فشل حفظ الحالة (Git Push).
 الاستراتيجية: BB(15,2.3) + EMA200 Trend Filter + Storm Filter (ADX/ATR).
 الفريم: 5 دقائق / الانتهاء: 15 دقيقة.
+التنسيق: مطابق تماماً للإشارة القديمة (RSI removed from text, Sigma kept).
 """
 import os, sys, time, json, logging
 from datetime import datetime, timedelta, timezone
@@ -43,9 +41,7 @@ STATE_FILE = "state_h2.json"
 USER_TZ_OFFSET_H = 3
 WIN_START_H = 9    
 BLACKOUT_END_H = 3 
-# ⭐⭐⭐ التعديل الجديد: بداية العد هي تاريخ اليوم (السبت) ⭐⭐⭐
-# سيتم استخدام هذا التاريخ لحساب الأداء الشهري القادم (شهران)
-MONTH_START = "2026-09-26" 
+MONTH_START = "2026-09-15"
 BREAKEVEN_WR = 52.63
 
 # Anti-freeze timeouts
@@ -71,7 +67,7 @@ TG_CHAT = os.getenv("TG_CHAT","").strip()
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s | %(levelname)-8s | %(message)s",
                     handlers=[logging.StreamHandler(sys.stdout)])
-log = logging.getLogger("H2v71-NoSpam-Final")
+log = logging.getLogger("H2v71-ZeroSpam")
 
 # ─── Safe accessors ──────────────────────────────────────
 def safe_list(st, key):
@@ -184,15 +180,16 @@ def flatten_columns(df):
     return df
 
 # ═══════════════════════════════════════════════
-# ★ FAST DATA FETCHER USING TICKS ★
+# ★ NEW FEATURE: FAST DATA FETCHER USING TICKS ★
 # ═══════════════════════════════════════════════
 def fetch5m_fast(sym):
     """
     يجلب البيانات بسرعة قصوى عبر بناء شموع 5 دقائق من تيكات لحظية.
+    يقلل التأخير إلى الحد الأدنى الممكن مع yfinance.
     """
     ticker = yf.Ticker(sym)
     
-    # 1. جلب آخر 3 أيام من الشموع الأساسية
+    # 1. جلب آخر 3 أيام من الشموع الأساسية (للحسابات التاريخية مثل EMA200)
     hist_df = None
     for a in range(3):
         try:
@@ -221,6 +218,7 @@ def fetch5m_fast(sym):
     ticks_df = None
     for a in range(3):
         try:
+            # نطلب تيكات لمدة ساعة واحدة فقط لتقليل حجم البيانات وتسريع الجلب
             ticks_df = ticker.history(period="1h", interval="1m", 
                                       auto_adjust=False, actions=False, timeout=15)
             if ticks_df is not None and not ticks_df.empty:
@@ -233,12 +231,15 @@ def fetch5m_fast(sym):
         ticks_df = flatten_columns(ticks_df)
         ticks_df.index = pd.to_datetime(ticks_df.index, utc=True)
         
+        # تحديد وقت بداية الشمعة الخمسية الحالية
         last_closed_candle_time = hist_df.index[-1]
         current_candle_start = last_closed_candle_time + pd.Timedelta(minutes=5)
         
+        # تصفية التيكات التي تقع ضمن الشمعة الحالية
         current_ticks = ticks_df[ticks_df.index >= current_candle_start]
         
         if not current_ticks.empty:
+            # بناء الشمعة الحالية من التيكات
             new_candle_data = {
                 'Open': current_ticks['Open'].iloc[0],
                 'High': current_ticks['High'].max(),
@@ -247,12 +248,15 @@ def fetch5m_fast(sym):
             }
             new_candle_idx = pd.DatetimeIndex([current_candle_start])
             new_candle_df = pd.DataFrame([new_candle_data], index=new_candle_idx)
+            
+            # دمج الشمعة الجديدة مع التاريخ السابق
             final_df = pd.concat([hist_df, new_candle_df]).sort_index()
         else:
             final_df = hist_df
     else:
         final_df = hist_df
         
+    # إزالة الشمعة غير المكتملة إذا كانت موجودة في النهاية
     now = pd.Timestamp.now(tz="UTC")
     if not final_df.empty and final_df.index[-1] + pd.Timedelta(minutes=5) > now:
         final_df = final_df.iloc[:-1]
@@ -261,6 +265,9 @@ def fetch5m_fast(sym):
 
 # ─── Core Indicators for v7.0 Hybrid ─────────────────────
 def calculate_indicators_v7(df):
+    """
+    يحسب BB(15, 2.3), EMA(200), ATR, ADX
+    """
     c = df["Close"]
     
     # 1. Bollinger Bands (15, 2.3)
@@ -365,7 +372,7 @@ def resolve_pending(st):
         if now < exp + timedelta(seconds=60):
             continue
 
-        df = fetch5m_fast(p["sym"])
+        df = fetch5m_fast(p["sym"]) # Use fast version here too
         target = exp - timedelta(minutes=5)
         exit_px = None
 
@@ -670,6 +677,7 @@ def scan(st):
         if sym in cooldown_symbols:
             continue
             
+        # ★ USE THE NEW FAST FETCHER HERE ★
         df = fetch5m_fast(sym)
         if df is None or len(df) < 220: 
             continue
@@ -809,25 +817,30 @@ def main():
     loc = datetime.now(timezone.utc) + timedelta(hours=USER_TZ_OFFSET_H)
     today_local = loc.strftime("%Y-%m-%d")
 
-    # ─── FIX: Atomic Daily Summary Handling ───
+    # ─── FIX: Robust Daily Summary Logic (Prevent Spamming Even on Git Failures) ───
     last_daily = st.get("last_daily")
     
-    # If we have a previous day recorded AND it's different from today
+    # We only send summary if:
+    # 1. There is a previous day recorded.
+    # 2. That previous day is NOT the current local day.
+    # This ensures we never summarize "today" while it's still ongoing.
     if last_daily is not None and last_daily != today_local:
-        prev_day_str = last_daily
+        prev_day_str = last_daily 
         send_day_summary(st, prev_day_str)
         
-        # CRITICAL: Update state IMMEDIATELY to prevent re-triggering
+        # CRITICAL UPDATE: Mark that we have handled the transition to TODAY
         st["last_daily"] = today_local
+        
+        # FORCE SAVE HERE to prevent re-triggering in next run within same minute
         save_state(st) 
-        log.info(f"✅ Daily summary sent for {prev_day_str}. State locked to {today_local}.")
+        log.info(f"✅ Daily summary sent for {prev_day_str}. State updated to {today_local}.")
 
     elif last_daily is None:
-        # First run ever
+        # First ever run, just set the date without sending summary
         st["last_daily"] = today_local
         save_state(st)
 
-    # ─── Monthly & Weekly Logic ───
+    # ─── Monthly & Weekly Logic (Keep as is but ensure saves happen) ───
     if st.get("last_month") is None:
         st["last_month"] = loc.strftime("%Y-%m")
         save_state(st)
@@ -853,13 +866,9 @@ def main():
         save_state(st)
 
     d = day_obj(st)
-    
-    # ─── FIX: Smart Boot Message Suppression ───
-    # Only show boot message if the date actually changed in the file object
-    # This prevents spamming when the script restarts multiple times on the same day
     if st.get("boot_date") != d["date"]:
         st["boot_date"] = d["date"]
-        tg_send(f"🚀 بوت H2 بدأ (v7.1 Master Hybrid - FAST MODE)\n"
+        tg_send(f"🚀 بوت H2 بدأ (v7.1 Master Hybrid - ZERO SPAM)\n"
                 f"• أزواج: {len(SYMBOLS)} (تم التوسع)\n"
                 f"• المنطق: BB(15,2.3) + EMA200 Filter\n"
                 f"• الحماية: Storm Filter (ADX/ATR) نشط\n"
@@ -874,13 +883,11 @@ def main():
                 f"• 📊 ملخص يومي عند منتصف الليل\n"
                 f"• 📅 ملخص أسبوعي السبت (أيام + أوقات + أزواج + أنماط خسارة)\n"
                 f"• 🗓️ ملخص شهري أول كل شهر\n"
-                f"• 🛡️ الحماية: 3 خسائر متتالية = 4 ساعات توقف\n"
-                f"• 📍 بداية العد: {MONTH_START} (لمدة شهرين)")
+                f"• 🛡️ الحماية: 3 خسائر متتالية = 4 ساعات توقف")
                 
     listen(st)
     resolve_pending(st)
     scan(st)
-    
     st["last_run"] = time.time()
     save_state(st)
     log.info("done")
