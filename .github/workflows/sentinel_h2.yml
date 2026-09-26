@@ -41,14 +41,14 @@ jobs:
           SYMBOLS_H2: "USDJPY=X,EURAUD=X,USDCHF=X,EURCAD=X,CADJPY=X,GBPUSD=X,USDCAD=X,AUDNZD=X,EURGBP=X"
           
         # ⭐⭐⭐ التغيير الجوهري هنا ⭐⭐⭐
-        # بدلا من sentinel_h2.py القديم، نشغل النسخة السريعة الجديدة
-        run: python sentinel_h2_fast.py
+        # نشغل الملف الموجود فعلا في المستودع: sentinel_h2.py
+        run: python sentinel_h2.py
 
       - name: Save State File to Repository (Robust Mode)
         if: always() # حتى لو فشل السكربت، نحاول حفظ الحالة لتجنب فقدان البيانات
         run: |
           git config user.name github-actions
-          git config user.email github-actions@github.com
+          git user.email github-actions@github.com
           
           # إضافة التغييرات
           git add state_h2.json || true
