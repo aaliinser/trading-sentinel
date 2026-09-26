@@ -32,12 +32,10 @@ jobs:
           TG_CHAT: ${{ secrets.TG_CHAT }}
           
           # ─── Deriv API Configuration (Optional for future use) ───
-          # حتى لو لم تستخدمه الآن، وجوده لا يضر إذا كان فارغا أو خاطئا
           DERIV_API_TOKEN: ${{ secrets.DERIV_API_TOKEN }}
           DERIV_APP_ID: "1089" 
           
           # ─── Strategy Symbols Override ───
-          # نستخدم الرموز الافتراضية داخل الكود، لكن يمكننا تمريرها هنا لو أردنا تغييرها دون تعديل الكود
           SYMBOLS_H2: "USDJPY=X,EURAUD=X,USDCHF=X,EURCAD=X,CADJPY=X,GBPUSD=X,USDCAD=X,AUDNZD=X,EURGBP=X"
           
         # ⭐⭐⭐ التغيير الجوهري هنا ⭐⭐⭐
@@ -48,7 +46,7 @@ jobs:
         if: always() # حتى لو فشل السكربت، نحاول حفظ الحالة لتجنب فقدان البيانات
         run: |
           git config user.name github-actions
-          git user.email github-actions@github.com
+          git config user.email github-actions@github.com
           
           # إضافة التغييرات
           git add state_h2.json || true
