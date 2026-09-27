@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-غيث H2 — بوت إشارات حي (v7.1 Master Hybrid - ZERO SPAM EDITION)
-الإصلاح الحاسم: منع تكرار إرسال الملخصات اليومية حتى لو فشل حفظ الحالة (Git Push).
+غيث H2 — بوت إشارات حي (v7.1 Master Hybrid - FINAL LOCK)
+الإصلاح الحاسم: قفل مزدوج ضد تكرار رسالة الترحيب والملخص اليومي.
 الاستراتيجية: BB(15,2.3) + EMA200 Trend Filter + Storm Filter (ADX/ATR).
 الفريم: 5 دقائق / الانتهاء: 15 دقيقة.
 التنسيق: مطابق تماماً للإشارة القديمة (RSI removed from text, Sigma kept).
@@ -67,7 +67,7 @@ TG_CHAT = os.getenv("TG_CHAT","").strip()
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s | %(levelname)-8s | %(message)s",
                     handlers=[logging.StreamHandler(sys.stdout)])
-log = logging.getLogger("H2v71-ZeroSpam")
+log = logging.getLogger("H2v71-LockDown")
 
 # ─── Safe accessors ──────────────────────────────────────
 def safe_list(st, key):
@@ -817,30 +817,52 @@ def main():
     loc = datetime.now(timezone.utc) + timedelta(hours=USER_TZ_OFFSET_H)
     today_local = loc.strftime("%Y-%m-%d")
 
-    # ─── FIX: Robust Daily Summary Logic (Prevent Spamming Even on Git Failures) ───
-    last_daily = st.get("last_daily")
+    # --- LOGIC FIX: Handle Day Transition & Boot Message Atomically ---
     
-    # We only send summary if:
-    # 1. There is a previous day recorded.
-    # 2. That previous day is NOT the current local day.
-    # This ensures we never summarize "today" while it's still ongoing.
+    need_boot_msg = False
+    need_daily_summary = False
+    
+    last_daily = st.get("last_daily")
+    boot_date = st.get("boot_date")
+    
+    # 1. Check Daily Summary
     if last_daily is not None and last_daily != today_local:
-        prev_day_str = last_daily 
+        need_daily_summary = True
+        
+    # 2. Check Boot Message (New Day OR First Run)
+    if boot_date is None or boot_date != today_local:
+        need_boot_msg = True
+
+    # Execute Actions
+    if need_daily_summary:
+        prev_day_str = last_daily
         send_day_summary(st, prev_day_str)
-        
-        # CRITICAL UPDATE: Mark that we have handled the transition to TODAY
         st["last_daily"] = today_local
-        
-        # FORCE SAVE HERE to prevent re-triggering in next run within same minute
-        save_state(st) 
-        log.info(f"✅ Daily summary sent for {prev_day_str}. State updated to {today_local}.")
+        save_state(st) # Save immediately to lock this action
 
-    elif last_daily is None:
-        # First ever run, just set the date without sending summary
-        st["last_daily"] = today_local
-        save_state(st)
+    if need_boot_msg:
+        st["boot_date"] = today_local
+        # If we just did daily summary, we might want to combine messages or keep separate.
+        # Keeping separate is safer for logic flow.
+        tg_send(f"🚀 بوت H2 بدأ (v7.1 Master Hybrid - FINAL LOCK)\n"
+                f"• أزواج: {len(SYMBOLS)} (تم التوسع)\n"
+                f"• المنطق: BB(15,2.3) + EMA200 Filter\n"
+                f"• الحماية: Storm Filter (ADX/ATR) نشط\n"
+                f"• الفريم: 5 دقائق / الانتهاء: 15 دقيقة\n"
+                f"• ⚡ الوضع السريع: يعتمد على بناء شموع ديناميكية من التيكات\n"
+                f"• 🔑 لا يحتاج لمفتاح Deriv\n"
+                f"• ✨ بدون سقف تنبيهات — لن تضيع إشارة\n"
+                f"• ❄️ تبريد لكل زوج: إشارة واحدة حتى حسم النتيجة\n"
+                f"• 🌙 حظر ليلي: لا إشارات من 12 إلى 9 صباحا\n"
+                f"• ⏳ حماية ضد التجميد: timeout {PENDING_HARD_TIMEOUT_MIN}د\n"
+                f"• 🤖 تسجيل تلقائي + رد تلقائي بالنتيجة\n"
+                f"• 📊 ملخص يومي عند منتصف الليل\n"
+                f"• 📅 ملخص أسبوعي السبت (أيام + أوقات + أزواج + أنماط خسارة)\n"
+                f"• 🗓️ ملخص شهري أول كل شهر\n"
+                f"• 🛡️ الحماية: 3 خسائر متتالية = 4 ساعات توقف")
+        save_state(st) # Save immediately to lock boot status
 
-    # ─── Monthly & Weekly Logic (Keep as is but ensure saves happen) ───
+    # Monthly & Weekly Logic
     if st.get("last_month") is None:
         st["last_month"] = loc.strftime("%Y-%m")
         save_state(st)
@@ -866,24 +888,6 @@ def main():
         save_state(st)
 
     d = day_obj(st)
-    if st.get("boot_date") != d["date"]:
-        st["boot_date"] = d["date"]
-        tg_send(f"🚀 بوت H2 بدأ (v7.1 Master Hybrid - ZERO SPAM)\n"
-                f"• أزواج: {len(SYMBOLS)} (تم التوسع)\n"
-                f"• المنطق: BB(15,2.3) + EMA200 Filter\n"
-                f"• الحماية: Storm Filter (ADX/ATR) نشط\n"
-                f"• الفريم: 5 دقائق / الانتهاء: 15 دقيقة\n"
-                f"• ⚡ الوضع السريع: يعتمد على بناء شموع ديناميكية من التيكات\n"
-                f"• 🔑 لا يحتاج لمفتاح Deriv\n"
-                f"• ✨ بدون سقف تنبيهات — لن تضيع إشارة\n"
-                f"• ❄️ تبريد لكل زوج: إشارة واحدة حتى حسم النتيجة\n"
-                f"• 🌙 حظر ليلي: لا إشارات من 12 إلى 9 صباحا\n"
-                f"• ⏳ حماية ضد التجميد: timeout {PENDING_HARD_TIMEOUT_MIN}د\n"
-                f"• 🤖 تسجيل تلقائي + رد تلقائي بالنتيجة\n"
-                f"• 📊 ملخص يومي عند منتصف الليل\n"
-                f"• 📅 ملخص أسبوعي السبت (أيام + أوقات + أزواج + أنماط خسارة)\n"
-                f"• 🗓️ ملخص شهري أول كل شهر\n"
-                f"• 🛡️ الحماية: 3 خسائر متتالية = 4 ساعات توقف")
                 
     listen(st)
     resolve_pending(st)
