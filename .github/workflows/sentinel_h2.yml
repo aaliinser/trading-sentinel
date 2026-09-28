@@ -1,4 +1,4 @@
-name: Sentinel H2 Trading Bot (Smart Freeze Edition)
+name: Sentinel H2 Trading Bot (Atomic Lock Edition)
 
 on:
   schedule:
@@ -35,36 +35,42 @@ jobs:
           SYMBOLS_H2: "USDJPY=X,EURAUD=X,USDCHF=X,EURCAD=X,CADJPY=X,GBPUSD=X,USDCAD=X,AUDNZD=X,EURGBP=X"
         run: python sentinel_h2.py
 
-      - name: Save State File to Repository (ROBUST MODE V3)
+      - name: Save State AND Locks to Repository
         if: always()
         run: |
-          echo "--- Starting Robust Save Process ---"
+          echo "--- Starting Robust Save Process (State + Locks) ---"
           
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           
+          # 1. Add state file
           if [ -f state_h2.json ]; then
             git add state_h2.json || true
-          else
-            echo "Warning: state_h2.json not found! Skipping save."
-            exit 0
           fi
           
+          # 2. Add ALL files inside locks directory (New Feature!)
+          if [ -d locks ]; then
+            git add locks/* || true
+          fi
+          
+          # 3. Check for changes
           if ! git diff --cached --quiet; then
             echo "Changes detected. Preparing commit..."
             
-            COMMIT_MSG="Auto-update bot state $(date +'%Y-%m-%d %H:%M:%S')"
+            COMMIT_MSG="Auto-update bot state & locks $(date +'%Y-%m-%d %H:%M:%S')"
             git commit -m "$COMMIT_MSG" || {
               echo "Commit failed or nothing to commit."
               exit 0
             }
             
+            # 4. Pull Rebase
             echo "Attempting to pull latest changes with rebase..."
             git pull origin main --rebase || {
               echo "Pull/Rebase failed. Trying merge strategy..."
               git pull origin main --no-edit || true
             }
             
+            # 5. Push with Retries
             MAX_RETRIES=5
             RETRY_COUNT=0
             
@@ -72,7 +78,7 @@ jobs:
               echo "Attempt $((RETRY_COUNT+1))/$MAX_RETRIES to push..."
               
               if git push origin main; then
-                echo "✅ SUCCESS: State file pushed successfully!"
+                echo "✅ SUCCESS: State and Locks pushed successfully!"
                 break
               else
                 echo "❌ PUSH FAILED. Retrying in 10 seconds..."
