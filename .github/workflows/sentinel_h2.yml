@@ -1,20 +1,24 @@
-name: Sentinel H2 Trading Bot (Atomic Lock Edition)
+name: Sentinel H2 Trading Bot (API Lock Edition)
 
 on:
   schedule:
+    # تشغيل كل 5 دقائق (توافق الفريم الزمني للتحليل)
     - cron: '*/5 * * * *'
-  workflow_dispatch:
+  workflow_dispatch: # للسماح بالتشغيل اليدوي للاختبار الفوري
 
 jobs:
   scan-and-alert:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     
+    permissions:
+      contents: write # صلاحية الكتابة للمستودع (ضرورية لإنشاء ملفات القفل عبر API)
+      
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 0 # جلب كامل التاريخ لضمان عدم وجود تعارضات في Git
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
@@ -28,61 +32,63 @@ jobs:
 
       - name: Run H2 Sentinel Script
         env:
+          # ─── Telegram Configuration ───
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
           TG_CHAT: ${{ secrets.TG_CHAT }}
+          
+          # ─── Deriv API Configuration (Optional for future use) ───
           DERIV_API_TOKEN: ${{ secrets.DERIV_API_TOKEN }}
           DERIV_APP_ID: "1089" 
+          
+          # ─── Strategy Symbols Override ───
           SYMBOLS_H2: "USDJPY=X,EURAUD=X,USDCHF=X,EURCAD=X,CADJPY=X,GBPUSD=X,USDCAD=X,AUDNZD=X,EURGBP=X"
+          
+          # ★ NEW REQUIRED VARIABLE FOR API LOCK ★
+          # هذا التوكن يسمح للكود بالاتصال بـ GitHub API مباشرة
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          
         run: python sentinel_h2.py
 
-      - name: Save State AND Locks to Repository
-        if: always()
+      - name: Save State File to Repository (Backup Mechanism)
+        if: always() # حتى لو فشل السكربت، نحاول حفظ الحالة لتجنب فقدان البيانات
         run: |
-          echo "--- Starting Robust Save Process (State + Locks) ---"
+          echo "--- Starting Backup Save Process ---"
           
+          # إعداد بيانات المستخدم
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           
-          # 1. Add state file
+          # إضافة التغييرات فقط إذا كان الملف موجوداَ ومتغيراَ
           if [ -f state_h2.json ]; then
             git add state_h2.json || true
+          else
+            echo "Warning: state_h2.json not found! Skipping backup save."
+            exit 0
           fi
           
-          # 2. Add ALL files inside locks directory (New Feature!)
-          if [ -d locks ]; then
-            git add locks/* || true
-          fi
-          
-          # 3. Check for changes
+          # التحقق من وجود تغييرات فعلية للالتزام بها
           if ! git diff --cached --quiet; then
-            echo "Changes detected. Preparing commit..."
+            echo "Changes detected in state file. Preparing commit..."
             
-            COMMIT_MSG="Auto-update bot state & locks $(date +'%Y-%m-%d %H:%M:%S')"
+            COMMIT_MSG="Auto-update bot state $(date +'%Y-%m-%d %H:%M:%S')"
             git commit -m "$COMMIT_MSG" || {
               echo "Commit failed or nothing to commit."
               exit 0
             }
             
-            # 4. Pull Rebase
-            echo "Attempting to pull latest changes with rebase..."
-            git pull origin main --rebase || {
-              echo "Pull/Rebase failed. Trying merge strategy..."
-              git pull origin main --no-edit || true
-            }
-            
-            # 5. Push with Retries
-            MAX_RETRIES=5
+            # محاولة الدفع (Push) - هذه الآن خطوة احتياطية لأن الـ API تعامل مع الأقفال
+            MAX_RETRIES=3
             RETRY_COUNT=0
             
             while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
               echo "Attempt $((RETRY_COUNT+1))/$MAX_RETRIES to push..."
               
               if git push origin main; then
-                echo "✅ SUCCESS: State and Locks pushed successfully!"
+                echo "✅ SUCCESS: State file pushed successfully!"
                 break
               else
-                echo "❌ PUSH FAILED. Retrying in 10 seconds..."
-                sleep 10
+                echo "❌ PUSH FAILED. Retrying in 5 seconds..."
+                sleep 5
                 RETRY_COUNT=$((RETRY_COUNT+1))
                 
                 if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
@@ -95,4 +101,4 @@ jobs:
             echo "No changes to commit. Skipping push."
           fi
           
-          echo "--- End of Robust Save Process ---"
+          echo "--- End of Backup Save Process ---"
