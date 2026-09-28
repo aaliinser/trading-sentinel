@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-غيث H2 — بوت إشارات حي (v7.3 Atomic Lock Edition)
-الحل الجذري لمشكلة التكرار: استخدام ملفات قفل منفصلة في المستودع.
+غيث H2 — بوت إشارات حي (v7.4 Master Hybrid - GITHUB API LOCK EDITION)
+الإصلاح الجذري: التحقق من ملفات القفل عبر GitHub REST API مباشرةً من المستودع الأصلي.
+الاستراتيجية: BB(15,2.3) + EMA200 Trend Filter + Storm Filter (ADX/ATR).
+الفريم: 5 دقائق / الانتهاء: 15 دقيقة.
 """
 import os, sys, time, json, logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import numpy as np, pandas as pd
 import requests
-import subprocess # لتشغيل أوامر Git مباشرة من بايثون إذا لزم الأمر، لكن سنستخدم المنطق الداخلي
 
 try:
     import yfinance as yf
@@ -34,7 +35,7 @@ INTERVAL = "5m"
 STOP_AFTER_LOSSES = 3
 STOP_HOURS = 4
 STATE_FILE = "state_h2.json"
-LOCK_DIR = "locks" # مجلد الأقفال الجديد
+LOCK_DIR = "locks" # مجلد الأقفال في المستودع
 
 USER_TZ_OFFSET_H = 3
 WIN_START_H = 9    
@@ -60,10 +61,15 @@ AR_MONTHS = ["يناير","فبراير","مارس","أبريل","مايو","ي�
 TG_TOKEN = os.getenv("TG_TOKEN","").strip()
 TG_CHAT = os.getenv("TG_CHAT","").strip()
 
+# ★ NEW CONFIGURATION FOR GITHUB API ★
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN","").strip()
+GITHUB_REPO = os.getenv("GITHUB_REPOSITORY","").strip() # Format: owner/repo
+GITHUB_BRANCH = os.getenv("GITHUB_REF_NAME","main").strip()
+
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s | %(levelname)-8s | %(message)s",
                     handlers=[logging.StreamHandler(sys.stdout)])
-log = logging.getLogger("H2v73-AtomicLock")
+log = logging.getLogger("H2v74-GitHubAPILock")
 
 # ─── Safe accessors ──────────────────────────────────────
 def safe_list(st, key):
@@ -157,27 +163,81 @@ def tg_send(text, reply_to=None):
             log.warning(f"tg attempt {a}: {e}")
     return None
 
-# ★ NEW FEATURE: ATOMIC LOCK CHECKER ★
-def check_and_create_lock(lock_name):
+# ═══════════════════════════════════════════════
+# ★ NEW FEATURE: GITHUB API BASED LOCK CHECKER ★
+# ═══════════════════════════════════════════════
+def check_and_create_lock_via_api(lock_name):
     """
-    يتحقق من وجود ملف قفل باسم معين في مجلد locks/.
-    إذا كان موجوداً، يرجع False (تم الإرسال سابقاً).
-    إذا لم يكن موجوداً، ينشئه ويرجع True (يجب الإرسال الآن).
-    ملاحظة: الإنشاء هنا محلي فقط، والرفع سيتم في نهاية السكربت عبر YAML.
+    يتحقق من وجود ملف قفل في المستودع الأصلي عبر GitHub API.
+    إذا لم يوجد، ينشئه محلياَ ويرفعه فوراَ عبر API.
+    يرجع True إذا تم إنشاء قفل جديد (يجب إرسال الرسالة).
+    يرجع False إذا كان القفل موجوداَ مسبقاَ (يمنع الإرسال).
     """
-    lock_path = Path(LOCK_DIR) / lock_name
+    if not GITHUB_TOKEN or not GITHUB_REPO:
+        log.warning("GitHub Token or Repo not configured. Falling back to local check.")
+        # Fallback to original logic if API is not available
+        lock_path = Path(LOCK_DIR) / lock_name
+        if lock_path.exists():
+            return False
+        else:
+            lock_path.parent.mkdir(parents=True, exist_ok=True)
+            lock_path.touch()
+            return True
     
-    # التأكد من وجود المجلد
-    if not Path(LOCK_DIR).exists():
-        Path(LOCK_DIR).mkdir(parents=True, exist_ok=True)
+    api_url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{LOCK_DIR}/{lock_name}"
+    headers = {
+        "Authorization": f"token {GITHUB_TOKEN}",
+        "Accept": "application/vnd.github.v3+json"
+    }
+    
+    try:
+        # 1. Check if file exists in the repository
+        response = requests.get(api_url, headers=headers, timeout=10)
         
-    if lock_path.exists():
-        log.info(f"🔒 Lock found: {lock_name}. Skipping message.")
-        return False
-    else:
-        # إنشاء الملف الفارغ كعلامة
-        lock_path.touch()
-        log.info(f"🔓 Creating new lock: {lock_name}. Proceeding to send.")
+        if response.status_code == 200:
+            # File exists -> Lock already acquired -> Skip message
+            log.info(f"🔒 Lock found in REPO via API: {lock_name}. Skipping message.")
+            return False
+            
+        elif response.status_code == 404:
+            # File does not exist -> Create it locally and push via API
+            log.info(f"🔓 Creating new lock via API: {lock_name}. Proceeding to send.")
+            
+            # Prepare content (empty file encoded in base64)
+            import base64
+            content = base64.b64encode(b"").decode('ascii')
+            
+            create_payload = {
+                "message": f"Create lock file: {lock_name}",
+                "content": content,
+                "branch": GITHUB_BRANCH
+            }
+            
+            # Push the new file to the repository
+            create_response = requests.put(api_url, headers=headers, json=create_payload, timeout=15)
+            
+            if create_response.status_code in [200, 201]:
+                log.info(f"✅ Successfully created and pushed lock file: {lock_name}")
+                # Also create locally for consistency within this run
+                lock_path = Path(LOCK_DIR) / lock_name
+                lock_path.parent.mkdir(parents=True, exist_ok=True)
+                lock_path.touch()
+                return True
+            else:
+                log.error(f"❌ Failed to push lock file via API. Status: {create_response.status_code}, Response: {create_response.text}")
+                # If API push fails, fall back to allowing the message but warn user
+                # This prevents complete blocking due to transient API issues
+                return True
+                
+        else:
+            # Unexpected API response
+            log.error(f"⚠️ Unexpected API response checking lock: {response.status_code}, {response.text}")
+            # Be conservative: allow sending if we can't verify the lock state
+            return True
+            
+    except Exception as e:
+        log.error(f"💥 Exception during API lock check: {e}")
+        # On exception, allow sending to avoid complete system halt
         return True
 
 def flatten_columns(df):
@@ -422,7 +482,7 @@ def send_report(st):
     n = len(sim)
     w = sum(1 for x in sim if x["win"])
     wr = round(100*w/n, 1) if n else 0.0
-    txt = (f"📊 *تقرير الأداء (v7.3)*\n\n"
+    txt = (f"📊 *تقرير الأداء (v7.4)*\n\n"
            f"*إشارات:* *{n}* | فوز *{wr}%*\n\n"
            f"📌 التعادل: {BREAKEVEN_WR}%")
     tg_send(txt)
@@ -469,7 +529,7 @@ def send_week_summary(st, days):
     mwr = round(100*mw/mn, 1) if mn else 0.0
     win_payout = 6.0 * 0.90
     stake = 6.0
-    txt = (f"📅 *ملخص أسبوع التداول (v7.3)*\n"
+    txt = (f"📅 *ملخص أسبوع التداول (v7.4)*\n"
            f"({ar_day(days[0])} {days[0]} → "
            f"{ar_day(days[-1])} {days[-1]})\n\n"
            f"📆 *تفصيل الأيام:*\n")
@@ -713,7 +773,7 @@ def scan(st):
         arrow = "🔴 PUT (هبوط)" if dr == "PUT" else "🟢 CALL (صعود)"
         sym_copy = fmt_sym(sym)
         d["alerts"] += 1
-        txt = (f"🎯 *إشارة H2 v7.3 Fast — BB + Trend*\n\n"
+        txt = (f"🎯 *إشارة H2 v7.4 Fast — BB + Trend*\n\n"
                f"📊 *الزوج:* `{sym_copy}`\n"
                f"📈 *الاتجاه:* {arrow}\n"
                f"💰 *السعر الحي الآن:* {fmt_px(cl)}\n\n"
@@ -753,23 +813,23 @@ def main():
     loc = datetime.now(timezone.utc) + timedelta(hours=USER_TZ_OFFSET_H)
     today_local = loc.strftime("%Y-%m-%d")
     
-    # --- LOGIC FIX: ATOMIC LOCK PREVENTION ---
+    # --- LOGIC FIX: ATOMIC LOCK VIA GITHUB API ---
     need_boot_msg = False
     need_daily_summary = False
     
     last_daily = st.get("last_daily")
     boot_date = st.get("boot_date")
     
-    # 1. Check Daily Summary Lock
+    # 1. Check Daily Summary Lock via GitHub API
     if last_daily is not None and last_daily != today_local:
         lock_name = f"daily_summary_{today_local}.lock"
-        if check_and_create_lock(lock_name):
+        if check_and_create_lock_via_api(lock_name):
             need_daily_summary = True
             
-    # 2. Check Boot Message Lock
+    # 2. Check Boot Message Lock via GitHub API
     if boot_date is None or boot_date != today_local:
         lock_name = f"boot_msg_{today_local}.lock"
-        if check_and_create_lock(lock_name):
+        if check_and_create_lock_via_api(lock_name):
             need_boot_msg = True
 
     # Execute Actions
@@ -781,7 +841,7 @@ def main():
 
     if need_boot_msg:
         st["boot_date"] = today_local
-        tg_send(f"🚀 بوت H2 بدأ (v7.3 Master Hybrid - ATOMIC LOCK)\n"
+        tg_send(f"🚀 بوت H2 بدأ (v7.4 Master Hybrid - GITHUB API LOCK)\n"
                 f"• أزواج: {len(SYMBOLS)} (تم التوسع)\n"
                 f"• المنطق: BB(15,2.3) + EMA200 Filter\n"
                 f"• الحماية: Storm Filter (ADX/ATR) نشط\n"
@@ -799,8 +859,7 @@ def main():
                 f"• 🛡️ الحماية: 3 خسائر متتالية = 4 ساعات توقف")
         save_state(st) 
 
-    # Monthly & Weekly Logic (Same lock logic applies implicitly via last_run check above if needed, 
-    # but these are rare so we let them proceed normally if dates mismatch)
+    # Monthly & Weekly Logic
     if st.get("last_month") is None:
         st["last_month"] = loc.strftime("%Y-%m")
         save_state(st)
