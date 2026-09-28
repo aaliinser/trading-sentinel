@@ -1,10 +1,9 @@
-name: Sentinel H2 Trading Bot (Fast Mode - ROBUST V3)
+name: Sentinel H2 Trading Bot (Smart Freeze Edition)
 
 on:
   schedule:
-    # تشغيل كل 5 دقائق (توافق الفريم الزمني للتحليل)
     - cron: '*/5 * * * *'
-  workflow_dispatch: # للسماح بالتشغيل اليدوي للاختبار الفوري
+  workflow_dispatch:
 
 jobs:
   scan-and-alert:
@@ -15,7 +14,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # جلب كامل التاريخ لضمان عدم وجود تعارضات في Git
+          fetch-depth: 0
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
@@ -29,30 +28,21 @@ jobs:
 
       - name: Run H2 Sentinel Script
         env:
-          # ─── Telegram Configuration ───
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
           TG_CHAT: ${{ secrets.TG_CHAT }}
-          
-          # ─── Deriv API Configuration (Optional for future use) ───
           DERIV_API_TOKEN: ${{ secrets.DERIV_API_TOKEN }}
           DERIV_APP_ID: "1089" 
-          
-          # ─── Strategy Symbols Override ───
           SYMBOLS_H2: "USDJPY=X,EURAUD=X,USDCHF=X,EURCAD=X,CADJPY=X,GBPUSD=X,USDCAD=X,AUDNZD=X,EURGBP=X"
-          
-        # نشغل الملف الموجود فعلا في المستودع: sentinel_h2.py
         run: python sentinel_h2.py
 
       - name: Save State File to Repository (ROBUST MODE V3)
-        if: always() # حتى لو فشل السكربت، نحاول حفظ الحالة لتجنب فقدان البيانات
+        if: always()
         run: |
           echo "--- Starting Robust Save Process ---"
           
-          # 1. إعداد بيانات المستخدم بدقة لتجنب أخطاء الهوية
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           
-          # 2. إضافة التغييرات فقط إذا كان الملف موجوداً ومتغيراَ
           if [ -f state_h2.json ]; then
             git add state_h2.json || true
           else
@@ -60,26 +50,21 @@ jobs:
             exit 0
           fi
           
-          # 3. التحقق من وجود تغييرات فعلية للالتزام بها
           if ! git diff --cached --quiet; then
             echo "Changes detected. Preparing commit..."
             
-            # 4. محاولة الالتزام (Commit)
             COMMIT_MSG="Auto-update bot state $(date +'%Y-%m-%d %H:%M:%S')"
             git commit -m "$COMMIT_MSG" || {
               echo "Commit failed or nothing to commit."
               exit 0
             }
             
-            # 5. السحب الإجباري لإعادة الترتيب (Rebase) لتجنب التعارضات
-            # هذا هو المفتاح لحل مشكلة "non-fast-forward errors" التي تسبب التكرار
             echo "Attempting to pull latest changes with rebase..."
             git pull origin main --rebase || {
               echo "Pull/Rebase failed. Trying merge strategy..."
               git pull origin main --no-edit || true
             }
             
-            # 6. الدفع للمستودع مع محاولات إعادة (Retry Logic) حتى 5 مرات
             MAX_RETRIES=5
             RETRY_COUNT=0
             
@@ -94,8 +79,6 @@ jobs:
                 sleep 10
                 RETRY_COUNT=$((RETRY_COUNT+1))
                 
-                # في حالة الفشل المتكرر، نحاول فرض التحديث كحل أخير
-                # تحذير: استخدم بحذر، لكن هنا آمن لأننا نتحكم في الملف الوحيد
                 if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
                   echo "⚠️ All retries exhausted. Attempting force push as last resort..."
                   git push origin main --force-with-lease || echo "Final Force Push also failed."
