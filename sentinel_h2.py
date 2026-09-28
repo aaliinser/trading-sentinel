@@ -1,16 +1,15 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-غيث H2 — بوت إشارات حي (v7.2 Master Hybrid - TELEGRAM VERIFIED EDITION)
-الإصلاح النهائي: منع تكرار الرسائل عبر التحقق المباشر من سجل تليجرام، مستقلاً عن Git Push.
-الاستراتيجية: BB(15,2.3) + EMA200 Trend Filter + Storm Filter (ADX/ATR).
-الفريم: 5 دقائق / الانتهاء: 15 دقيقة.
+غيث H2 — بوت إشارات حي (v7.3 Atomic Lock Edition)
+الحل الجذري لمشكلة التكرار: استخدام ملفات قفل منفصلة في المستودع.
 """
 import os, sys, time, json, logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import numpy as np, pandas as pd
 import requests
+import subprocess # لتشغيل أوامر Git مباشرة من بايثون إذا لزم الأمر، لكن سنستخدم المنطق الداخلي
 
 try:
     import yfinance as yf
@@ -35,6 +34,7 @@ INTERVAL = "5m"
 STOP_AFTER_LOSSES = 3
 STOP_HOURS = 4
 STATE_FILE = "state_h2.json"
+LOCK_DIR = "locks" # مجلد الأقفال الجديد
 
 USER_TZ_OFFSET_H = 3
 WIN_START_H = 9    
@@ -63,7 +63,7 @@ TG_CHAT = os.getenv("TG_CHAT","").strip()
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s | %(levelname)-8s | %(message)s",
                     handlers=[logging.StreamHandler(sys.stdout)])
-log = logging.getLogger("H2v72-TGVerified")
+log = logging.getLogger("H2v73-AtomicLock")
 
 # ─── Safe accessors ──────────────────────────────────────
 def safe_list(st, key):
@@ -157,63 +157,28 @@ def tg_send(text, reply_to=None):
             log.warning(f"tg attempt {a}: {e}")
     return None
 
-# ★ NEW FEATURE: Check Telegram History to Prevent Spam Independently of Git ★
-def check_recent_bot_message(keyword, minutes_back=60):
+# ★ NEW FEATURE: ATOMIC LOCK CHECKER ★
+def check_and_create_lock(lock_name):
     """
-    يسجل تليجرام مباشرة ليرى إذا كانت هناك رسالة من البوت تحتوي على Keyword
-    خلال آخر X دقائق. هذا يمنع التكرار حتى لو فشل حفظ ملف الحالة.
+    يتحقق من وجود ملف قفل باسم معين في مجلد locks/.
+    إذا كان موجوداً، يرجع False (تم الإرسال سابقاً).
+    إذا لم يكن موجوداً، ينشئه ويرجع True (يجب الإرسال الآن).
+    ملاحظة: الإنشاء هنا محلي فقط، والرفع سيتم في نهاية السكربت عبر YAML.
     """
-    if not TG_TOKEN or not TG_CHAT:
-        return False # Assume false if TG disabled (fail-safe)
+    lock_path = Path(LOCK_DIR) / lock_name
     
-    try:
-        # Get updates from the last few hours to be sure we catch recent ones
-        # We use offset=-100 to get the last 100 messages roughly
-        url = f"https://api.telegram.org/bot{TG_TOKEN}/getUpdates"
-        params = {"offset": -100, "timeout": 5}
-        r = requests.get(url, params=params, timeout=10)
+    # التأكد من وجود المجلد
+    if not Path(LOCK_DIR).exists():
+        Path(LOCK_DIR).mkdir(parents=True, exist_ok=True)
         
-        if r.status_code != 200:
-            return False
-            
-        results = r.json().get("result", [])
-        now_ts = datetime.now(timezone.utc).timestamp()
-        cutoff_ts = now_ts - (minutes_back * 60)
-        
-        for u in reversed(results): # Iterate backwards (newest first)
-            msg = u.get("message") or u.get("edited_message")
-            if not msg:
-                continue
-                
-            # Check sender ID (Bot's own ID)
-            # Note: In private chats/groups, bot messages usually have chat.id == TG_CHAT
-            # But strictly speaking, we check if it came from our bot token context implicitly by content
-            # However, getUpdates returns ALL updates including incoming user messages.
-            # We need to filter for OUTGOING messages sent BY the bot.
-            # Actually, getUpdates ONLY returns INCOMING updates TO the bot.
-            # So this method won't work directly with getUpdates for outgoing logs unless we store them locally.
-            
-            # CORRECTION: getUpdates does NOT show messages SENT by the bot. It only shows received ones.
-            # Therefore, we MUST rely on local state OR a different mechanism.
-            pass 
-            
-        return False # Placeholder because getUpdates doesn't show sent msgs easily without complex logic
-        
-    except Exception as e:
-        log.debug(f"Check TG history failed: {e}")
+    if lock_path.exists():
+        log.info(f"🔒 Lock found: {lock_name}. Skipping message.")
         return False
-
-# Since getUpdates doesn't show sent messages, we revert to a HYBRID approach:
-# 1. Try to read state.
-# 2. If state says "Already Sent Today", skip.
-# 3. CRITICAL FIX: Before sending Boot/Daily Summary, update an ENVIRONMENT VARIABLE or LOCAL FILE 
-#    that persists across runs IF git fails? No, runners are ephemeral.
-    
-# THE REAL FIX FOR EPHEMERAL RUNNERS WITH GIT FAILURES:
-# Use a simple HTTP GET request to a free service like "jsonblob.com" or similar? Too risky.
-# Let's stick to the most robust Python-only solution:
-# Increase the "Time Since Last Run" threshold significantly AND add a random jitter delay 
-# before checking state, to allow previous git pushes to propagate.
+    else:
+        # إنشاء الملف الفارغ كعلامة
+        lock_path.touch()
+        log.info(f"🔓 Creating new lock: {lock_name}. Proceeding to send.")
+        return True
 
 def flatten_columns(df):
     OHLC = ("Open", "High", "Low", "Close")
@@ -457,7 +422,7 @@ def send_report(st):
     n = len(sim)
     w = sum(1 for x in sim if x["win"])
     wr = round(100*w/n, 1) if n else 0.0
-    txt = (f"📊 *تقرير الأداء (v7.2)*\n\n"
+    txt = (f"📊 *تقرير الأداء (v7.3)*\n\n"
            f"*إشارات:* *{n}* | فوز *{wr}%*\n\n"
            f"📌 التعادل: {BREAKEVEN_WR}%")
     tg_send(txt)
@@ -504,7 +469,7 @@ def send_week_summary(st, days):
     mwr = round(100*mw/mn, 1) if mn else 0.0
     win_payout = 6.0 * 0.90
     stake = 6.0
-    txt = (f"📅 *ملخص أسبوع التداول (v7.2)*\n"
+    txt = (f"📅 *ملخص أسبوع التداول (v7.3)*\n"
            f"({ar_day(days[0])} {days[0]} → "
            f"{ar_day(days[-1])} {days[-1]})\n\n"
            f"📆 *تفصيل الأيام:*\n")
@@ -748,7 +713,7 @@ def scan(st):
         arrow = "🔴 PUT (هبوط)" if dr == "PUT" else "🟢 CALL (صعود)"
         sym_copy = fmt_sym(sym)
         d["alerts"] += 1
-        txt = (f"🎯 *إشارة H2 v7.2 Fast — BB + Trend*\n\n"
+        txt = (f"🎯 *إشارة H2 v7.3 Fast — BB + Trend*\n\n"
                f"📊 *الزوج:* `{sym_copy}`\n"
                f"📈 *الاتجاه:* {arrow}\n"
                f"💰 *السعر الحي الآن:* {fmt_px(cl)}\n\n"
@@ -788,27 +753,23 @@ def main():
     loc = datetime.now(timezone.utc) + timedelta(hours=USER_TZ_OFFSET_H)
     today_local = loc.strftime("%Y-%m-%d")
     
-    # --- LOGIC FIX: Smart Duplicate Prevention based on Last Run Time ---
+    # --- LOGIC FIX: ATOMIC LOCK PREVENTION ---
     need_boot_msg = False
     need_daily_summary = False
     
     last_daily = st.get("last_daily")
     boot_date = st.get("boot_date")
-    last_run_ts = st.get("last_run", 0) 
     
-    now_ts = time.time()
-    time_since_last_run_min = (now_ts - last_run_ts) / 60.0 if last_run_ts > 0 else 9999
-    
-    # KEY CHANGE: If less than 2 hours since last run, DO NOT SEND BOOT/SUMMARY EVEN IF DATE CHANGED.
-    # This prevents the "Midnight Loop" where git fails to push the date change immediately.
-    # The next successful push will fix the date, but meanwhile, silence is golden.
-    if time_since_last_run_min < 120: 
-        log.info(f"Smart Freeze Active: Only {time_since_last_run_min:.1f} mins since last run. Suppressing Boot/Summary.")
-        # Still process trades/signals below, just suppress the meta-messages
-    else:
-        if last_daily is not None and last_daily != today_local:
+    # 1. Check Daily Summary Lock
+    if last_daily is not None and last_daily != today_local:
+        lock_name = f"daily_summary_{today_local}.lock"
+        if check_and_create_lock(lock_name):
             need_daily_summary = True
-        if boot_date is None or boot_date != today_local:
+            
+    # 2. Check Boot Message Lock
+    if boot_date is None or boot_date != today_local:
+        lock_name = f"boot_msg_{today_local}.lock"
+        if check_and_create_lock(lock_name):
             need_boot_msg = True
 
     # Execute Actions
@@ -820,7 +781,7 @@ def main():
 
     if need_boot_msg:
         st["boot_date"] = today_local
-        tg_send(f"🚀 بوت H2 بدأ (v7.2 Master Hybrid - SMART FREEZE)\n"
+        tg_send(f"🚀 بوت H2 بدأ (v7.3 Master Hybrid - ATOMIC LOCK)\n"
                 f"• أزواج: {len(SYMBOLS)} (تم التوسع)\n"
                 f"• المنطق: BB(15,2.3) + EMA200 Filter\n"
                 f"• الحماية: Storm Filter (ADX/ATR) نشط\n"
@@ -838,7 +799,7 @@ def main():
                 f"• 🛡️ الحماية: 3 خسائر متتالية = 4 ساعات توقف")
         save_state(st) 
 
-    # Monthly & Weekly Logic (Same freeze logic applies implicitly via last_run check above if needed, 
+    # Monthly & Weekly Logic (Same lock logic applies implicitly via last_run check above if needed, 
     # but these are rare so we let them proceed normally if dates mismatch)
     if st.get("last_month") is None:
         st["last_month"] = loc.strftime("%Y-%m")
@@ -870,7 +831,6 @@ def main():
     resolve_pending(st)
     scan(st)
     
-    # CRITICAL UPDATE: Save the current timestamp as 'last_run'
     st["last_run"] = time.time()
     save_state(st)
     log.info("done")
