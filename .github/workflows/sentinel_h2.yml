@@ -1,10 +1,9 @@
-name: Sentinel H2 Trading Bot (Fast Mode)
+name: Sentinel H2 Trading Bot (Fast Mode - Fixed Save)
 
 on:
   schedule:
-    # تشغيل كل 5 دقائق (توافق الفريم الزمني للتحليل)
     - cron: '*/5 * * * *'
-  workflow_dispatch: # للسماح بالتشغيل اليدوي للاختبار الفوري
+  workflow_dispatch:
 
 jobs:
   scan-and-alert:
@@ -14,6 +13,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # جلب كامل التاريخ لضمان عدم وجود تعارضات
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
@@ -25,42 +26,75 @@ jobs:
           pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
-      - name: Run H2 Sentinel Script (FAST VERSION)
+      - name: Run H2 Sentinel Script
         env:
-          # ─── Telegram Configuration ───
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
           TG_CHAT: ${{ secrets.TG_CHAT }}
-          
-          # ─── Deriv API Configuration (Optional for future use) ───
           DERIV_API_TOKEN: ${{ secrets.DERIV_API_TOKEN }}
           DERIV_APP_ID: "1089" 
-          
-          # ─── Strategy Symbols Override ───
           SYMBOLS_H2: "USDJPY=X,EURAUD=X,USDCHF=X,EURCAD=X,CADJPY=X,GBPUSD=X,USDCAD=X,AUDNZD=X,EURGBP=X"
-          
-        # ⭐⭐⭐ التغيير الجوهري هنا ⭐⭐⭐
-        # نشغل الملف الموجود فعلا في المستودع: sentinel_h2.py
         run: python sentinel_h2.py
 
-      - name: Save State File to Repository (Robust Mode)
-        if: always() # حتى لو فشل السكربت، نحاول حفظ الحالة لتجنب فقدان البيانات
+      - name: Save State File to Repository (ROBUST MODE V2)
+        if: always()
         run: |
-          git config user.name github-actions
-          git config user.email github-actions@github.com
+          echo "--- Starting Robust Save Process ---"
           
-          # إضافة التغييرات
-          git add state_h2.json || true
+          # 1. إعداد بيانات المستخدم
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
           
-          # محاولة الالتزام (Commit) فقط إذا كان هناك تغييرات فعلية
-          if ! git diff --cached --quiet; then
-            echo "Changes detected in state file. Committing..."
-            git commit -m "Auto-update bot state $(date +'%Y-%m-%d %H:%M')"
-            
-            # سحب آخر التغييرات من الفرع الرئيسي أولا لتجنب التعارضات (Merge Conflicts)
-            git pull origin main --rebase || true
-            
-            # الدفع للمستودع
-            git push origin main || true
+          # 2. إضافة التغييرات فقط إذا كان الملف موجوداً ومتغيراً
+          if [ -f state_h2.json ]; then
+            git add state_h2.json || true
           else
-            echo "No changes to commit."
+            echo "Warning: state_h2.json not found!"
+            exit 0
           fi
+          
+          # 3. التحقق من وجود تغييرات فعلية للالتزام بها
+          if ! git diff --cached --quiet; then
+            echo "Changes detected. Preparing commit..."
+            
+            # 4. محاولة الالتزام (Commit)
+            COMMIT_MSG="Auto-update bot state $(date +'%Y-%m-%d %H:%M:%S')"
+            git commit -m "$COMMIT_MSG" || {
+              echo "Commit failed or nothing to commit."
+              exit 0
+            }
+            
+            # 5. السحب الإجباري لإعادة الترتيب (Rebase) لتجنب التعارضات
+            echo "Attempting to pull latest changes with rebase..."
+            git pull origin main --rebase || {
+              echo "Pull/Rebase failed. Trying merge strategy..."
+              git pull origin main --no-edit || true
+            }
+            
+            # 6. الدفع للمستودع مع محاولات إعادة (Retry Logic)
+            MAX_RETRIES=3
+            RETRY_COUNT=0
+            
+            while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+              echo "Attempt $((RETRY_COUNT+1))/$MAX_RETRIES to push..."
+              
+              if git push origin main; then
+                echo "✅ SUCCESS: State file pushed successfully!"
+                break
+              else
+                echo "❌ PUSH FAILED. Retrying in 5 seconds..."
+                sleep 5
+                RETRY_COUNT=$((RETRY_COUNT+1))
+                
+                # في حالة الفشل المتكرر، نحاول فرض التحديث (Force Push) كحل أخير
+                # تحذير: استخدم بحذر، لكن هنا آمن لأننا نتحكم في الملف الوحيد
+                if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
+                  echo "⚠️ All retries exhausted. Attempting force push as last resort..."
+                  git push origin main --force-with-lease || echo "Final Force Push also failed."
+                fi
+              fi
+            done
+          else
+            echo "No changes to commit. Skipping push."
+          fi
+          
+          echo "--- End of Robust Save Process ---"
