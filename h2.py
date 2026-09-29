@@ -535,7 +535,8 @@ def send_week_summary(st, days):
     active = [b for b in bucket_stats if b[1] > 0]
     if active:
         best_b = max(active, key=lambda b: b[2])
-        txt += f"🏆 أفضل وقت: {best_b[0]} ({best_b[2]%}\n"
+        # ★★ الإصلاح هنا: تم إضافة القوس المغلق % بشكل صحيح ★★
+        txt += f"🏆 أفضل وقت: {best_b[0]} ({best_b[2]}%)\n"
     txt += f"\n🧩 *تفصيل الأزواج:*\n"
     pair_stats = []
     for sym in sorted({x["sym"] for x in sim}):
@@ -547,7 +548,8 @@ def send_week_summary(st, days):
         txt += f"• {fmt_sym(sym)}: {sn} | {swr}%\n"
     if pair_stats:
         best_p = max(pair_stats, key=lambda p: p[2])
-        txt += f"🏆 أفضل زوج: {fmt_sym(best_p[0])} ({best_p[2]%}\n"
+        # ★★ الإصلاح هنا: تم إضافة القوس المغلق % بشكل صحيح ★★
+        txt += f"🏆 أفضل زوج: {fmt_sym(best_p[0])} ({best_p[2]}%)\n"
     max_streak = 0
     cur = 0
     for x in sim:
@@ -565,10 +567,11 @@ def send_week_summary(st, days):
             txt += f"• أكثر الأزواج خسارة: {fmt_sym(worst_p[0])} ({worst_p[3]} خسائر)\n"
     if active:
         worst_b = min(active, key=lambda b: b[2])
-        txt += f"• أضعف وقت: {worst_b[0]} ({worst_b[2]%}\n"
+        # ★★ الإصلاح هنا: تم إضافة القوس المغلق % بشكل صحيح ★★
+        txt += f"• أضعف وقت: {worst_b[0]} ({worst_b[2]}%)\n"
     pnl = round(w * win_payout - l * stake, 2)
     txt += (f"\n• إجمالي الإشارات: *{n}*\n"
-            f"• تلقائي: فوز {w} / خسارة {l} | *{round(wr,1)%}\n"
+            f"• تلقائي: فوز {w} / خسارة {l} | *{round(wr,1)}%*\n"
             f"• صافي تقديري: {pnl:+.2f}$\n"
             f"• Z-score: {z:+.2f} "
             f"{'✅ دلالة حقيقية' if z > 1.96 else '⚠️ ضمن الضجيج'}\n"
@@ -595,7 +598,7 @@ def send_month_summary(st, y, m):
     pnl = round(w * win_payout - l * stake, 2)
     txt = (f"🗓️ *ملخص شهر {ar_month(m)} {y}*\n"
            f"• إجمالي الإشارات: *{n}*\n"
-           f"• فوز {w} / خسارة {l} | *{round(wr,1)%}\n"
+           f"• فوز {w} / خسارة {l} | *{round(wr,1)}%*\n"
            f"• صافي تقديري: {pnl:+.2f}$\n"
            f"• Z-score: {z:+.2f}\n\n"
            f"📌 التعادل: {BREAKEVEN_WR}%")
