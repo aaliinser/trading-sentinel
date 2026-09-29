@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-غيث H2 — بوت إشارات حي (v7.5 Final Stable Edition)
-الإصلاح الجذري: منع تكرار الرسائل عبر "القفل الزمني الداخلي" المستقل عن نجاح Git Push.
+غيث H2 — بوت إشارات حي (v7.6 Master Hybrid - AUTO-RESOLVE FIXED EDITION)
+الإصلاح الحاسم: دالة حسم ذكية تتعامل مع تأخر البيانات وترسل نتائج مؤكدة أو إلغاء صريح.
 الاستراتيجية: BB(15,2.3) + EMA200 Trend Filter + Storm Filter (ADX/ATR).
 الفريم: 5 دقائق / الانتهاء: 15 دقيقة.
 """
@@ -23,7 +23,7 @@ try:
 except ImportError:
     pass
 
-# ─── Configuration ─────────────────────────────────────
+# ─── Configuration ────────────────────────────────────
 SYMBOLS = os.getenv("SYMBOLS_H2", "USDJPY=X,EURAUD=X,USDCHF=X,EURCAD=X,CADJPY=X,GBPUSD=X,USDCAD=X,AUDNZD=X,EURGBP=X").split(",")
 
 BB_P = 15          
@@ -63,7 +63,7 @@ TG_CHAT = os.getenv("TG_CHAT","").strip()
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s | %(levelname)-8s | %(message)s",
                     handlers=[logging.StreamHandler(sys.stdout)])
-log = logging.getLogger("H2v75-FinalStable")
+log = logging.getLogger("H2v76-AutoFix")
 
 # ─── Safe accessors ──────────────────────────────────────
 def safe_list(st, key):
@@ -305,6 +305,9 @@ def calc_urgency(cl, band, sdv, direction):
         else:
             return "far", "skip", "🚫", "تخطّ — السعر ابتعد عن الباند"
 
+# ═══════════════════════════════════════════════
+# ★ CRITICAL FIX: SMART RESOLVE PENDING LOGIC ★
+# ═══════════════════════════════════════════════
 def resolve_pending(st):
     pend = safe_list(st, "pending")
     if not pend:
@@ -314,6 +317,7 @@ def resolve_pending(st):
     resolved_count = 0
     voided_count = 0
     forced_count = 0
+
     for p in pend:
         try:
             exp = datetime.fromisoformat(p["exp"])
@@ -322,40 +326,89 @@ def resolve_pending(st):
             done.append(p)
             forced_count += 1
             continue
+
         age_min = (now - exp).total_seconds() / 60.0
+
+        # 1. Hard Timeout Cleanup (Forced Void after max wait)
         if age_min > PENDING_HARD_TIMEOUT_MIN:
             log.warning(f"{p.get('sym')}: hard timeout ({age_min:.0f}m) — forced cleanup")
+            rid = p.get("mid")
+            try:
+                rid = int(rid) if rid is not None else None
+            except Exception:
+                rid = None
+            txt_cancel = (f"⚠️ *إلغاء تلقائي*: `{fmt_sym(p['sym'])}`\n"
+                          f"• السبب: تعذر جلب بيانات السعر بعد مرور {int(age_min)} دقيقة.\n"
+                          f"• الحالة: لاغية (Void)")
+            tg_send(txt_cancel, reply_to=rid)
             done.append(p)
             forced_count += 1
             continue
-        if now < exp + timedelta(seconds=60):
+
+        # 2. Wait Buffer (Give extra time for data availability - reduced to 1 min for speed)
+        if now < exp + timedelta(minutes=1):
             continue
+
         df = fetch5m_fast(p["sym"])
-        target = exp - timedelta(minutes=5)
+        target = exp - timedelta(minutes=5) # The candle that should contain the close price
         exit_px = None
+
         if df is not None and not df.empty:
+            # Try exact match first
             if target in df.index:
                 exit_px = float(df.loc[target, "Close"])
             else:
+                # Fallback 1: Find the closest candle BEFORE or AT target time
                 earlier = df[df.index <= target]
                 if not earlier.empty:
                     exit_px = float(earlier["Close"].iloc[-1])
                     log.info(f"{p['sym']}: target {target} missing, using fallback at {earlier.index[-1]}")
+                
+                # NEW FALLBACK 2: If still no data, check if we have ANY recent data newer than entry/expiry
+                # This handles cases where Yahoo delays significantly
+                if exit_px is None:
+                    latest_data = df.iloc[-1]
+                    if latest_data.name >= exp: # If we have data past expiry
+                         exit_px = float(latest_data["Close"])
+                         log.warning(f"{p['sym']}: Using LATEST available close ({latest_data.name}) as proxy for result.")
+
         if exit_px is None:
+            # If absolutely no data found after waiting long enough, VOID it safely
             if age_min > PENDING_SOFT_TIMEOUT_MIN:
                 log.warning(f"void pending {p['sym']} (no data after {age_min:.0f}m)")
+                rid = p.get("mid")
+                try:
+                    rid = int(rid) if rid is not None else None
+                except Exception:
+                    rid = None
+                txt_void = (f"❌ *نتيجة غير محسومة*: `{fmt_sym(p['sym'])}`\n"
+                            f"• السبب: انقطاع بيانات السوق لمدة طويلة.\n"
+                            f"• الحالة: لاغية (Void)")
+                tg_send(txt_void, reply_to=rid)
                 done.append(p)
                 voided_count += 1
             continue
+
         entry = float(p["px"])
-        if abs(exit_px - entry) < 0.00001:
+        if abs(exit_px - entry) < 0.00001: # Tie handling
             log.info(f"tie void {p['sym']}")
+            rid = p.get("mid")
+            try:
+                rid = int(rid) if rid is not None else None
+            except Exception:
+                rid = None
+            txt_tie = (f"➖ *تعادل*: `{fmt_sym(p['sym'])}`\n"
+                       f"• الدخول والخروج متطابقان.\n"
+                       f"• الحالة: لاغية (Void)")
+            tg_send(txt_tie, reply_to=rid)
             done.append(p)
             voided_count += 1
             continue
+
         win = exit_px > entry if p["dr"] == "CALL" else exit_px < entry
         sent = datetime.fromisoformat(p["sent"])
         loc = sent + timedelta(hours=USER_TZ_OFFSET_H)
+
         sim_list = safe_list(st, "sim")
         new_record = {
             "dl": loc.strftime("%Y-%m-%d"),
@@ -366,17 +419,24 @@ def resolve_pending(st):
             "px": entry, "ex": exit_px,
         }
         sim_list.append(new_record)
+        
+        # CRITICAL: Save immediately after recording result
         save_state(st) 
+
         if len(sim_list) > 2000:
             st["sim"] = sim_list[-2000:]
             save_state(st)
+
         log.info(f"auto-resolved {p['sym']} {p['dr']} win={win} | Entry:{entry:.5f} Exit:{exit_px:.5f}")
         resolved_count += 1
+
         rid = p.get("mid")
         try:
             rid = int(rid) if rid is not None else None
         except Exception:
             rid = None
+        
+        # Send Result Notification
         txt = (f"{'✅' if win else '❌'} *نتيجة تلقائية*: "
                f"{'ربحت' if win else 'خسرت'}\n"
                f"• الدخول: {fmt_px(entry)}\n"
@@ -384,9 +444,11 @@ def resolve_pending(st):
                f"• ضمن V4: {'✅' if p.get('v4') else '➖'}")
         tg_send(txt, reply_to=rid)
         done.append(p)
+
     for p in done:
         if p in pend:
             pend.remove(p)
+
     if resolved_count or voided_count or forced_count:
         log.info(f"resolve_pending summary: resolved={resolved_count} voided={voided_count} forced={forced_count} remaining={len(pend)}")
 
@@ -399,7 +461,7 @@ def send_report(st):
     n = len(sim)
     w = sum(1 for x in sim if x["win"])
     wr = round(100*w/n, 1) if n else 0.0
-    txt = (f"📊 *تقرير الأداء (v7.5)*\n\n"
+    txt = (f"📊 *تقرير الأداء (v7.6)*\n\n"
            f"*إشارات:* *{n}* | فوز *{wr}%*\n\n"
            f"📌 التعادل: {BREAKEVEN_WR}%")
     tg_send(txt)
@@ -446,7 +508,7 @@ def send_week_summary(st, days):
     mwr = round(100*mw/mn, 1) if mn else 0.0
     win_payout = 6.0 * 0.90
     stake = 6.0
-    txt = (f"📅 *ملخص أسبوع التداول (v7.5)*\n"
+    txt = (f"📅 *ملخص أسبوع التداول (v7.6)*\n"
            f"({ar_day(days[0])} {days[0]} → "
            f"{ar_day(days[-1])} {days[-1]})\n\n"
            f"📆 *تفصيل الأيام:*\n")
@@ -690,7 +752,7 @@ def scan(st):
         arrow = "🔴 PUT (هبوط)" if dr == "PUT" else "🟢 CALL (صعود)"
         sym_copy = fmt_sym(sym)
         d["alerts"] += 1
-        txt = (f"🎯 *إشارة H2 v7.5 Fast — BB + Trend*\n\n"
+        txt = (f"🎯 *إشارة H2 v7.6 Fast — BB + Trend*\n\n"
                f"📊 *الزوج:* `{sym_copy}`\n"
                f"📈 *الاتجاه:* {arrow}\n"
                f"💰 *السعر الحي الآن:* {fmt_px(cl)}\n\n"
@@ -742,13 +804,9 @@ def main():
     time_since_last_run_min = (now_ts - last_run_ts) / 60.0 if last_run_ts > 0 else 9999
     
     # ★★ THE NUCLEAR OPTION: If less than 2 hours since last run, SUPPRESS ALL META-MESSAGES ★★
-    # This ensures that even if the state file fails to update the date, 
-    # the bot will remain silent during the critical midnight window.
     if time_since_last_run_min < 120: 
         log.info(f"Smart Time-Lock Active: Only {time_since_last_run_min:.1f} mins since last run. Suppressing Boot/Summary.")
-        # Do NOT set need_boot_msg or need_daily_summary to True here.
     else:
-        # Normal logic applies only if enough time has passed
         if last_daily is not None and last_daily != today_local:
             need_daily_summary = True
         if boot_date is None or boot_date != today_local:
@@ -763,7 +821,7 @@ def main():
 
     if need_boot_msg:
         st["boot_date"] = today_local
-        tg_send(f"🚀 بوت H2 بدأ (v7.5 Master Hybrid - FINAL STABLE)\n"
+        tg_send(f"🚀 بوت H2 بدأ (v7.6 Master Hybrid - AUTO-RESOLVE FIXED)\n"
                 f"• أزواج: {len(SYMBOLS)} (تم التوسع)\n"
                 f"• المنطق: BB(15,2.3) + EMA200 Filter\n"
                 f"• الحماية: Storm Filter (ADX/ATR) نشط\n"
@@ -813,7 +871,6 @@ def main():
     scan(st)
     
     # CRITICAL UPDATE: Always save the current timestamp as 'last_run'
-    # This acts as the heartbeat for the Time-Lock mechanism.
     st["last_run"] = time.time()
     save_state(st)
     log.info("done")
