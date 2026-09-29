@@ -1,1 +1,22 @@
-{"last_daily": "2026-09-29", "last_month": "2026-09", "last_week": null, "boot_date": "2026-09-29", "day": {"date": "2026-09-28", "alerts": 0, "trades": 0, "wins": 0, "losses": 0, "cl": 0}, "pending": [], "sim": [], "log": [], "open": {}, "last_sig": {"USDJPY=X": "2026-09-28T23:50:00+00:00", "EURAUD=X": "2026-09-28T23:50:00+00:00", "USDCHF=X": "2026-09-28T23:50:00+00:00", "EURCAD=X": "2026-09-28T23:50:00+00:00", "CADJPY=X": "2026-09-28T23:50:00+00:00", "GBPUSD=X": "2026-09-28T23:50:00+00:00", "USDCAD=X": "2026-09-28T23:50:00+00:00", "AUDNZD=X": "2026-09-28T23:50:00+00:00", "EURGBP=X": "2026-09-28T23:50:00+00:00"}, "tg_offset": 0, "stop_until": 0, "last_run": 1790639763.0431564}
+{
+  "last_daily": "2026-09-29",
+  "last_month": "2026-09",
+  "last_week": null,
+  "boot_date": "2026-09-29",
+  "day": {
+    "date": "2026-09-29",
+    "alerts": 0,
+    "trades": 0,
+    "wins": 0,
+    "losses": 0,
+    "cl": 0
+  },
+  "pending": [],
+  "sim": [],
+  "log": [],
+  "open": {},
+  "last_sig": {},
+  "tg_offset": 0,
+  "stop_until": 0,
+  "last_run": 1759100000.0
+}
