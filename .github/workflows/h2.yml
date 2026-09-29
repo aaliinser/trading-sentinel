@@ -26,6 +26,7 @@ jobs:
           pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
+      # ★★ التصحيح الحاسم هنا: تم تغيير اسم الملف من sentinel_h2.py إلى h2.py ★★
       - name: Run H2 Sentinel Script
         env:
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
@@ -33,7 +34,7 @@ jobs:
           DERIV_API_TOKEN: ${{ secrets.DERIV_API_TOKEN }}
           DERIV_APP_ID: "1089" 
           SYMBOLS_H2: "USDJPY=X,EURAUD=X,USDCHF=X,EURCAD=X,CADJPY=X,GBPUSD=X,USDCAD=X,AUDNZD=X,EURGBP=X"
-        run: python sentinel_h2.py
+        run: python h2.py
 
       - name: Save State File to Repository
         if: always()
