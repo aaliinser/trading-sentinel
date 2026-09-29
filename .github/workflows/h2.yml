@@ -1,1 +1,67 @@
+name: Sentinel H2 Trading Bot (Final Stable)
 
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+jobs:
+  scan-and-alert:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+      - name: Run H2 Sentinel Script
+        env:
+          TG_TOKEN: ${{ secrets.TG_TOKEN }}
+          TG_CHAT: ${{ secrets.TG_CHAT }}
+          DERIV_API_TOKEN: ${{ secrets.DERIV_API_TOKEN }}
+          DERIV_APP_ID: "1089" 
+          SYMBOLS_H2: "USDJPY=X,EURAUD=X,USDCHF=X,EURCAD=X,CADJPY=X,GBPUSD=X,USDCAD=X,AUDNZD=X,EURGBP=X"
+        run: python sentinel_h2.py
+
+      - name: Save State File to Repository
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # إضافة ملف الحالة فقط
+          if [ -f state_h2.json ]; then
+            git add state_h2.json || true
+          fi
+          
+          # التحقق من وجود تغييرات
+          if ! git diff --cached --quiet; then
+            echo "Changes detected. Committing..."
+            git commit -m "Auto-update bot state $(date +'%Y-%m-%d %H:%M:%S')" || exit 0
+            
+            # محاولة الدفع مع إعادة المحاولة
+            for i in {1..3}; do
+              if git push origin main; then
+                echo "✅ Push successful!"
+                break
+              else
+                echo "❌ Push failed. Retrying ($i/3)..."
+                sleep 5
+                git pull origin main --rebase || true
+              fi
+            done
+          else
+            echo "No changes to commit."
+          fi
