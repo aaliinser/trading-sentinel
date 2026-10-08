@@ -1,11 +1,8 @@
-name: H1 Stochastic Live Bot (Auto-Schedule)
+name: H1 Stochastic Live Bot (Persistent State)
 
 on:
-  # ★★ هذا السطر هو ما يجعل البوت يعمل تلقائياً كل 5 دقائق ★★
   schedule:
     - cron: '*/5 * * * *' 
-  
-  # للسماح بالتشغيل اليدوي للاختبار فقط
   workflow_dispatch:
 
 jobs:
@@ -14,55 +11,44 @@ jobs:
     timeout-minutes: 10
     
     steps:
+      # 1. تحميل الكود
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # 2. تجهيز البيئة
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
+      # 3. تثبيت المكتبات
       - name: Install dependencies
         run: |
           pip install --upgrade pip
           pip install requests numpy pandas yfinance
 
+      # ★★ الإضافة الجوهرية: تنزيل الحالة السابقة إن وجدت ★★
+      - name: Restore previous state artifact
+        id: restore-state
+        uses: actions/cache@v3
+        with:
+          path: ./state_h1.json
+          key: h1-stoch-state-${{ github.run_id }}
+          restore-keys: |
+            h1-stoch-state-
+
+      # 4. تشغيل البوت
       - name: Run H1 Stoch Live Bot Script
         env:
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
           TG_CHAT: ${{ secrets.TG_CHAT }}
         run: python h1_stoch_bot.py
 
-      - name: Save State File to Repository
-        if: always()
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          
-          if [ -f state_h1.json ]; then
-            echo "Found state file. Adding to Git..."
-            git add state_h1.json || true
-            
-            if ! git diff --cached --quiet; then
-              echo "Changes detected in state file. Committing..."
-              git commit -m "Auto-save live bot state $(date +'%Y-%m-%d %H:%M:%S UTC')" || exit 0
-              
-              MAX_RETRIES=3
-              RETRY_COUNT=0
-              while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-                if git push origin main; then
-                  echo "✅ State saved successfully!"
-                  break
-                else
-                  echo "❌ Push failed. Retrying ($((RETRY_COUNT+1))/$MAX_RETRIES)..."
-                  sleep 5
-                  git pull origin main --rebase || true
-                  RETRY_COUNT=$((RETRY_COUNT+1))
-                fi
-              done
-            else
-              echo "No changes in state file. Skipping push."
-            fi
-          else
-            echo "Warning: state_h1.json not found. Nothing to save."
-          fi
+      # ★★ الإضافة الثانية: حفظ الحالة الجديدة كـ Artifact ★★
+      - name: Upload current state artifact
+        if: always() # حتى لو فشل السكربت نحاول حفظ ما لدينا
+        uses: actions/upload-artifact@v3
+        with:
+          name: h1-stoch-state-current
+          path: ./state_h1.json
+          retention-days: 1 # نحتفظ به ليوم واحد فقط لتوفير المساحة
