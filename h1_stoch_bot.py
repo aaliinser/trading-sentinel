@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-H1 Stochastic Extreme Reversal Bot - Layer 1 & 2 Integrated
+H1 Stochastic Extreme Reversal Bot - Layer 1 & 2 Integrated (Fixed)
 الهدف: دمج الهيكل الأساسي مع محرك البيانات والمؤشرات واختبارهما معاَ.
+الإصلاح: زيادة فترة جلب البيانات في الاختبار لضمان حساب EMA200 بشكل صحيح.
 """
 import os, sys, time, json, logging
 from datetime import datetime, timezone
@@ -217,7 +218,10 @@ def test_layer_2():
     test_symbol = "EURUSD=X"
     log.info(f"Testing Layer 2 with symbol: {test_symbol}")
     
-    df_raw = fetch_h1_data(test_symbol, period_days=3)
+    # ★★ الإصلاح هنا: تم تغيير period_days من 3 إلى 15 ★★
+    # 15 يوم تعطي حوالي 360 شمعة، وهو كافٍ جداَ لحساب EMA200
+    df_raw = fetch_h1_data(test_symbol, period_days=15) 
+    
     if df_raw is None:
         log.error("Failed to fetch raw data.")
         return False
@@ -248,7 +252,7 @@ def test_layer_2():
 # ═══════════════════════════════════════════════
 def main():
     log.info("="*50)
-    log.info(f"Starting {BOT_NAME} - Layer 2 Integration")
+    log.info(f"Starting {BOT_NAME} - Layer 2 Integration (Fixed)")
     log.info("="*50)
 
     # تهيئة مدير الحالة
@@ -264,8 +268,7 @@ def main():
     
     if success:
         log.info("✅ Layer 2 Passed.")
-        # اختيارياَ: إرسال تأكيد نجاح الطبقة الثانية لتليجرام
-        # send_telegram(" Data Engine Verified OK.") 
+        send_telegram("🚀 Data Engine Verified OK!\nReady for Strategy Logic.")
     else:
         log.error("❌ Layer 2 Failed.")
         send_telegram("⚠️ Warning: Data Engine Test Failed. Check Logs.")
