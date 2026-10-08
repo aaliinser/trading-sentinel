@@ -1,4 +1,4 @@
-name: H1 Stochastic Live Bot (Persistent State)
+name: H1 Stochastic Live Bot (Persistent State - Fixed v4)
 
 on:
   schedule:
@@ -27,10 +27,10 @@ jobs:
           pip install --upgrade pip
           pip install requests numpy pandas yfinance
 
-      # ★★ الإضافة الجوهرية: تنزيل الحالة السابقة إن وجدت ★★
+      # ★★ الإصلاح الحاسم: تحديث Cache إلى v4 ★★
       - name: Restore previous state artifact
         id: restore-state
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: ./state_h1.json
           key: h1-stoch-state-${{ github.run_id }}
@@ -44,10 +44,10 @@ jobs:
           TG_CHAT: ${{ secrets.TG_CHAT }}
         run: python h1_stoch_bot.py
 
-      # ★★ الإضافة الثانية: حفظ الحالة الجديدة كـ Artifact ★★
+      # ★★ الإصلاح الثاني: تحديث Upload Artifact إلى v4 ★★
       - name: Upload current state artifact
         if: always() # حتى لو فشل السكربت نحاول حفظ ما لدينا
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: h1-stoch-state-current
           path: ./state_h1.json
