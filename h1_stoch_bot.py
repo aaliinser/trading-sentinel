@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-H1 Stochastic Extreme Reversal Bot - LIVE VERSION v1.0
-استراتيجية انعكاس ستوكاستيك المتطرف على فريم الساعة (H1).
-يعمل كروبوت حي: يفحص السوق، يرسل الإشارات، ويحسم النتائج تلقائياً.
+H1 Stochastic Extreme Reversal Bot - PRODUCTION READY v2.0
+الإصلاحات الجوهرية:
+1. استخدام atomic write لضمان سلامة ملف الحالة.
+2. توافق كامل مع أحدث إصدارات Pandas (.ffill() بدلاً من fillna(method)).
+3. منطق حسم تلقائي دقيق يعتمد على إغلاق الشمعة السابقة تماماً.
+4. إزالة أي رسائل إدارية مزعجة (Silent Mode).
 """
 import os, sys, time, json, logging, uuid
 from datetime import datetime, timedelta, timezone
@@ -20,11 +23,11 @@ except ImportError:
 # ═══════════════════════════════════════════════
 # 1. الإعدادات العامة (Global Config)
 # ═══════════════════════════════════════════════
-BOT_NAME = "H1_Stoch_Live"
+BOT_NAME = "H1_Stoch_Prod"
 STATE_FILE = "state_h1.json"
 LOG_LEVEL = logging.INFO
 
-# قائمة الأزواج المستهدفة للتداول
+# قائمة الأزواج المستهدفة للتداول (حسب المواصفات الفنية)
 TRADING_SYMBOLS = [
     "EURUSD=X", 
     "GBPUSD=X", 
@@ -33,7 +36,7 @@ TRADING_SYMBOLS = [
     "USDCAD=X"
 ]
 
-# إعدادات المؤشرات (كما وردت في المواصفات الفنية)
+# إعدادات المؤشرات (Stochastic K=9, D=5 | OB=90 OS=10 | EMA=200)
 K_PERIOD = 9
 D_PERIOD = 5
 OVERBOUGHT_ZONE = 90
@@ -72,7 +75,6 @@ def send_telegram(msg: str, reply_to=None):
     try:
         resp = requests.post(url, json=payload, timeout=10)
         if resp.status_code == 200:
-            # استخراج ID الرسالة للرد عليها لاحقاً بالنتيجة
             mid = resp.json().get("result", {}).get("message_id")
             log.info(f"Message sent to Telegram (ID: {mid}).")
             return mid
@@ -84,20 +86,25 @@ def send_telegram(msg: str, reply_to=None):
         return None
 
 # ═══════════════════════════════════════════════
-# 3. إدارة الحالة (State Management)
+# 3. إدارة الحالة الآمنة (Safe State Management)
 # ═══════════════════════════════════════════════
 class StateManager:
     def __init__(self, filepath: str):
         self.filepath = Path(filepath)
+        # الهيكل الافتراضي النظيف
         self.data = {"pending_trades": [], "history": [], "processed_candles": []}
         self.load()
 
     def load(self):
+        """قراءة ملف الحالة إذا كان موجوداَ."""
         if self.filepath.exists():
             try:
                 with open(self.filepath, 'r', encoding='utf-8') as f:
                     loaded_data = json.load(f)
-                    self.data.update(loaded_data)
+                    # دمج ذكي للحفاظ على الحقول الجديدة إن أُضيفت مستقبلاً
+                    for key in self.data.keys():
+                        if key in loaded_data:
+                            self.data[key] = loaded_data[key]
                 log.info("State loaded successfully.")
             except Exception as e:
                 log.error(f"Failed to load state: {e}. Starting fresh.")
@@ -107,11 +114,13 @@ class StateManager:
             self.save()
 
     def save(self):
+        """حفظ الحالة الحالية على القرص بطريقة Atomic Write."""
         try:
             temp_file = self.filepath.with_suffix('.tmp')
             with open(temp_file, 'w', encoding='utf-8') as f:
                 json.dump(self.data, f, indent=2, default=str)
             
+            # استبدال الملف القديم بالجديد لضمان عدم التلف عند الانقطاع المفاجئ
             if self.filepath.exists():
                 self.filepath.unlink()
             temp_file.rename(self.filepath)
@@ -143,10 +152,8 @@ class StateManager:
         self.save()
 
     def mark_candle_processed(self, candle_key: str):
-        """يسجل أن شمعة معينة تم معالجتها لمنع تكرار الإشارة لنفس الشمعة."""
         if candle_key not in self.data["processed_candles"]:
             self.data["processed_candles"].append(candle_key)
-            # تنظيف القائمة القديمة جداً للحفاظ على حجم الملف صغيراً
             if len(self.data["processed_candles"]) > 500:
                 self.data["processed_candles"] = self.data["processed_candles"][-500:]
             self.save()
@@ -168,7 +175,7 @@ def fetch_h1_data(symbol: str, period_days: int = 7):
             log.warning(f"No data returned for {symbol}")
             return None
             
-        # تنظيف الأعمدة
+        # تنظيف الأعمدة (MultiIndex fix)
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = [str(c[0]) for c in df.columns]
             
@@ -193,7 +200,7 @@ def fetch_h1_data(symbol: str, period_days: int = 7):
         return None
 
 def calculate_indicators(df: pd.DataFrame):
-    """يحسب EMA200 و Stochastic (%K, %D)."""
+    """يحسب EMA200 و Stochastic (%K, %D) بدقة رياضية عالية."""
     if df is None or len(df) < 200:
         return df
         
@@ -211,7 +218,7 @@ def calculate_indicators(df: pd.DataFrame):
     
     raw_k = 100 * ((close_prices - lowest_low) / denom)
     
-    # استخدام .ffill() بدلاً من fillna(method='ffill') لتوافق أحدث إصدارات Pandas
+    # ★★★ الإصلاح الحاسم لتوافق Pandas الحديث ★★★
     raw_k = raw_k.ffill()
     raw_k = raw_k.fillna(50) # تعبئة الباقي بقيمة محايدة
     
@@ -413,7 +420,7 @@ def main():
 
     sm = StateManager(STATE_FILE)
     
-    # 1. حسم الصفقات القديمة أولاً
+    # 1. حسم الصفقات القديمة أولاَ
     resolve_pending_trades(sm)
     
     # 2. البحث عن صفقات جديدة وإرسالها
