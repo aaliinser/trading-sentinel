@@ -1,0 +1,78 @@
+name: H1 Stochastic Bot - Layer 1 Test
+
+on:
+  # تشغيل تلقائي عند بداية كل ساعة جديدة (0 دقيقة)
+  schedule:
+    - cron: '0 * * * *' 
+  
+  # السماح بالتشغيل اليدوي للاختبار الفوري
+  workflow_dispatch:
+
+jobs:
+  run-bot-layer-1:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    
+    steps:
+      # 1. تحميل الكود من المستودع
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 2. تجهيز بيئة Python
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # 3. تثبيت المكتبات المطلوبة للكود الحالي (requests فقط للطبقة 1)
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install requests
+
+      # 4. تشغيل السكربت الرئيسي
+      - name: Run H1 Stoch Bot Script
+        env:
+          TG_TOKEN: ${{ secrets.TG_TOKEN }}
+          TG_CHAT: ${{ secrets.TG_CHAT }}
+        run: python h1_stoch_bot.py
+
+      # 5. حفظ ملف الحالة (state_h1.json) إذا تم إنشاؤه أو تعديله
+      # هذه الخطوة حاسمة لضمان عدم ضياع بيانات الصفقات المفتوحة بين التشغيلات
+      - name: Save State File to Repository
+        if: always() # حتى لو فشل السكربت، نحاول حفظ ما لدينا لتجنب فقدان البيانات القديمة
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # التحقق من وجود ملف الحالة
+          if [ -f state_h1.json ]; then
+            echo "Found state file. Adding to Git..."
+            git add state_h1.json || true
+            
+            # التحقق مما إذا كان هناك تغييرات فعلية لحفظها
+            if ! git diff --cached --quiet; then
+              echo "Changes detected in state file. Committing..."
+              git commit -m "Auto-save state for H1 Bot $(date +'%Y-%m-%d %H:%M:%S UTC')" || exit 0
+              
+              # محاولة الدفع مع إعادة المحاولة البسيطة
+              MAX_RETRIES=3
+              RETRY_COUNT=0
+              while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+                if git push origin main; then
+                  echo "✅ State saved successfully!"
+                  break
+                else
+                  echo "❌ Push failed. Retrying ($((RETRY_COUNT+1))/$MAX_RETRIES)..."
+                  sleep 5
+                  # سحب التغييرات الحديثة قبل المحاولة التالية لتجنب التعارضات
+                  git pull origin main --rebase || true
+                  RETRY_COUNT=$((RETRY_COUNT+1))
+                fi
+              done
+            else
+              echo "No changes in state file. Skipping push."
+            fi
+          else
+            echo "Warning: state_h1.json not found. Nothing to save."
+          fi
