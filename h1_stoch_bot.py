@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-H1 Stochastic Extreme Reversal Bot - PRODUCTION READY v2.0
-الإصلاحات الجوهرية:
+H1 Stochastic Extreme Reversal Bot - PRODUCTION READY v2.1
+التحديث: توسيع نطاق التداول ليشمل 9 أزواج رئيسية وأكثر سيولة.
+الإصلاحات الجوهرية محفوظة:
 1. استخدام atomic write لضمان سلامة ملف الحالة.
 2. توافق كامل مع أحدث إصدارات Pandas (.ffill() بدلاً من fillna(method)).
 3. منطق حسم تلقائي دقيق يعتمد على إغلاق الشمعة السابقة تماماً.
@@ -27,13 +28,18 @@ BOT_NAME = "H1_Stoch_Prod"
 STATE_FILE = "state_h1.json"
 LOG_LEVEL = logging.INFO
 
-# قائمة الأزواج المستهدفة للتداول (حسب المواصفات الفنية)
+# ★★ التحديث الحصري هنا: إضافة 3 أزواج جديدة للأمان والتنوع ★★
 TRADING_SYMBOLS = [
+    # الأساسيات (5 أزواج)
     "EURUSD=X", 
     "GBPUSD=X", 
     "USDJPY=X", 
     "AUDUSD=X", 
-    "USDCAD=X"
+    "USDCAD=X",
+    # الإضافات الآمنة (4 أزواج إضافية لدعم السيولة والسلوك الارتدادي)
+    "CHFJPY=X",   # سويسري/ين - معروف بتقلباته الحادة المناسبة للعكس
+    "NZDUSD=X",   # نيوزلندي/دولار - يرتبط بأستراليا لكنه مستقل قليلاً
+    "EURCHF=X"    # يورو/سويسري - هادئ جداً ومناسب للاستراتيجيات طويلة النفس
 ]
 
 # إعدادات المؤشرات (Stochastic K=9, D=5 | OB=90 OS=10 | EMA=200)
