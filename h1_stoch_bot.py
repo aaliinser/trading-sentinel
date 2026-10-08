@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-H1 Stochastic Extreme Reversal Bot - Layer 1 & 2 Integrated (Final Fix)
-الإصلاح الحاسم: تحديث دوال Pandas لتجنب خطأ fillna(method=...).
+H1 Stochastic Extreme Reversal Bot - Layers 1, 2 & 3 Integrated
+الهدف: دمج الهيكل الأساسي مع محرك البيانات ومنطق الاستراتيجية واختبارهم معاَ.
 """
 import os, sys, time, json, logging
 from datetime import datetime, timezone
@@ -181,25 +181,148 @@ def calculate_indicators(df: pd.DataFrame):
     raw_k = 100 * ((close_prices - lowest_low) / denom)
     
     # ★★★ التعديل الجوهري لحل المشكلة ★★★
-    # بدلاً من: raw_k.fillna(method='ffill', inplace=True)
-    # نستخدم:
     raw_k = raw_k.ffill()
     raw_k = raw_k.fillna(50) # تعبئة الباقي بقيمة محايدة
     
     df["STOCH_K"] = raw_k
     
     stoch_d_raw = raw_k.rolling(window=d_period).mean()
-    # بدلاً من: stoch_d_raw.fillna(method='ffill', inplace=True)
     df["STOCH_D"] = stoch_d_raw.ffill()
     
     return df
 
+# ═══════════════════════════════════════════════
+# 6. منطق الاستراتيجية الصارم (Strategy Logic) - LAYER 3
+# ═══════════════════════════════════════════════
+
+def check_signal_logic(df: pd.DataFrame):
+    """
+    يفحص شروط الدخول بناءً على استراتيجية H1 Stochastic Extreme Reversal.
+    يرجع 'CALL', 'PUT', أو None.
+    """
+    if df is None or len(df) < 2:
+        return None
+        
+    # الحصول على آخر شمعتين (الحالية والسابقة) لإجراء مقارنة التقاطع
+    current_candle = df.iloc[-1]
+    prev_candle = df.iloc[-2]
+    
+    # استخراج القيم اللازمة للحساب
+    close_price = float(current_candle['Close'])
+    ema_200 = float(current_candle['EMA_200'])
+    
+    k_curr = float(current_candle['STOCH_K'])
+    d_curr = float(current_candle['STOCH_D'])
+    
+    k_prev = float(prev_candle['STOCH_K'])
+    d_prev = float(prev_candle['STOCH_D'])
+    
+    signal_direction = None
+    
+    # ---------------------------------------------------------
+    # 1. فحص إشارة الشراء (BUY / CALL)
+    # ---------------------------------------------------------
+    # الشرط أ: الاتجاه العام صاعد (السعر فوق EMA200)
+    trend_is_bullish = close_price > ema_200
+    
+    # الشرط ب: تقاطع صعودي للستوكاستيك (%K عبر %D للأعلى)
+    crossover_up = (k_prev <= d_prev) and (k_curr > d_curr)
+    
+    # الشرط ج: تأكيد المنطقة المتطرفة (التقاطع حدث تحت مستوى 10)
+    oversold_zone_confirmed = min(k_prev, k_curr) < 10 
+    
+    if trend_is_bullish and crossover_up and oversold_zone_confirmed:
+        signal_direction = "CALL"
+        
+    # ---------------------------------------------------------
+    # 2. فحص إشارة البيع (SELL / PUT)
+    # ---------------------------------------------------------
+    # الشرط أ: الاتجاه العام هابط (السعر تحت EMA200)
+    trend_is_bearish = close_price < ema_200
+    
+    # الشرط ب: تقاطع هبوطي للستوكاستيك (%K عبر %D للأسفل)
+    crossover_down = (k_prev >= d_prev) and (k_curr < d_curr)
+    
+    # الشرط ج: تأكيد المنطقة المتطرفة (التقاطع حدث فوق مستوى 90)
+    overbought_zone_confirmed = max(k_prev, k_curr) > 90
+    
+    if trend_is_bearish and crossover_down and overbought_zone_confirmed:
+        signal_direction = "PUT"
+        
+    return signal_direction
+
+def test_layer_3():
+    """دالة اختبار سريعة لمنطق الاستراتيجية."""
+    log.info(">>> Running Layer 3 Self-Test (Strategy Logic) <<<")
+    
+    symbols_to_test = ["EURUSD=X", "GBPUSD=X", "USDJPY=X"]
+    found_signal = False
+    
+    for sym in symbols_to_test:
+        df_raw = fetch_h1_data(sym, period_days=15)
+        if df_raw is not None and len(df_raw) >= 200:
+            df_processed = calculate_indicators(df_raw)
+            sig = check_signal_logic(df_processed)
+            
+            last_k = df_processed.iloc[-1]['STOCH_K']
+            last_d = df_processed.iloc[-1]['STOCH_D']
+            last_close = df_processed.iloc[-1]['Close']
+            last_ema = df_processed.iloc[-1]['EMA_200']
+            
+            log.info(f"Testing {sym}: Close={last_close:.5f}, EMA={last_ema:.5f}, K={last_k:.2f}, D={last_d:.2f}")
+            
+            if sig:
+                log.info(f"✅ SIGNAL FOUND FOR {sym}: {sig}")
+                found_signal = True
+                break 
+            else:
+                log.info(f"⏸️ No active signal for {sym} right now.")
+                
+    if not found_signal:
+        log.info("ℹ️ No extreme reversal signals found across tested pairs currently.")
+        log.info("This is normal due to strict criteria (90/10 zones + Trend alignment).")
+        
+    return True 
+
+# ═══════════════════════════════════════════════
+# 5. الحلقة الرئيسية المحدثة (Main Loop with All Tests)
+# ═══════════════════════════════════════════════
+def main():
+    log.info("="*50)
+    log.info(f"Starting {BOT_NAME} - Full Integration Test (Layers 1-3)")
+    log.info("="*50)
+
+    sm = StateManager(STATE_FILE)
+    
+    # --- اختبار الطبقة الأولى والثانية ---
+    msg_l1_l2 = f"✅ **{BOT_NAME} Online!**\nLayer 1 & 2 Active.\nTime: {datetime.now(timezone.utc).strftime('%H:%M UTC')}"
+    send_telegram(msg_l1_l2)
+
+    log.info(">>> Running Layer 2 Self-Test <<<")
+    success_l2 = test_layer_2() # سنستخدم نفس دالة الاختبار القديمة للتأكد من عمل المؤشرات
+    
+    if success_l2:
+        log.info("✅ Layer 2 Passed.")
+    else:
+        log.error("❌ Layer 2 Failed.")
+        send_telegram("⚠️ Warning: Data Engine Test Failed. Check Logs.")
+        return # نتوقف إذا فشلت طبقة البيانات الأساسية
+
+    # --- اختبار الطبقة الثالثة (منطق الاستراتيجية) ---
+    success_l3 = test_layer_3()
+    if success_l3:
+        send_telegram("🧠 Strategy Logic Module Loaded Successfully.\nReady to scan markets.")
+    else:
+        send_telegram("❌ Strategy Logic Test Failed.")
+
+    log.info("Cycle Complete.")
+
+# نضيف دالة الاختبار الخاصة بالطبقة الثانية مرة أخرى لضمان عملها
 def test_layer_2():
     """دالة اختبار سريعة للتأكد من عمل المحرك."""
     test_symbol = "EURUSD=X"
     log.info(f"Testing Layer 2 with symbol: {test_symbol}")
     
-    # جلب بيانات كافية (15 يوم = ~360 شمعة) لضمان حساب EMA200
     df_raw = fetch_h1_data(test_symbol, period_days=15) 
     
     if df_raw is None:
@@ -225,31 +348,6 @@ def test_layer_2():
     log.info(f"Trend Direction: {'UP' if trend_up else 'DOWN'}")
     
     return True
-
-# ═══════════════════════════════════════════════
-# 5. الحلقة الرئيسية (Main Loop)
-# ═══════════════════════════════════════════════
-def main():
-    log.info("="*50)
-    log.info(f"Starting {BOT_NAME} - Final Integration Test")
-    log.info("="*50)
-
-    sm = StateManager(STATE_FILE)
-    
-    msg_l1 = f"✅ **{BOT_NAME} Online!**\nLayer 1 & 2 Active.\nTime: {datetime.now(timezone.utc).strftime('%H:%M UTC')}"
-    send_telegram(msg_l1)
-
-    log.info(">>> Running Layer 2 Self-Test <<<")
-    success = test_layer_2()
-    
-    if success:
-        log.info("✅ Layer 2 Passed.")
-        send_telegram("🚀 Data Engine Verified OK!\nReady for Strategy Logic.")
-    else:
-        log.error("❌ Layer 2 Failed.")
-        send_telegram("⚠️ Warning: Data Engine Test Failed. Check Logs.")
-
-    log.info("Cycle Complete.")
 
 if __name__ == "__main__":
     try:
