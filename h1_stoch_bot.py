@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-H1 Stochastic Extreme Reversal Bot - Layers 1, 2 & 3 Integrated
-الهدف: دمج الهيكل الأساسي مع محرك البيانات ومنطق الاستراتيجية واختبارهم معاَ.
+H1 Stochastic Extreme Reversal Bot - LIVE VERSION v1.0
+استراتيجية انعكاس ستوكاستيك المتطرف على فريم الساعة (H1).
+يعمل كروبوت حي: يفحص السوق، يرسل الإشارات، ويحسم النتائج تلقائياً.
 """
-import os, sys, time, json, logging
-from datetime import datetime, timezone
+import os, sys, time, json, logging, uuid
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import requests
 import numpy as np
@@ -19,9 +20,25 @@ except ImportError:
 # ═══════════════════════════════════════════════
 # 1. الإعدادات العامة (Global Config)
 # ═══════════════════════════════════════════════
-BOT_NAME = "H1_Stoch_Bot"
+BOT_NAME = "H1_Stoch_Live"
 STATE_FILE = "state_h1.json"
 LOG_LEVEL = logging.INFO
+
+# قائمة الأزواج المستهدفة للتداول
+TRADING_SYMBOLS = [
+    "EURUSD=X", 
+    "GBPUSD=X", 
+    "USDJPY=X", 
+    "AUDUSD=X", 
+    "USDCAD=X"
+]
+
+# إعدادات المؤشرات (كما وردت في المواصفات الفنية)
+K_PERIOD = 9
+D_PERIOD = 5
+OVERBOUGHT_ZONE = 90
+OVERSOLD_ZONE = 10
+EMA_PERIOD = 200
 
 # Telegram Credentials
 TG_TOKEN = os.getenv("TG_TOKEN", "").strip()
@@ -37,26 +54,34 @@ log = logging.getLogger(BOT_NAME)
 # ═══════════════════════════════════════════════
 # 2. أدوات مساعدة (Utilities)
 # ═══════════════════════════════════════════════
-def send_telegram(msg: str):
+def send_telegram(msg: str, reply_to=None):
     """إرسال رسالة نصية إلى تليجرام."""
     if not TG_TOKEN or not TG_CHAT:
         log.warning("Telegram credentials missing.")
         return None
     
     url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
-    payload = {"chat_id": TG_CHAT, "text": msg, "parse_mode": "Markdown"}
-    
+    payload = {
+        "chat_id": TG_CHAT,
+        "text": msg,
+        "parse_mode": "Markdown"
+    }
+    if reply_to:
+        payload["reply_to_message_id"] = reply_to
+        
     try:
         resp = requests.post(url, json=payload, timeout=10)
         if resp.status_code == 200:
-            log.info("Message sent to Telegram.")
-            return True
+            # استخراج ID الرسالة للرد عليها لاحقاً بالنتيجة
+            mid = resp.json().get("result", {}).get("message_id")
+            log.info(f"Message sent to Telegram (ID: {mid}).")
+            return mid
         else:
             log.error(f"Telegram API Error: {resp.status_code}")
-            return False
+            return None
     except Exception as e:
         log.error(f"Exception sending Telegram message: {e}")
-        return False
+        return None
 
 # ═══════════════════════════════════════════════
 # 3. إدارة الحالة (State Management)
@@ -64,7 +89,7 @@ def send_telegram(msg: str):
 class StateManager:
     def __init__(self, filepath: str):
         self.filepath = Path(filepath)
-        self.data = {"pending_trades": [], "history": []}
+        self.data = {"pending_trades": [], "history": [], "processed_candles": []}
         self.load()
 
     def load(self):
@@ -117,8 +142,20 @@ class StateManager:
             self.data["history"] = self.data["history"][-1000:]
         self.save()
 
+    def mark_candle_processed(self, candle_key: str):
+        """يسجل أن شمعة معينة تم معالجتها لمنع تكرار الإشارة لنفس الشمعة."""
+        if candle_key not in self.data["processed_candles"]:
+            self.data["processed_candles"].append(candle_key)
+            # تنظيف القائمة القديمة جداً للحفاظ على حجم الملف صغيراً
+            if len(self.data["processed_candles"]) > 500:
+                self.data["processed_candles"] = self.data["processed_candles"][-500:]
+            self.save()
+
+    def is_candle_processed(self, candle_key: str) -> bool:
+        return candle_key in self.data["processed_candles"]
+
 # ═══════════════════════════════════════════════
-# 4. محرك البيانات والمؤشرات (Data Engine & Indicators) - LAYER 2 FIXED
+# 4. محرك البيانات والمؤشرات (Data Engine & Indicators)
 # ═══════════════════════════════════════════════
 
 def fetch_h1_data(symbol: str, period_days: int = 7):
@@ -145,7 +182,7 @@ def fetch_h1_data(symbol: str, period_days: int = 7):
         df.index = pd.to_datetime(df.index, utc=True)
         df = df[~df.index.duplicated()].sort_index().dropna()
         
-        # إزالة الشمعة الحالية غير المكتملة
+        # إزالة الشمعة الحالية غير المكتملة (Zero Look-Ahead Bias Prevention)
         now_utc = pd.Timestamp.now(tz="UTC")
         if not df.empty and df.index[-1] + pd.Timedelta(hours=1) > now_utc:
              df = df.iloc[:-1]
@@ -156,43 +193,37 @@ def fetch_h1_data(symbol: str, period_days: int = 7):
         return None
 
 def calculate_indicators(df: pd.DataFrame):
-    """
-    يحسب EMA200 و Stochastic (%K, %D).
-    ★★ الإصلاح هنا: استبدال .fillna(method='ffill') بـ .ffill() ★★
-    """
+    """يحسب EMA200 و Stochastic (%K, %D)."""
     if df is None or len(df) < 200:
         return df
         
     close_prices = df["Close"]
     
     # 1. حساب EMA 200
-    df["EMA_200"] = close_prices.ewm(span=200, adjust=False).mean()
+    df["EMA_200"] = close_prices.ewm(span=EMA_PERIOD, adjust=False).mean()
     
-    # 2. حساب Stochastic Oscillator (K=9, D=5)
-    k_period = 9
-    d_period = 5
-    
-    lowest_low = df["Low"].rolling(window=k_period).min()
-    highest_high = df["High"].rolling(window=k_period).max()
+    # 2. حساب Stochastic Oscillator
+    lowest_low = df["Low"].rolling(window=K_PERIOD).min()
+    highest_high = df["High"].rolling(window=K_PERIOD).max()
     
     denom = highest_high - lowest_low
     denom.replace(0, np.nan, inplace=True) 
     
     raw_k = 100 * ((close_prices - lowest_low) / denom)
     
-    # ★★★ التعديل الجوهري لحل المشكلة ★★★
+    # استخدام .ffill() بدلاً من fillna(method='ffill') لتوافق أحدث إصدارات Pandas
     raw_k = raw_k.ffill()
     raw_k = raw_k.fillna(50) # تعبئة الباقي بقيمة محايدة
     
     df["STOCH_K"] = raw_k
     
-    stoch_d_raw = raw_k.rolling(window=d_period).mean()
+    stoch_d_raw = raw_k.rolling(window=D_PERIOD).mean()
     df["STOCH_D"] = stoch_d_raw.ffill()
     
     return df
 
 # ═══════════════════════════════════════════════
-# 6. منطق الاستراتيجية الصارم (Strategy Logic) - LAYER 3
+# 5. منطق الاستراتيجية الصارم (Strategy Logic)
 # ═══════════════════════════════════════════════
 
 def check_signal_logic(df: pd.DataFrame):
@@ -203,11 +234,9 @@ def check_signal_logic(df: pd.DataFrame):
     if df is None or len(df) < 2:
         return None
         
-    # الحصول على آخر شمعتين (الحالية والسابقة) لإجراء مقارنة التقاطع
     current_candle = df.iloc[-1]
     prev_candle = df.iloc[-2]
     
-    # استخراج القيم اللازمة للحساب
     close_price = float(current_candle['Close'])
     ema_200 = float(current_candle['EMA_200'])
     
@@ -222,14 +251,9 @@ def check_signal_logic(df: pd.DataFrame):
     # ---------------------------------------------------------
     # 1. فحص إشارة الشراء (BUY / CALL)
     # ---------------------------------------------------------
-    # الشرط أ: الاتجاه العام صاعد (السعر فوق EMA200)
     trend_is_bullish = close_price > ema_200
-    
-    # الشرط ب: تقاطع صعودي للستوكاستيك (%K عبر %D للأعلى)
     crossover_up = (k_prev <= d_prev) and (k_curr > d_curr)
-    
-    # الشرط ج: تأكيد المنطقة المتطرفة (التقاطع حدث تحت مستوى 10)
-    oversold_zone_confirmed = min(k_prev, k_curr) < 10 
+    oversold_zone_confirmed = min(k_prev, k_curr) < OVERSOLD_ZONE 
     
     if trend_is_bullish and crossover_up and oversold_zone_confirmed:
         signal_direction = "CALL"
@@ -237,117 +261,165 @@ def check_signal_logic(df: pd.DataFrame):
     # ---------------------------------------------------------
     # 2. فحص إشارة البيع (SELL / PUT)
     # ---------------------------------------------------------
-    # الشرط أ: الاتجاه العام هابط (السعر تحت EMA200)
     trend_is_bearish = close_price < ema_200
-    
-    # الشرط ب: تقاطع هبوطي للستوكاستيك (%K عبر %D للأسفل)
     crossover_down = (k_prev >= d_prev) and (k_curr < d_curr)
-    
-    # الشرط ج: تأكيد المنطقة المتطرفة (التقاطع حدث فوق مستوى 90)
-    overbought_zone_confirmed = max(k_prev, k_curr) > 90
+    overbought_zone_confirmed = max(k_prev, k_curr) > OVERBOUGHT_ZONE
     
     if trend_is_bearish and crossover_down and overbought_zone_confirmed:
         signal_direction = "PUT"
         
     return signal_direction
 
-def test_layer_3():
-    """دالة اختبار سريعة لمنطق الاستراتيجية."""
-    log.info(">>> Running Layer 3 Self-Test (Strategy Logic) <<<")
-    
-    symbols_to_test = ["EURUSD=X", "GBPUSD=X", "USDJPY=X"]
-    found_signal = False
-    
-    for sym in symbols_to_test:
-        df_raw = fetch_h1_data(sym, period_days=15)
-        if df_raw is not None and len(df_raw) >= 200:
-            df_processed = calculate_indicators(df_raw)
-            sig = check_signal_logic(df_processed)
-            
-            last_k = df_processed.iloc[-1]['STOCH_K']
-            last_d = df_processed.iloc[-1]['STOCH_D']
-            last_close = df_processed.iloc[-1]['Close']
-            last_ema = df_processed.iloc[-1]['EMA_200']
-            
-            log.info(f"Testing {sym}: Close={last_close:.5f}, EMA={last_ema:.5f}, K={last_k:.2f}, D={last_d:.2f}")
-            
-            if sig:
-                log.info(f"✅ SIGNAL FOUND FOR {sym}: {sig}")
-                found_signal = True
-                break 
-            else:
-                log.info(f"⏸️ No active signal for {sym} right now.")
-                
-    if not found_signal:
-        log.info("ℹ️ No extreme reversal signals found across tested pairs currently.")
-        log.info("This is normal due to strict criteria (90/10 zones + Trend alignment).")
-        
-    return True 
+# ═══════════════════════════════════════════════
+# 6. الحلقة الرئيسية للروبوت الحي (Live Bot Loop)
+# ═══════════════════════════════════════════════
 
-# ═══════════════════════════════════════════════
-# 5. الحلقة الرئيسية المحدثة (Main Loop with All Tests)
-# ═══════════════════════════════════════════════
+def resolve_pending_trades(sm: StateManager):
+    """يفحص الصفقات المعلقة ويحسم نتيجتها تلقائياَ."""
+    pending = sm.get_pending_trades()
+    if not pending: return
+    
+    now_utc = datetime.now(timezone.utc)
+    resolved_ids = []
+    
+    log.info(f">>> Checking {len(pending)} pending trades...")
+    
+    for trade in pending:
+        try:
+            entry_time_str = trade['entry_time']
+            entry_dt = datetime.fromisoformat(entry_time_str)
+            expiry_dt = entry_dt + timedelta(minutes=60)
+            
+            # ننتظر حتى تمر دقيقة كاملة بعد وقت الانتهاء لضمان إغلاق الشمعة
+            if now_utc < expiry_dt + timedelta(minutes=1):
+                continue
+                
+            sym = trade['symbol']
+            dr = trade['direction']
+            entry_px = float(trade['entry_price'])
+            
+            # جلب السعر الحالي للإغلاق (Exit Price)
+            df_exit = fetch_h1_data(sym, period_days=1) 
+            exit_px = None
+            
+            if df_exit is not None and not df_exit.empty:
+                target_time = expiry_dt - timedelta(hours=1) 
+                mask = df_exit.index <= target_time
+                if mask.any():
+                    exit_px = float(df_exit.loc[mask].iloc[-1]['Close'])
+                else:
+                     exit_px = float(df_exit.iloc[-1]['Close'])
+                    
+            if exit_px is None:
+                log.warning(f"Could not fetch exit price for {sym}. Will retry next cycle.")
+                continue
+                
+            win = (exit_px > entry_px) if dr == 'CALL' else (exit_px < entry_px)
+            result_emoji = "✅ WIN" if win else "❌ LOSS"
+            
+            rid = int(trade['telegram_message_id'])
+            result_msg = (f"{result_emoji} *Result for {sym} ({dr}):*\n"
+                          f"• Entry: `{entry_px:.5f}`\n"
+                          f"• Exit: `{exit_px:.5f}`\n"
+                          f"• P/L: `{abs(exit_px-entry_px)/entry_px*100:.3f}%`")
+            send_telegram(result_msg, reply_to=rid)
+            
+            trade_result = {
+                "id": trade['id'],
+                "symbol": sym,
+                "direction": dr,
+                "entry_price": entry_px,
+                "exit_price": exit_px,
+                "win": bool(win),
+                "resolved_at": now_utc.isoformat()
+            }
+            sm.archive_trade(trade_result)
+            resolved_ids.append(trade['id'])
+            log.info(f"Resolved trade {trade['id']} for {sym}: {'WIN' if win else 'LOSS'}")
+
+        except Exception as e:
+            log.error(f"Error resolving trade {trade.get('id')}: {e}")
+            
+    for tid in resolved_ids:
+        sm.remove_pending_trade(tid)
+
+def scan_and_alert(sm: StateManager):
+    """يفحص جميع الأزواج ويرسل إشارات جديدة."""
+    log.info(">>> Scanning market for new signals...")
+    
+    open_positions_syms = {t['symbol'] for t in sm.get_pending_trades()}
+    new_signals_count = 0
+    
+    for sym in TRADING_SYMBOLS:
+        if sym in open_positions_syms:
+            log.debug(f"Skipping {sym}. Already has an open position.")
+            continue
+            
+        df_raw = fetch_h1_data(sym, period_days=15)
+        if df_raw is None or len(df_raw) < 200:
+            continue
+            
+        df_processed = calculate_indicators(df_raw)
+        sig_dir = check_signal_logic(df_processed)
+        
+        if sig_dir is None:
+            continue
+            
+        # التحقق من عدم تكرار الإشارة لنفس الشمعة
+        current_candle_time = df_processed.index[-1]
+        candle_key = f"{sym}_{current_candle_time.isoformat()}"
+        
+        if sm.is_candle_processed(candle_key):
+            log.debug(f"Signal for {candle_key} was already processed. Skipping.")
+            continue
+            
+        # === تم العثور على إشارة جديدة! ===
+        log.info(f"🔥 NEW SIGNAL DETECTED: {sym} -> {sig_dir}")
+        
+        trade_id = str(uuid.uuid4())[:8]
+        
+        arrow = "🟢 BUY/CALL" if sig_dir == "CALL" else "🔴 SELL/PUT"
+        alert_msg = (f"*H1 Stochastic Signal Alert!* \n\n"
+                     f"Pair: `{sym}`\n"
+                     f"Direction: {arrow}\n"
+                     f"Entry Price: `{df_processed.iloc[-1]['Close']:.5f}`\n"
+                     f"Expiry: 60 minutes\n"
+                     f"_Result will be auto-reported._")
+                     
+        mid_id = send_telegram(alert_msg)
+        
+        if mid_id:
+            trade_info = {
+                "id": trade_id,
+                "symbol": sym,
+                "direction": sig_dir,
+                "entry_price": float(df_processed.iloc[-1]['Close']),
+                "entry_time": current_candle_time.isoformat(),
+                "telegram_message_id": mid_id
+            }
+            sm.add_pending_trade(trade_info)
+            sm.mark_candle_processed(candle_key)
+            
+            new_signals_count += 1
+            time.sleep(1) 
+            
+    log.info(f"Scan complete. New signals sent: {new_signals_count}")
+
+
 def main():
     log.info("="*50)
-    log.info(f"Starting {BOT_NAME} - Full Integration Test (Layers 1-3)")
+    log.info(f"Starting {BOT_NAME} - LIVE BOT INITIALIZATION")
     log.info("="*50)
 
     sm = StateManager(STATE_FILE)
     
-    # --- اختبار الطبقة الأولى والثانية ---
-    msg_l1_l2 = f"✅ **{BOT_NAME} Online!**\nLayer 1 & 2 Active.\nTime: {datetime.now(timezone.utc).strftime('%H:%M UTC')}"
-    send_telegram(msg_l1_l2)
-
-    log.info(">>> Running Layer 2 Self-Test <<<")
-    success_l2 = test_layer_2() # سنستخدم نفس دالة الاختبار القديمة للتأكد من عمل المؤشرات
+    # 1. حسم الصفقات القديمة أولاً
+    resolve_pending_trades(sm)
     
-    if success_l2:
-        log.info("✅ Layer 2 Passed.")
-    else:
-        log.error("❌ Layer 2 Failed.")
-        send_telegram("⚠️ Warning: Data Engine Test Failed. Check Logs.")
-        return # نتوقف إذا فشلت طبقة البيانات الأساسية
-
-    # --- اختبار الطبقة الثالثة (منطق الاستراتيجية) ---
-    success_l3 = test_layer_3()
-    if success_l3:
-        send_telegram("🧠 Strategy Logic Module Loaded Successfully.\nReady to scan markets.")
-    else:
-        send_telegram("❌ Strategy Logic Test Failed.")
-
-    log.info("Cycle Complete.")
-
-# نضيف دالة الاختبار الخاصة بالطبقة الثانية مرة أخرى لضمان عملها
-def test_layer_2():
-    """دالة اختبار سريعة للتأكد من عمل المحرك."""
-    test_symbol = "EURUSD=X"
-    log.info(f"Testing Layer 2 with symbol: {test_symbol}")
+    # 2. البحث عن صفقات جديدة وإرسالها
+    scan_and_alert(sm)
     
-    df_raw = fetch_h1_data(test_symbol, period_days=15) 
-    
-    if df_raw is None:
-        log.error("Failed to fetch raw data.")
-        return False
-        
-    log.info(f"Fetched {len(df_raw)} candles.")
-    
-    df_processed = calculate_indicators(df_raw)
-    if df_processed is None or "EMA_200" not in df_processed.columns:
-        log.error("Failed to calculate indicators.")
-        return False
-        
-    last_row = df_processed.iloc[-1]
-    log.info("--- Sample Calculation Results ---")
-    log.info(f"Candle Time: {last_row.name}")
-    log.info(f"Close Price: {last_row['Close']:.5f}")
-    log.info(f"EMA 200:     {last_row['EMA_200']:.5f}")
-    log.info(f"Stoch %K:    {last_row['STOCH_K']:.2f}")
-    log.info(f"Stoch %D:    {last_row['STOCH_D']:.2f}")
-    
-    trend_up = last_row['Close'] > last_row['EMA_200']
-    log.info(f"Trend Direction: {'UP' if trend_up else 'DOWN'}")
-    
-    return True
+    log.info("Live Cycle Complete.")
 
 if __name__ == "__main__":
     try:
