@@ -1,54 +1,58 @@
-name: H1 Stochastic Live Bot (Persistent State - Fixed v4)
+name: H1 Stochastic Ultimate Bot (v3.1)
 
 on:
   schedule:
-    - cron: '*/5 * * * *' 
-  workflow_dispatch:
+    # يعمل كل ساعة عند الدقيقة 0 (متزامن مع إغلاق شموع H1)
+    - cron: '0 * * * *'
+  workflow_dispatch: # يسمح بالتشغيل اليدوي للاختبار
 
 jobs:
-  run-live-bot:
+  run-h1-bot:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     
     steps:
-      # 1. تحميل الكود
+      # 1. تحميل الكود من المستودع
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2. تجهيز البيئة
+      # 2. تثبيت بايثون
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      # 3. تثبيت المكتبات
+      # 3. تثبيت المكتبات المطلوبة
       - name: Install dependencies
         run: |
           pip install --upgrade pip
           pip install requests numpy pandas yfinance
 
-      # ★★ الإصلاح الحاسم: تحديث Cache إلى v4 ★★
+      # 4. استعادة حالة البوت السابقة (صفقات مفتوحة + سجلات)
+      # ★★ ملاحظة هامة: يجب أن يطابق المسار هنا STATE_FILE في الكود ★★
       - name: Restore previous state artifact
         id: restore-state
         uses: actions/cache@v4
         with:
-          path: ./state_h1.json
-          key: h1-stoch-state-${{ github.run_id }}
+          path: ./state_h1_ultimate.json  # <-- يطابق STATE_FILE في كود البايثون
+          key: h1-ultimate-state-${{ github.run_id }}
           restore-keys: |
-            h1-stoch-state-
+            h1-ultimate-state-
 
-      # 4. تشغيل البوت
-      - name: Run H1 Stoch Live Bot Script
+      # 5. تشغيل سكربت البوت
+      # ★★ تم تعديل السطر التالي ليطابق اسم ملفك h1_stoch_bot.py ★★
+      - name: Run H1 Ultimate Bot Script
         env:
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
           TG_CHAT: ${{ secrets.TG_CHAT }}
-        run: python h1_stoch_bot.py
+        run: python h1_stoch_bot.py 
 
-      # ★★ الإصلاح الثاني: تحديث Upload Artifact إلى v4 ★★
+      # 6. حفظ الحالة الجديدة بعد انتهاء الدورة
+      # if: always() يضمن الحفظ حتى لو فشل السكربت لسبب طفيف، لحماية البيانات
       - name: Upload current state artifact
-        if: always() # حتى لو فشل السكربت نحاول حفظ ما لدينا
+        if: always() 
         uses: actions/upload-artifact@v4
         with:
-          name: h1-stoch-state-current
-          path: ./state_h1.json
-          retention-days: 1 # نحتفظ به ليوم واحد فقط لتوفير المساحة
+          name: h1-ultimate-state-current
+          path: ./state_h1_ultimate.json   # <-- نفس المسار أعلاه
+          retention-days: 1
