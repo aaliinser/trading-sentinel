@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-H1 Stochastic Ultimate Bot - v4.1 (FULLY AUDITED)
-الإصلاحات:
+H1 Stochastic Ultimate Bot - v4.2 (Optimized Timing for Gaza Market Hours)
+التعديلات:
 1. تصحيح حساب مناطق الدخول (point_value = 1/pip_mult).
 2. تصحيح توقيت الحسم لانتظار إغلاق شمعة الخروج (حل VOID الجذري).
 3. حفظ ذرّي للملف (os.replace).
 4. فرض timezone على fromisoformat.
 5. استعادة التقارير الأسبوعية والشهرية.
-6. ★★ تعديل التوقيت: الحظر الليلي الآن بتوقيت غزة (Hebron) لتطابق النبضة الخارجية ★★
+6. ★★ تعديل التوقيت: بدء التداول الساعة 9 صباحاً (غزة) لتجنب ضعف سيولة الصباح الباكر ★★
 """
 import os, sys, time, json, logging, uuid
 from datetime import datetime, timedelta, timezone
@@ -27,8 +27,8 @@ except ImportError:
 # ═══════════════════════════════════════════════
 # 1. الإعدادات العامة
 # ═══════════════════════════════════════════════
-BOT_NAME = "H1_Ultimate_Bot_V4_1"
-STATE_FILE = "state_h1_ultimate_v41.json"
+BOT_NAME = "H1_Ultimate_Bot_V4_2_Gaza_Time"
+STATE_FILE = "state_h1_ultimate_v42.json" # ملف حالة جديد لضمان النظافة
 LOG_LEVEL = logging.INFO
 
 TRADING_SYMBOLS = [
@@ -43,10 +43,11 @@ OVERBOUGHT_ZONE = 90
 OVERSOLD_ZONE = 10
 EMA_PERIOD = 200
 
-# ★★ التعديل الوحيد: تحويل ساعات التداول لتتوافق مع توقيت غزة (UTC+3) ★★
-# 7 صباحاً بتوقيت غزة = 04:00 UTC | 21 مساءً بتوقيت غزة = 18:00 UTC
-NIGHT_START_HOUR = 0   # يبدأ الحظر منتصف الليل (بتوقيت الموقع/غزة)
-NIGHT_END_HOUR = 7     # ينتهي الحظر الساعة 7 صباحاً (بتوقيت الموقع/غزة)
+# ★★ التعديل الجوهري: توقيت غزة المحلي ★★
+# الحظر الليلي يبدأ منتصف الليل وينتهي الساعة 9 صباحاً بتوقيت غزة
+# (الساعة 9 صباحاً غزة = 06:00 UTC، حيث تبدأ الجلسة الأوروبية بالتسخين)
+NIGHT_START_HOUR = 0   
+NIGHT_END_HOUR = 9     
 
 # مدة الصفقة بالدقائق (ساعة واحدة = 60 دقيقة)
 TRADE_DURATION_MINUTES = 60
@@ -360,6 +361,7 @@ def scan_and_alert(sm: StateManager):
     hebron_tz = timezone(timedelta(hours=3)) 
     local_now = now_utc.astimezone(hebron_tz)
     
+    # الشرط الجديد: النوم حتى الساعة 9 صباحاً بتوقيت غزة
     if NIGHT_START_HOUR <= local_now.hour < NIGHT_END_HOUR:
         log.info(f"Night ban active ({local_now.strftime('%H:%M')} Local Time). Skipping scan.")
         return
@@ -538,7 +540,7 @@ def generate_reports(sm: StateManager):
 
 def main():
     log.info("=" * 50)
-    log.info(f"Starting {BOT_NAME} - FULLY AUDITED")
+    log.info(f"Starting {BOT_NAME} - GAZA TIME OPTIMIZED")
     log.info(f"Current UTC Time: {datetime.now(timezone.utc).strftime('%H:%M:%S')}")
     log.info("=" * 50)
     sm = StateManager(STATE_FILE)
