@@ -8,6 +8,7 @@ H1 Stochastic Ultimate Bot - v4.1 (FULLY AUDITED)
 3. حفظ ذرّي للملف (os.replace).
 4. فرض timezone على fromisoformat.
 5. استعادة التقارير الأسبوعية والشهرية.
+6. ★★ تعديل التوقيت: الحظر الليلي الآن بتوقيت غزة (Hebron) لتطابق النبضة الخارجية ★★
 """
 import os, sys, time, json, logging, uuid
 from datetime import datetime, timedelta, timezone
@@ -42,8 +43,10 @@ OVERBOUGHT_ZONE = 90
 OVERSOLD_ZONE = 10
 EMA_PERIOD = 200
 
-NIGHT_START_HOUR = 0
-NIGHT_END_HOUR = 9
+# ★★ التعديل الوحيد: تحويل ساعات التداول لتتوافق مع توقيت غزة (UTC+3) ★★
+# 7 صباحاً بتوقيت غزة = 04:00 UTC | 21 مساءً بتوقيت غزة = 18:00 UTC
+NIGHT_START_HOUR = 0   # يبدأ الحظر منتصف الليل (بتوقيت الموقع/غزة)
+NIGHT_END_HOUR = 7     # ينتهي الحظر الساعة 7 صباحاً (بتوقيت الموقع/غزة)
 
 # مدة الصفقة بالدقائق (ساعة واحدة = 60 دقيقة)
 TRADE_DURATION_MINUTES = 60
@@ -142,7 +145,7 @@ class StateManager:
             self.save()
 
     def save(self):
-        """حفظ ذرّي آمن: نكتب مؤقتاً ثم نستبدل بذرة واحدة."""
+        """حفظ ذرّي آمن: نكتب مؤقتا ثم نستبدل بذرة واحدة."""
         try:
             temp_file = self.filepath.with_suffix('.tmp')
             with open(temp_file, 'w', encoding='utf-8') as f:
@@ -264,7 +267,7 @@ def check_signal_logic(df: pd.DataFrame):
     return signal_direction
 
 # ═══════════════════════════════════════════════
-# 6. ★★★ الحسم التلقائي المُصحح جذرياً ★★★
+# 6. ★★★ الحسم التلقائي المصحح جذريا ★★★
 # ═══════════════════════════════════════════════
 
 def resolve_pending_trades(sm: StateManager):
@@ -304,7 +307,7 @@ def resolve_pending_trades(sm: StateManager):
             pips_diff = abs(diff) * pip_mult
             log.info(f"Entry={entry_px} Exit={exit_px} Diff={diff} Pips={pips_diff:.2f}")
             rid = trade.get('telegram_message_id')
-            # سوق ساكن حقاً (أقل من نصف نقطة)
+            # سوق ساكن حقا (أقل من نصف نقطة)
             if pips_diff < 0.5:
                 send_telegram(
                     f"⚪ *Result for {sym} ({dr}):*\n"
@@ -351,9 +354,16 @@ def resolve_pending_trades(sm: StateManager):
 def scan_and_alert(sm: StateManager):
     log.info(">>> Scanning market for new signals...")
     now_utc = datetime.now(timezone.utc)
-    if NIGHT_START_HOUR <= now_utc.hour < NIGHT_END_HOUR:
-        log.info("Night ban active (00:00 - 09:00 UTC). Skipping scan.")
+    
+    # ★★ التعديل هنا: استخدام التوقيت المحلي (غزة) للحظر الليلي ★★
+    # بما أن النبضة تعمل بتوقيت Hebron، نحول الوقت الحالي لنفس النطاق الزمني للفحص
+    hebron_tz = timezone(timedelta(hours=3)) 
+    local_now = now_utc.astimezone(hebron_tz)
+    
+    if NIGHT_START_HOUR <= local_now.hour < NIGHT_END_HOUR:
+        log.info(f"Night ban active ({local_now.strftime('%H:%M')} Local Time). Skipping scan.")
         return
+        
     open_positions_syms = {t['symbol'] for t in sm.get_pending_trades()}
     new_signals_count = 0
     for sym in TRADING_SYMBOLS:
