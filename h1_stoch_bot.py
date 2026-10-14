@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-H1 Stochastic Ultimate Bot - v4.2 (Optimized Timing for Gaza Market Hours)
-التعديلات:
-1. تصحيح حساب مناطق الدخول (point_value = 1/pip_mult).
-2. تصحيح توقيت الحسم لانتظار إغلاق شمعة الخروج (حل VOID الجذري).
-3. حفظ ذرّي للملف (os.replace).
-4. فرض timezone على fromisoformat.
-5. استعادة التقارير الأسبوعية والشهرية.
-6. ★★ تعديل التوقيت: بدء التداول الساعة 9 صباحاً (غزة) لتجنب ضعف سيولة الصباح الباكر ★★
+H1 Stochastic Ultimate Bot - v4.3 (Smart Retry Resolution Fix)
+الإصلاحات النهائية:
+1. ★★ حل جذري لمشكلة عدم وصول رسائل الحسم (آلية إعادة محاولة ذكية ضد تأخر yfinance) ★★
+2. تصحيح حساب مناطق الدخول (point_value = 1/pip_mult).
+3. توقيت غزة المحلي: يعمل 9 صباحاُ -> 12 منتصف الليل، ينام 12 -> 9 صباحاُ.
+4. حفظ ذرّي آمن للملفات (os.replace).
+5. فرض timezone على fromisoformat.
+6. استعادة التقارير الأسبوعية والشهرية.
+ملاحظة: منطق الاستراتيجية (check_signal_logic) والتجميد والعداد لم تُمَس إطلاقاُ.
 """
 import os, sys, time, json, logging, uuid
 from datetime import datetime, timedelta, timezone
@@ -27,8 +28,8 @@ except ImportError:
 # ═══════════════════════════════════════════════
 # 1. الإعدادات العامة
 # ═══════════════════════════════════════════════
-BOT_NAME = "H1_Ultimate_Bot_V4_2_Gaza_Time"
-STATE_FILE = "state_h1_ultimate_v42.json" # ملف حالة جديد لضمان النظافة
+BOT_NAME = "H1_Ultimate_Bot_V4_3_Gaza_Time"
+STATE_FILE = "state_h1_ultimate_v43.json" # ملف حالة جديد لضمان النظافة
 LOG_LEVEL = logging.INFO
 
 TRADING_SYMBOLS = [
@@ -44,15 +45,14 @@ OVERSOLD_ZONE = 10
 EMA_PERIOD = 200
 
 # ★★ التعديل الجوهري: توقيت غزة المحلي ★★
-# الحظر الليلي يبدأ منتصف الليل وينتهي الساعة 9 صباحاً بتوقيت غزة
-# (الساعة 9 صباحاً غزة = 06:00 UTC، حيث تبدأ الجلسة الأوروبية بالتسخين)
+# الحظر الليلي يبدأ منتصف الليل وينتهي الساعة 9 صباحاُ بتوقيت غزة
 NIGHT_START_HOUR = 0   
 NIGHT_END_HOUR = 9     
 
 # مدة الصفقة بالدقائق (ساعة واحدة = 60 دقيقة)
 TRADE_DURATION_MINUTES = 60
 # هامش انتظار إغلاق شمعة الخروج + تحديث البيانات
-EXIT_GRACE_MINUTES = 3
+EXIT_GRACE_MINUTES = 1 # قللناه لدقيقة لأننا سنعيد المحاولة داخلياُ
 
 TG_TOKEN = os.getenv("TG_TOKEN", "").strip()
 TG_CHAT = os.getenv("TG_CHAT", "").strip()
@@ -146,7 +146,7 @@ class StateManager:
             self.save()
 
     def save(self):
-        """حفظ ذرّي آمن: نكتب مؤقتا ثم نستبدل بذرة واحدة."""
+        """حفظ ذرّي آمن: نكتب مؤقتاُ ثم نستبدل بذرة واحدة."""
         try:
             temp_file = self.filepath.with_suffix('.tmp')
             with open(temp_file, 'w', encoding='utf-8') as f:
@@ -268,47 +268,77 @@ def check_signal_logic(df: pd.DataFrame):
     return signal_direction
 
 # ═══════════════════════════════════════════════
-# 6. ★★★ الحسم التلقائي المصحح جذريا ★★★
+# 6. ★★★ الحسم التلقائي الذكي (مع آلية إعادة المحاولة) ★★★
 # ═══════════════════════════════════════════════
 
 def resolve_pending_trades(sm: StateManager):
     pending = sm.get_pending_trades()
     if not pending:
         return
+    
     now_utc = datetime.now(timezone.utc)
     resolved_ids = []
     log.info(f">>> Checking {len(pending)} pending trades...")
+    
     for trade in pending:
         try:
             entry_dt = ensure_utc(datetime.fromisoformat(trade['entry_time']))
-            # شمعة الخروج تبدأ بعد مدة الصفقة، وتغلق بعدها بمدة الصفقة
+            
+            # حساب وقت إغلاق شمعة الخروج
             exit_candle_start = entry_dt + timedelta(minutes=TRADE_DURATION_MINUTES)
             exit_candle_close = exit_candle_start + timedelta(minutes=TRADE_DURATION_MINUTES)
-            # ننتظر إغلاق شمعة الخروج + هامش تحديث البيانات
+            
+            # ننتظر إغلاق الشمعة + هامش بسيط جداُ (دقيقة واحدة فقط الآن لأننا سنعيد المحاولة داخلياُ)
             check_time = exit_candle_close + timedelta(minutes=EXIT_GRACE_MINUTES)
+            
             if now_utc < check_time:
                 continue
+            
             sym = trade['symbol']
             dr = trade['direction']
             entry_px = float(trade['entry_price'])
-            log.info(f"Resolving {sym} | entry_start={entry_dt} | exit_candle={exit_candle_start}")
-            df_exit_full = fetch_h1_data(sym, period_days=3)
-            if df_exit_full is None or df_exit_full.empty:
-                log.warning(f"No exit data for {sym}. Retry next cycle.")
+            
+            log.info(f"Resolving {sym} | Target Close Time: {exit_candle_close}")
+            
+            # ★★ آلية إعادة المحاولة الذكية (Retry Loop) ★★
+            exit_px = None
+            max_retries = 3
+            retry_delay = 5 # ثواني
+            
+            for attempt in range(max_retries):
+                df_exit_full = fetch_h1_data(sym, period_days=3)
+                
+                if df_exit_full is None or df_exit_full.empty:
+                    log.warning(f"Attempt {attempt+1}: No data returned for {sym}. Retrying in {retry_delay}s...")
+                    time.sleep(retry_delay)
+                    continue
+                
+                # البحث عن الشمعة المطلوبة
+                mask = df_exit_full.index >= exit_candle_start
+                
+                if not mask.any():
+                    log.warning(f"Attempt {attempt+1}: Candle {exit_candle_start} not found yet. Data might be lagging. Retrying...")
+                    time.sleep(retry_delay)
+                    continue
+                
+                # نجحنا في العثور على الشمعة!
+                exit_px = float(df_exit_full[mask].iloc[0]['Close'])
+                break # خروج من حلقة重试
+            
+            # إذا فشلت كل المحاولات، نخرج ونحاول مرة أخرى في الدورة القادمة (بعد 30 دقيقة)
+            if exit_px is None:
+                log.error(f"All retries failed for {sym}. Will try again next cycle.")
                 continue
-            # نأخذ أول شمعة تبدأ عند/بعد وقت بداية شمعة الخروج
-            mask = df_exit_full.index >= exit_candle_start
-            if not mask.any():
-                # شمعة الخروج غير متاحة بعد -> لا نحسب VOID كاذب، ننتظر
-                log.warning(f"Exit candle not ready for {sym}. Retry next cycle.")
-                continue
-            exit_px = float(df_exit_full[mask].iloc[0]['Close'])
+
             pip_mult = get_pip_multiplier(sym)
             diff = exit_px - entry_px
             pips_diff = abs(diff) * pip_mult
-            log.info(f"Entry={entry_px} Exit={exit_px} Diff={diff} Pips={pips_diff:.2f}")
+            
+            log.info(f"Success! Entry={entry_px} Exit={exit_px} Diff={diff} Pips={pips_diff:.2f}")
+            
             rid = trade.get('telegram_message_id')
-            # سوق ساكن حقا (أقل من نصف نقطة)
+            
+            # سوق ساكن حقاُ
             if pips_diff < 0.5:
                 send_telegram(
                     f"⚪ *Result for {sym} ({dr}):*\n"
@@ -325,8 +355,10 @@ def resolve_pending_trades(sm: StateManager):
                 })
                 resolved_ids.append(trade['id'])
                 continue
+                
             win = (diff > 0) if dr == 'CALL' else (diff < 0)
             result_emoji = "✅ WIN" if win else "❌ LOSS"
+            
             send_telegram(
                 f"{result_emoji} *Result for {sym} ({dr}):*\n"
                 f"• Entry: `{entry_px:.5f}`\n"
@@ -335,6 +367,7 @@ def resolve_pending_trades(sm: StateManager):
                 f"• P/L: `{abs(diff)/entry_px*100:.3f}%`",
                 reply_to=rid
             )
+            
             sm.archive_trade({
                 "id": trade['id'], "symbol": sym, "direction": dr,
                 "entry_price": entry_px, "exit_price": exit_px,
@@ -343,8 +376,10 @@ def resolve_pending_trades(sm: StateManager):
             })
             resolved_ids.append(trade['id'])
             log.info(f"Resolved {trade['id']} {sym}: {'WIN' if win else 'LOSS'} ({pips_diff:.1f} pips)")
+            
         except Exception as e:
             log.error(f"Error resolving trade {trade.get('id')}: {e}", exc_info=True)
+            
     for tid in resolved_ids:
         sm.remove_pending_trade(tid)
 
@@ -361,7 +396,7 @@ def scan_and_alert(sm: StateManager):
     hebron_tz = timezone(timedelta(hours=3)) 
     local_now = now_utc.astimezone(hebron_tz)
     
-    # الشرط الجديد: النوم حتى الساعة 9 صباحاً بتوقيت غزة
+    # الشرط الجديد: النوم حتى الساعة 9 صباحاُ بتوقيت غزة
     if NIGHT_START_HOUR <= local_now.hour < NIGHT_END_HOUR:
         log.info(f"Night ban active ({local_now.strftime('%H:%M')} Local Time). Skipping scan.")
         return
@@ -409,11 +444,11 @@ def scan_and_alert(sm: StateManager):
             f"• قوية (عند الباند): `{optimal_entry_min:.5f} - {optimal_entry_max:.5f}`\n"
             f"• وسطى (مقبولة): `{live_price:.5f}`\n\n"
             f"*التعليمات:*\n"
-            f"✅ ادخل فورا خلال 60 ثانية\n"
+            f"✅ ادخل فوراُ خلال 60 ثانية\n"
             f"(السعر عند الباند — فرصة مثالية)\n\n"
             f"*السبب:* التقاطع في منطقة التشبع المتطرف "
-            f"(Stoch K={k_val:.1f}, D={d_val:.1f}) متوافقا مع اتجاه EMA200.\n"
-            f"_النتيجة ستسجل تلقائيا بعد إغلاق شمعة الخروج._"
+            f"(Stoch K={k_val:.1f}, D={d_val:.1f}) متوافقاُ مع اتجاه EMA200.\n"
+            f"_النتيجة ستسجل تلقائياُ بعد إغلاق شمعة الخروج._"
         )
         mid_id = send_telegram(alert_msg)
         if mid_id:
