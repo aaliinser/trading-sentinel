@@ -1,18 +1,24 @@
-name: H1 Stochastic Ultimate Bot (v3.1)
+name: H1 Stochastic Bot (State Persistent v4.5 - Final Fix)
 
 on:
+  workflow_dispatch: # للتشغيل اليدوي الفوري
   schedule:
-    # يعمل كل ساعة عند الدقيقة 0 (متزامن مع إغلاق شموع H1)
-    - cron: '0 * * * *'
-  workflow_dispatch: # يسمح بالتشغيل اليدوي للاختبار
+    # نبضة كل 30 دقيقة عند :03 و :33 (مثالي لفريم الساعة + هامش تحديث البيانات)
+    - cron: '3,33 * * * *' 
+
+permissions:
+  contents: write   # ★ ضروري جداً: السماح للبوت بحفظ الحالة في المستودع ★
+
+concurrency:
+  group: h1-bot     # منع تشغيل دورتين في نفس الوقت لتجنب تضارب الملفات
+  cancel-in-progress: false
 
 jobs:
-  run-h1-bot:
+  run-bot:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
     
     steps:
-      # 1. تحميل الكود من المستودع
+      # 1. سحب الكود الحالي
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -20,39 +26,36 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.x'
 
-      # 3. تثبيت المكتبات المطلوبة
+      # 3. تثبيت المكتبات
       - name: Install dependencies
         run: |
-          pip install --upgrade pip
-          pip install requests numpy pandas yfinance
+          pip install yfinance pandas numpy requests
 
-      # 4. استعادة حالة البوت السابقة (صفقات مفتوحة + سجلات)
-      # ★★ ملاحظة هامة: يجب أن يطابق المسار هنا STATE_FILE في الكود ★★
-      - name: Restore previous state artifact
-        id: restore-state
-        uses: actions/cache@v4
-        with:
-          path: ./state_h1_ultimate.json  # <-- يطابق STATE_FILE في كود البايثون
-          key: h1-ultimate-state-${{ github.run_id }}
-          restore-keys: |
-            h1-ultimate-state-
-
-      # 5. تشغيل سكربت البوت
-      # ★★ تم تعديل السطر التالي ليطابق اسم ملفك h1_stoch_bot.py ★★
-      - name: Run H1 Ultimate Bot Script
+      # 4. تشغيل البوت (الكود v4.5 المصحح)
+      - name: Run H1 Bot Script
         env:
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
           TG_CHAT: ${{ secrets.TG_CHAT }}
-        run: python h1_stoch_bot.py 
+        run: python h1_bot.py  # ← تأكد أن اسم الملف هنا هو h1_bot.py
 
-      # 6. حفظ الحالة الجديدة بعد انتهاء الدورة
-      # if: always() يضمن الحفظ حتى لو فشل السكربت لسبب طفيف، لحماية البيانات
-      - name: Upload current state artifact
-        if: always() 
-        uses: actions/upload-artifact@v4
-        with:
-          name: h1-ultimate-state-current
-          path: ./state_h1_ultimate.json   # <-- نفس المسار أعلاه
-          retention-days: 1
+      # ★★ الخطوة الحاسمة: حفظ الحالة كـ Commit في GitHub ★★
+      # هذه الخطوة تضمن أن الصفقات المفتوحة لا تضيع بين الدورات
+      - name: Persist bot state (commit & push)
+        if: always() # حتى لو فشل البوت، نحاول حفظ ما تم إنجازه
+        run: |
+          git config user.name "h1-bot"
+          git config user.email "h1-bot@users.noreply.github.com"
+          
+          # إضافة ملف الحالة فقط
+          git add state_h1_ultimate_v45.json
+          
+          # التحقق إذا كان هناك تغييرات حقيقية للحفظ
+          if git diff --cached --quiet; then
+            echo ">>> State unchanged. No commit needed."
+          else
+            git commit -m "chore: persist H1 bot state [skip ci]"
+            git push origin HEAD:${{ github.ref_name }}
+            echo ">>> State pushed to repository successfully."
+          fi
