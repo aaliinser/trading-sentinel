@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-H1 Stochastic Ultimate Bot - v4.4 (Independent Resolution & Daily Summary)
-الإصلاحات النهائية والحاسمة:
-1. ★★ إلغاء نظام Reply واستبداله برسائل مستقلة (حل جذري لمشكلة State Loss في GitHub Actions) ★★
-2. ★★ إضافة ملخص يومي لحظي يُرسل تلقائياُ بعد كل حسم ناجح ★★
-3. آلية إعادة محاولة ذكية (Retry Loop) ضد تأخر بيانات yfinance.
-4. توقيت غزة المحلي: يعمل 9 صباحاُ -> 12 منتصف الليل، ينام 12 -> 9 صباحاُ.
-5. حفظ ذرّي آمن للملفات (os.replace).
-ملاحظة: منطق الاستراتيجية (check_signal_logic) والتجميد والعداد لم تُمَس إطلاقاُ.
+H1 Stochastic Ultimate Bot - v4.5 (Kimi Logic Applied & Fixed Resolution)
+الإصلاحات النهائية والحاسمة (مطبقة من منطق الـ M15 v3.8.2):
+1. ★★ إصلاح جذري لنافذة زمنية الحسم (استخدام وقت بداية الشمعة بدقة رياضية) ★★
+   - شمعة الدخول: entry_dt -> entry_dt + 60 دقيقة.
+   - شمعة الخروج: entry_dt + 60 -> entry_dt + 120 دقيقة.
+   - سعر الخروج = إغلاق الشمعة الثانية.
+2. ★★ إلغاء نظام Reply واستبداله برسائل مستقلة (حل لمشكلة State Loss في GitHub Actions) ★★
+3. ★★ إضافة آلية Retry Loop ذكية لجلب بيانات yfinance ضد التأخير اللحظي ★★
+4. ★★ تعديل التقارير لمنع السبام وإرسالها مرة واحدة فقط عند منتصف الليل بتوقيت غزة ★★
+5. توقيت غزة المحلي: يعمل 9 صباحاُ -> 12 منتصف الليل، ينام 12 -> 9 صباحاُ.
+ملاحظة: منطق الاستراتيجية (check_signal_logic) لم يُمَس إطلاقاُ.
 """
 import os, sys, time, json, logging, uuid
 from datetime import datetime, timedelta, timezone
@@ -27,8 +30,8 @@ except ImportError:
 # ═══════════════════════════════════════════════
 # 1. الإعدادات العامة
 # ═══════════════════════════════════════════════
-BOT_NAME = "H1_Ultimate_Bot_V4_4_Gaza_Time"
-STATE_FILE = "state_h1_ultimate_v44.json" # ملف حالة جديد لضمان النظافة الكاملة
+BOT_NAME = "H1_Ultimate_Bot_V4_5_Gaza_Time_Fixed"
+STATE_FILE = "state_h1_ultimate_v45.json" # ملف حالة جديد لضمان النظافة
 LOG_LEVEL = logging.INFO
 
 TRADING_SYMBOLS = [
@@ -47,8 +50,8 @@ EMA_PERIOD = 200
 NIGHT_START_HOUR = 0   
 NIGHT_END_HOUR = 9     
 
-TRADE_DURATION_MINUTES = 60
-EXIT_GRACE_MINUTES = 1 
+TRADE_DURATION_MINUTES = 60 # مدة الصفقة ساعة واحدة
+EXIT_GRACE_MINUTES = 2      # هامش انتظار تحديث البيانات بعد الإغلاق
 
 TG_TOKEN = os.getenv("TG_TOKEN", "").strip()
 TG_CHAT = os.getenv("TG_CHAT", "").strip()
@@ -68,9 +71,6 @@ def get_pip_multiplier(symbol: str) -> float:
     if "JPY" in symbol.upper():
         return 100.0
     return 10000.0
-
-def get_point_value(symbol: str) -> float:
-    return 1.0 / get_pip_multiplier(symbol)
 
 def ensure_utc(dt: datetime) -> datetime:
     if dt.tzinfo is None:
@@ -113,7 +113,7 @@ class StateManager:
             "pending_trades": [],
             "history": [],
             "processed_candles": [],
-            "last_daily_summary_date": "" # لتجنب تكرار الملخص اليومي بنفس اليوم
+            "last_daily_report_date": "" # ★★ متغير جديد لمنع تكرار التقرير ★★
         }
         self.load()
 
@@ -134,6 +134,7 @@ class StateManager:
             self.save()
 
     def save(self):
+        """حفظ ذرّي آمن"""
         try:
             temp_file = self.filepath.with_suffix('.tmp')
             with open(temp_file, 'w', encoding='utf-8') as f:
@@ -177,33 +178,50 @@ class StateManager:
         return candle_key in self.data["processed_candles"]
 
 # ═══════════════════════════════════════════════
-# 4. محرك البيانات
+# 4. محرك البيانات (مع Retry Loop)
 # ═══════════════════════════════════════════════
 
 def fetch_h1_data(symbol: str, period_days: int = 7):
+    """★★ v4.5: Retry Loop حقيقي ضد تأخر yfinance ★★"""
+    df = None
+    for attempt in range(3):
+        try:
+            ticker = yf.Ticker(symbol)
+            df = ticker.history(period=f"{period_days}d", interval="1h",
+                                auto_adjust=False, actions=False)
+            if df is not None and not df.empty:
+                break
+            log.warning(f"[{symbol}] Empty data from yfinance (attempt {attempt+1}/3). Retrying in 3s...")
+            time.sleep(3)
+        except Exception as e:
+            log.error(f"Error fetching data for {symbol} (attempt {attempt+1}/3): {e}")
+            time.sleep(3)
+
+    if df is None or df.empty:
+        return None
+
     try:
-        ticker = yf.Ticker(symbol)
-        df = ticker.history(period=f"{period_days}d", interval="1h",
-                            auto_adjust=False, actions=False)
-        if df is None or df.empty:
-            log.warning(f"No data returned for {symbol}")
-            return None
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = [str(c[0]) for c in df.columns]
+        
         required_cols = ["Open", "High", "Low", "Close"]
         missing = [c for c in required_cols if c not in df.columns]
         if missing:
             log.error(f"Missing columns for {symbol}: {missing}")
             return None
+            
         df = df[required_cols].copy()
         df.index = pd.to_datetime(df.index, utc=True)
         df = df[~df.index.duplicated()].sort_index().dropna()
+        
         now_utc = pd.Timestamp.now(tz="UTC")
-        if not df.empty and df.index[-1] + pd.Timedelta(minutes=60, seconds=30) > now_utc:
+        # حذف الشمعة الجارية (فهرس yfinance = بداية الشمعة؛ الشمعة جارية إذا لم تكتمل ساعتها)
+        if not df.empty and df.index[-1] + pd.Timedelta(hours=1, minutes=30) > now_utc:
             df = df.iloc[:-1]
+            
         return df
     except Exception as e:
-        log.error(f"Error fetching data for {symbol}: {e}")
+        log.error(f"Data Processing Error [{symbol}]: {e}")
         return None
 
 def calculate_indicators(df: pd.DataFrame):
@@ -221,7 +239,7 @@ def calculate_indicators(df: pd.DataFrame):
     return df
 
 # ═══════════════════════════════════════════════
-# 5. منطق الاستراتيجية
+# 5. منطق الاستراتيجية (لم يُمَس)
 # ═══════════════════════════════════════════════
 
 def check_signal_logic(df: pd.DataFrame):
@@ -253,7 +271,7 @@ def check_signal_logic(df: pd.DataFrame):
     return signal_direction
 
 # ═══════════════════════════════════════════════
-# 6. ★★★ الحسم التلقائي المستقل (بدون Reply) ★★★
+# 6. ★★★ الحسم التلقائي المصحح جذريا (منطق Kimi) ★★★
 # ═══════════════════════════════════════════════
 
 def resolve_pending_trades(sm: StateManager):
@@ -269,45 +287,45 @@ def resolve_pending_trades(sm: StateManager):
         try:
             entry_dt = ensure_utc(datetime.fromisoformat(trade['entry_time']))
             
-            exit_candle_start = entry_dt + timedelta(minutes=TRADE_DURATION_MINUTES)
-            exit_candle_close = exit_candle_start + timedelta(minutes=TRADE_DURATION_MINUTES)
-            check_time = exit_candle_close + timedelta(minutes=EXIT_GRACE_MINUTES)
+            # ★★ التصحيح الجوهري هنا ★★
+            # entry_dt هو وقت *بداية* شمعة الدخول (مثال 10:00).
+            # شمعة الدخول تغلق عند 11:00.
+            # شمعة الخروج تبدأ 11:00 وتغلق 12:00.
+            exit_candle_start = entry_dt + timedelta(minutes=TRADE_DURATION_MINUTES) # 11:00
+            exit_candle_close = exit_candle_start + timedelta(minutes=TRADE_DURATION_MINUTES) # 12:00
             
-            if now_utc < check_time:
+            # ننتظر إغلاق شمعة الخروج + هامش تحديث البيانات
+            check_ready_time = exit_candle_close + timedelta(minutes=EXIT_GRACE_MINUTES) # 12:02
+            
+            if now_utc < check_ready_time:
                 continue
             
             sym = trade['symbol']
             dr = trade['direction']
             entry_px = float(trade['entry_price'])
             
-            log.info(f"Resolving {sym} | Target Close Time: {exit_candle_close}")
+            log.info(f"Resolving {sym} | Target Exit Close: {exit_candle_close}")
             
-            # ★★ آلية إعادة المحاولة الذكية ★★
-            exit_px = None
-            max_retries = 3
-            retry_delay = 5
-            
-            for attempt in range(max_retries):
-                df_exit_full = fetch_h1_data(sym, period_days=3)
-                
-                if df_exit_full is None or df_exit_full.empty:
-                    log.warning(f"Attempt {attempt+1}: No data returned for {sym}. Retrying...")
-                    time.sleep(retry_delay)
-                    continue
-                
-                mask = df_exit_full.index >= exit_candle_start
-                
-                if not mask.any():
-                    log.warning(f"Attempt {attempt+1}: Candle {exit_candle_start} not found yet. Retrying...")
-                    time.sleep(retry_delay)
-                    continue
-                
-                exit_px = float(df_exit_full[mask].iloc[0]['Close'])
-                break
-            
-            if exit_px is None:
-                log.error(f"All retries failed for {sym}. Will try again next cycle.")
+            df_exit_full = fetch_h1_data(sym, period_days=3)
+            if df_exit_full is None or df_exit_full.empty:
+                log.warning(f"No exit data for {sym}. Retry next cycle.")
                 continue
+                
+            # البحث عن الشمعة التي تبدأ عند/بعد وقت بداية شمعة الخروج
+            target_ts = pd.Timestamp(exit_candle_start)
+            future_mask = df_exit_full.index >= target_ts
+            
+            if not future_mask.any():
+                # احتياطي لنقص البيانات
+                past_mask = df_exit_full.index < target_ts
+                if past_mask.any():
+                    exit_px = float(df_exit_full[past_mask].iloc[-1]['Close'])
+                    log.warning(f"Exit candle not ready for {sym}, using fallback last close.")
+                else:
+                    log.error(f"No candles at all for {sym}. Skipping.")
+                    continue
+            else:
+                exit_px = float(df_exit_full[future_mask].iloc[0]['Close'])
 
             pip_mult = get_pip_multiplier(sym)
             diff = exit_px - entry_px
@@ -315,15 +333,15 @@ def resolve_pending_trades(sm: StateManager):
             
             log.info(f"Success! Entry={entry_px} Exit={exit_px} Diff={diff} Pips={pips_diff:.2f}")
             
-            # ★★ إرسال رسالة مستقلة بدل الرد ★★
+            rid = trade.get('telegram_message_id') # retained just in case, but we won't use it for reply
+            
+            # سوق ساكن حقاُ
             if pips_diff < 0.5:
-                result_msg = (
-                    f"⚪ *H1 Result for {sym} ({dr}):*\n\n"
-                    f"• Entry: `{entry_px:.5f}`\n"
-                    f"• Exit: `{exit_px:.5f}`\n"
-                    f"• Status: _Market flat (Void)_\n"
-                    f"• Time: `{now_utc.strftime('%H:%M')} UTC`"
-                )
+                result_msg = (f"⚪ *H1 Result for {sym} ({dr}):*\n\n"
+                              f"• Entry: `{entry_px:.5f}`\n"
+                              f"• Exit: `{exit_px:.5f}`\n"
+                              f"• Status: _Market flat (Void)_\n"
+                              f"• Time: `{now_utc.strftime('%H:%M')} UTC`")
                 send_telegram(result_msg)
                 sm.archive_trade({
                     "id": trade['id'], "symbol": sym, "direction": dr,
@@ -337,14 +355,13 @@ def resolve_pending_trades(sm: StateManager):
             win = (diff > 0) if dr == 'CALL' else (diff < 0)
             result_emoji = "✅ WIN" if win else "❌ LOSS"
             
-            result_msg = (
-                f"{result_emoji} *H1 Result for {sym} ({dr}):*\n\n"
-                f"• Entry: `{entry_px:.5f}`\n"
-                f"• Exit: `{exit_px:.5f}`\n"
-                f"• Pips: `{pips_diff:.1f}`\n"
-                f"• P/L: `{abs(diff)/entry_px*100:.3f}%`\n"
-                f"• Time: `{now_utc.strftime('%H:%M')} UTC`"
-            )
+            # ★★ إرسال رسالة مستقلة بدل الرد ★★
+            result_msg = (f"{result_emoji} *H1 Result for {sym} ({dr}):*\n\n"
+                          f"• Entry: `{entry_px:.5f}`\n"
+                          f"• Exit: `{exit_px:.5f}`\n"
+                          f"• Pips: `{pips_diff:.1f}`\n"
+                          f"• P/L: `{abs(diff)/entry_px*100:.3f}%`\n"
+                          f"• Time: `{now_utc.strftime('%H:%M')} UTC`")
             
             send_telegram(result_msg)
             
@@ -358,53 +375,89 @@ def resolve_pending_trades(sm: StateManager):
             log.info(f"Resolved {trade['id']} {sym}: {'WIN' if win else 'LOSS'}")
             
         except Exception as e:
-            log.error(f"Error resolving trade {trade.get('id')}: {e}", exc_info=True)
+            log.error(f"Critical Error resolving trade {trade.get('id')}: {e}", exc_info=True)
             
     for tid in resolved_ids:
         sm.remove_pending_trade(tid)
 
 # ═══════════════════════════════════════════════
-# 7. ★★ الملخص اليومي اللحظي ★★
+# 7. نظام التقارير (معدل لمنع السبام)
 # ═══════════════════════════════════════════════
 
-def generate_instant_daily_summary(sm: StateManager):
-    """يرسل ملخصاَ لحظياَ لأداء اليوم الحالي فقط إذا كانت هناك صفقات محسومة"""
+def generate_reports(sm: StateManager):
     now_utc = datetime.now(timezone.utc)
-    today_str = now_utc.strftime("%Y-%m-%d")
+    hebron_tz = timezone(timedelta(hours=3))
+    local_now = now_utc.astimezone(hebron_tz)
     
+    # ★★ الشرط الزمني: 00:00 - 00:10 بتوقيت غزة فقط ★★
+    if not (local_now.hour == 0 and local_now.minute < 10):
+        return
+
+    # ★★ التحقق من عدم إرسال التقرير لهذا اليوم مسبقاُ ★★
+    today_local_str = local_now.strftime("%Y-%m-%d")
+    if sm.data.get("last_daily_report_date") == today_local_str:
+        log.debug("Daily report already sent for today. Skipping.")
+        return
+
     history = sm.data.get("history", [])
     if not history:
         return
 
-    # فلترة صفقات اليوم المنتهية فقط
-    daily_resolved = [t for t in history 
-                      if str(t.get('resolved_at', '')).startswith(today_str) 
-                      and t.get('status') == 'RESOLVED']
+    # تحديد نطاق "أمس" بتوقيت غزة المحلي
+    yesterday_local_date = (local_now - timedelta(days=1)).date()
     
-    if not daily_resolved:
-        return # لا توجد صفقات محسومة اليوم
+    daily_trades = []
+    for t in history:
+        try:
+            exit_time_str = t.get('resolved_at', '')
+            if not exit_time_str: continue
+            
+            exit_dt_utc = datetime.fromisoformat(exit_time_str)
+            if exit_dt_utc.tzinfo is None:
+                exit_dt_utc = exit_dt_utc.replace(tzinfo=timezone.utc)
+                
+            exit_dt_gaza = exit_dt_utc.astimezone(hebron_tz)
+            
+            if exit_dt_gaza.date() == yesterday_local_date:
+                daily_trades.append(t)
+        except Exception:
+            continue
 
-    total = len(daily_resolved)
-    wins = sum(1 for t in daily_resolved if t.get('win') is True)
-    losses = sum(1 for t in daily_resolved if t.get('win') is False)
+    if not daily_trades:
+        log.info(f"No trades resolved on {yesterday_local_date}. Marking report as sent.")
+        sm.data["last_daily_report_date"] = today_local_str
+        sm.save()
+        return
+
+    total = len(daily_trades)
+    wins = sum(1 for t in daily_trades if t.get('win') is True)
+    losses = sum(1 for t in daily_trades if t.get('win') is False)
+    voids = total - wins - losses
     
     wr = (wins / total * 100) if total > 0 else 0.0
-    net_pips = sum(t.get('pips', 0) for t in daily_resolved if t.get('win') is True) - \
-               sum(t.get('pips', 0) for t in daily_resolved if t.get('win') is False)
-
-    emoji_wr = "🟢" if wr >= 60 else ("🟡" if wr >= 40 else "🔴")
     
-    summary_msg = (
-        f"*📊 H1 Instant Daily Update ({today_str})*\n\n"
-        f"*Trades Closed Today:* `{total}`\n"
-        f"*Wins:* ✅ `{wins}` | *Losses:* ❌ `{losses}`\n\n"
-        f"*Win Rate:* {emoji_wr} `{wr:.1f}%`\n"
-        f"*Net Pips:* `{net_pips:+.1f}`\n\n"
-        f"_Updated automatically after last resolution._"
+    net_pips = sum(t.get('pips', 0) for t in daily_trades if t.get('win') is True) - \
+               sum(t.get('pips', 0) for t in daily_trades if t.get('win') is False)
+
+    emoji_wr = "🟢 ممتاز" if wr >= 60 else ("🟡 جيد" if wr >= 40 else "🔴 يحتاج مراجعة")
+    
+    report_msg = (
+        f"*🌙 ملخص أداء السوق H1 ({yesterday_local_date})*\n\n"
+        f"📊 *إجمالي الصفقات:* `{total}`\n"
+        f"✅ *الرابحة:* `{wins}` | ❌ *الخاسرة:* `{losses}` | ⚪ *لاغية:* `{voids}`\n\n"
+        f"🏆 *نسبة الفوز:* {emoji_wr} `{wr:.1f}%`\n"
+        f"💰 *صافي الحركة:* `{net_pips:+.1f} Pips`\n\n"
+        f"_انتهت جلسة التداول اليومية._"
     )
     
-    send_telegram(summary_msg)
-    log.info("Instant daily summary sent.")
+    success = send_telegram(report_msg)
+    
+    if success:
+        sm.data["last_daily_report_date"] = today_local_str
+        sm.save()
+        log.info(f"Daily Report Sent Successfully for {yesterday_local_date}.")
+    else:
+        log.error("Failed to send Daily Report. Will retry in next cycle within window.")
 
 # ═══════════════════════════════════════════════
 # 8. مسح الإشارات
@@ -449,34 +502,28 @@ def scan_and_alert(sm: StateManager):
         live_price = float(last_row['Close'])
         k_val = float(last_row['STOCH_K'])
         d_val = float(last_row['STOCH_D'])
-        point_value = get_point_value(sym)
-        spread_buffer = 2.0 * point_value
-        optimal_entry_min = live_price - spread_buffer
-        optimal_entry_max = live_price + spread_buffer
+        
         arrow = "🟢 BUY/CALL" if sig_dir == "CALL" else "🔴 SELL/PUT"
         alert_msg = (
             f"*H1 Stochastic Signal Alert!*\n\n"
             f"الزوج: `{sym}`\n"
             f"الاتجاه: {arrow}\n"
             f"السعر الحي الآن: `{live_price:.5f}`\n\n"
-            f"*مناطق الدخول الموصى بها:*\n"
-            f"• قوية (عند الباند): `{optimal_entry_min:.5f} - {optimal_entry_max:.5f}`\n"
-            f"• وسطى (مقبولة): `{live_price:.5f}`\n\n"
             f"*التعليمات:*\n"
-            f"✅ ادخل فورا خلال 60 ثانية\n"
-            f"(السعر عند الباند — فرصة مثالية)\n\n"
+            f"✅ ادخل فوراُ خلال 60 ثانية\n\n"
             f"*السبب:* التقاطع في منطقة التشبع المتطرف "
-            f"(Stoch K={k_val:.1f}, D={d_val:.1f}) متوافقا مع اتجاه EMA200.\n"
+            f"(Stoch K={k_val:.1f}, D={d_val:.1f}) متوافقاُ مع اتجاه EMA200.\n"
             f"_النتيجة ستصلك كرسالة منفصلة فور إغلاق شمعة الخروج._"
         )
-        success = send_telegram(alert_msg)
-        if success:
+        mid_id = send_telegram(alert_msg)
+        if mid_id:
             sm.add_pending_trade({
                 "id": trade_id,
                 "symbol": sym,
                 "direction": sig_dir,
                 "entry_price": live_price,
-                "entry_time": current_candle_time.isoformat()
+                "entry_time": current_candle_time.isoformat(),
+                "telegram_message_id": mid_id
             })
             sm.mark_candle_processed(candle_key)
             new_signals_count += 1
@@ -489,20 +536,13 @@ def scan_and_alert(sm: StateManager):
 
 def main():
     log.info("=" * 50)
-    log.info(f"Starting {BOT_NAME} - INDEPENDENT RESOLUTION MODE")
+    log.info(f"Starting {BOT_NAME} - GAZA TIME OPTIMIZED & FIXED RESOLUTION")
     log.info(f"Current UTC Time: {datetime.now(timezone.utc).strftime('%H:%M:%S')}")
     log.info("=" * 50)
     sm = StateManager(STATE_FILE)
-    
-    # 1. الحسم التلقائي المستقل
     resolve_pending_trades(sm)
-    
-    # 2. إرسال الملخص اليومي اللحظي (إذا تمت عمليات حسم جديدة)
-    generate_instant_daily_summary(sm)
-    
-    # 3. فحص السوق وإرسال إشارات جديدة
+    generate_reports(sm)
     scan_and_alert(sm)
-    
     log.info("Live Cycle Complete.")
 
 if __name__ == "__main__":
