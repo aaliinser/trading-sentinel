@@ -1,61 +1,23 @@
-name: H1 Stochastic Bot (State Persistent v4.5 - Final Fix)
-
-on:
-  workflow_dispatch: # للتشغيل اليدوي الفوري
-  schedule:
-    # نبضة كل 30 دقيقة عند :03 و :33 (مثالي لفريم الساعة + هامش تحديث البيانات)
-    - cron: '3,33 * * * *' 
-
-permissions:
-  contents: write   # ★ ضروري جداً: السماح للبوت بحفظ الحالة في المستودع ★
-
-concurrency:
-  group: h1-bot     # منع تشغيل دورتين في نفس الوقت لتجنب تضارب الملفات
-  cancel-in-progress: false
-
-jobs:
-  run-bot:
-    runs-on: ubuntu-latest
-    
-    steps:
-      # 1. سحب الكود الحالي
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      # 2. تثبيت بايثون
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.x'
-
-      # 3. تثبيت المكتبات
-      - name: Install dependencies
+      # ★★ الخطوة المصححة: حفظ الحالة بأمان حتى لو فشل البوت أو كان الملف جديداً ★★
+      - name: Persist bot state safely
+        if: always() # نفذ هذه الخطوة دائماً سواء نجح البوت أم فشل
         run: |
-          pip install yfinance pandas numpy requests
-
-      # 4. تشغيل البوت (الكود v4.5 المصحح)
-      - name: Run H1 Bot Script
-        env:
-          TG_TOKEN: ${{ secrets.TG_TOKEN }}
-          TG_CHAT: ${{ secrets.TG_CHAT }}
-        run: python h1_bot.py  # ← تأكد أن اسم الملف هنا هو h1_bot.py
-
-      # ★★ الخطوة الحاسمة: حفظ الحالة كـ Commit في GitHub ★★
-      # هذه الخطوة تضمن أن الصفقات المفتوحة لا تضيع بين الدورات
-      - name: Persist bot state (commit & push)
-        if: always() # حتى لو فشل البوت، نحاول حفظ ما تم إنجازه
-        run: |
-          git config user.name "h1-bot"
-          git config user.email "h1-bot@users.noreply.github.com"
+          git config user.name "h1-bot-auto-save"
+          git config user.email "bot@example.com"
           
-          # إضافة ملف الحالة فقط
-          git add state_h1_ultimate_v45.json
-          
-          # التحقق إذا كان هناك تغييرات حقيقية للحفظ
-          if git diff --cached --quiet; then
-            echo ">>> State unchanged. No commit needed."
+          # نتحقق هل الملف موجود فعلاً؟
+          if [ -f "state_h1_ultimate_v45.json" ]; then
+            echo ">>> File found. Attempting to commit..."
+            git add state_h1_ultimate_v45.json
+            
+            # نتحقق هل هناك تغييرات حقيقية تستحق الحفظ؟
+            if ! git diff --cached --quiet; then
+              git commit -m "chore: auto-persist H1 bot state $(date +%Y-%m-%d_%H:%M)"
+              git push origin HEAD:${{ github.ref_name }} || echo "Push failed or no changes."
+            else
+              echo ">>> No new data to save."
+            fi
           else
-            git commit -m "chore: persist H1 bot state [skip ci]"
-            git push origin HEAD:${{ github.ref_name }}
-            echo ">>> State pushed to repository successfully."
+            echo ">>> State file not created by bot (likely due to error in script)."
+            echo ">>> Skipping save step gracefully."
           fi
