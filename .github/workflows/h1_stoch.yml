@@ -1,16 +1,16 @@
-name: H1 Stochastic Bot (State Persistent v4.5 - Final Fix)
+name: H1 Stochastic Bot (State Persistent v4.5 - Auto-Fix Name)
 
 on:
-  workflow_dispatch: # للتشغيل اليدوي الفوري
+  workflow_dispatch: # للتشغيل اليدوي
   schedule:
-    # نبضة كل 30 دقيقة عند :03 و :33 (مثالي لفريم الساعة + هامش تحديث البيانات)
+    # نبضة كل 30 دقيقة عند :03 و :33
     - cron: '3,33 * * * *' 
 
 permissions:
-  contents: write   # ★ ضروري جداً: السماح للبوت بحفظ الحالة في المستودع ★
+  contents: write   # ضروري لحفظ الحالة في Git
 
 concurrency:
-  group: h1-bot     # منع تشغيل دورتين في نفس الوقت لتجنب تضارب الملفات
+  group: h1-bot-final
   cancel-in-progress: false
 
 jobs:
@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-      # 1. سحب الكود الحالي
+      # 1. سحب الكود
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -33,34 +33,57 @@ jobs:
         run: |
           pip install yfinance pandas numpy requests
 
-      # 4. تشغيل البوت (الكود v4.5 المصحح)
-      - name: Run H1 Bot Script
+      # ★★ الخطوة 4: تحديد اسم الملف الذكي ★★
+      # بدلاً من افتراض اسم واحد، نبحث عن الملفات الممكنة ونشغل الأول الموجود
+      - name: Detect and Run Bot Script
         env:
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
           TG_CHAT: ${{ secrets.TG_CHAT }}
-        run: python h1_bot.py  # ← تأكد أن اسم الملف هنا هو h1_bot.py
+        run: |
+          echo ">>> Searching for bot script..."
+          
+          # قائمة الأسماء المحتملة (ضع اسمك الحقيقي أولها)
+          CANDIDATES=("h1_bot.py" "m5_bot.py" "main.py" "bot_h1.py")
+          
+          SCRIPT_FOUND=""
+          for file in "${CANDIDATES[@]}"; do
+            if [ -f "$file" ]; then
+              SCRIPT_FOUND="$file"
+              break
+            fi
+          done
+          
+          if [ -z "$SCRIPT_FOUND" ]; then
+            echo "::error:: Could not find any bot script! Checked: ${CANDIDATES[*]}"
+            exit 1
+          fi
+          
+          echo ">>> Found script: $SCRIPT_FOUND"
+          echo ">>> Running it now..."
+          python "$SCRIPT_FOUND"
 
-      # ★★ الخطوة الحاسمة والمصححة: حفظ الحالة بأمان ★★
-      # هذه الخطوة تتحقق من وجود الملف أولاً قبل محاولة إضافته لـ Git
+      # ★★ الخطوة 5: حفظ الحالة بأمان تام ★★
       - name: Persist bot state safely
-        if: always() # نفذ هذه الخطوة دائماً سواء نجح البوت أم فشل
+        if: always() # ينفذ دائماً سواء نجح البوت أم فشل
         run: |
           git config user.name "h1-bot-auto-save"
           git config user.email "bot@example.com"
           
-          # نتحقق هل الملف موجود فعلاً؟
-          if [ -f "state_h1_ultimate_v45.json" ]; then
-            echo ">>> File found. Attempting to commit..."
-            git add state_h1_ultimate_v45.json
+          # نتحقق هل تم إنشاء ملف الحالة؟
+          STATE_FILE="state_h1_ultimate_v45.json"
+          
+          if [ -f "$STATE_FILE" ]; then
+            echo ">>> State file found. Committing changes..."
+            git add "$STATE_FILE"
             
-            # نتحقق هل هناك تغييرات حقيقية تستحق الحفظ؟
+            # نتحقق هل هناك تغييرات فعلية؟
             if ! git diff --cached --quiet; then
               git commit -m "chore: auto-persist H1 bot state $(date +%Y-%m-%d_%H:%M)"
-              git push origin HEAD:${{ github.ref_name }} || echo "Push failed or no changes."
+              git push origin HEAD:${{ github.ref_name }} || echo "Push failed or no remote access."
             else
               echo ">>> No new data to save."
             fi
           else
-            echo ">>> State file not created by bot (likely due to error in script)."
-            echo ">>> Skipping save step gracefully."
+            echo ">>> Warning: State file '$STATE_FILE' was NOT created by the bot."
+            echo ">>> This usually means the bot crashed before saving or didn't run correctly."
           fi
