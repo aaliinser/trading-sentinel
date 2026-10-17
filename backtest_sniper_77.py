@@ -3,8 +3,19 @@ import pandas as pd
 import numpy as np
 import datetime
 
-# --- إعدادات الاستراتيجية ---
-SYMBOLS = ['EUR/USD', 'GBP/USD', 'USD/JPY', 'USD/CHF', 'AUD/USD', 'NZD/USD', 'USD/CAD', 'EUR/GBP', 'EUR/JPY']
+# --- إعدادات الاستراتيجية المحدثة لبيئة Binance ---
+# تم تغيير الرموز إلى أزواج كريبتو حقيقية موجودة على المنصة
+SYMBOLS = [
+    'BTC/USDT', 
+    'ETH/USDT', 
+    'BNB/USDT', 
+    'SOL/USDT', 
+    'XRP/USDT', 
+    'ADA/USDT', 
+    'DOGE/USDT',
+    'AVAX/USDT',
+    'LINK/USDT'
+]
 TIMEFRAME = '5m'
 EXCHANGE_ID = 'binance'
 
@@ -13,7 +24,7 @@ EMA_TREND_PERIOD = 200
 EMA_VALUE_PERIOD = 50
 RSI_PERIOD = 14
 ADX_PERIOD = 14
-ADX_MIN_STRENGTH = 20
+ADX_MIN_STRENGTH = 20 # رفعنا الحد قليلاً للكريبتو لضمان قوة الحركة
 
 exchange = getattr(ccxt, EXCHANGE_ID)({'enableRateLimit': True})
 
@@ -55,7 +66,7 @@ def get_adx(high, low, close, period):
 
 def analyze_market():
     print("\n" + "="*60)
-    print(f"🔬 SNIPER MOMENTUM TRAP - ANALYSIS REPORT")
+    print(f"🔬 SNIPER MOMENTUM TRAP - BINANCE CRYPTO EDITION")
     print(f"📅 Time: {datetime.datetime.now(datetime.timezone.utc)}")
     print("="*60)
     
@@ -93,7 +104,6 @@ def analyze_market():
             if adx_val >= ADX_MIN_STRENGTH:
                 
                 # شروط الشراء (Buy Setup)
-                # السعر فوق الترند + ارتداد من منطقة القيمة + زخم صحي
                 if price > ema_trend and \
                    prev_row['low'] <= ema_value * 1.001 and \
                    prev_row['low'] >= ema_value * 0.999 and \
@@ -102,7 +112,6 @@ def analyze_market():
                     signal_type = "BUY 🟢 STRONG"
                     
                 # شروط البيع (Sell Setup)
-                # السعر تحت الترند + رفض من منطقة القيمة + زخم صحي
                 elif price < ema_trend and \
                      prev_row['high'] >= ema_value * 0.999 and \
                      prev_row['high'] <= ema_value * 1.001 and \
@@ -128,7 +137,7 @@ def analyze_market():
     print("\n" + "="*60)
     if signals_found == 0:
         print("📊 SUMMARY: No valid sniper entries detected in this cycle.")
-        print("💡 The market is either ranging or waiting for a pullback confirmation.")
+        print("💡 Market is consolidating or trending strongly without pullback yet.")
     else:
         print(f" SUMMARY: {signals_found} HIGH PROBABILITY SIGNAL(S) DETECTED!")
     print("="*60 + "\n")
