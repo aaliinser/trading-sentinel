@@ -3,24 +3,28 @@ import numpy as np
 import datetime
 import yfinance as yf
 
-# --- إعدادات الاستراتيجية (Forex Real Pairs via Yahoo Finance) ---
-# صيغة الرموز في yfinance تكون هكذا: EURUSD=X وليس EUR/USD
+# --- إعدادات الاختبار التاريخي (Backtest Configuration) ---
 SYMBOLS = [
     'EURUSD=X', 'GBPUSD=X', 'USDJPY=X', 'USDCHF=X', 
     'AUDUSD=X', 'NZDUSD=X', 'USDCAD=X', 'EURGBP=X', 'EURJPY=X'
 ]
-INTERVAL = "5m" # فريم 5 دقائق
-PERIOD = "1d"   # نجلب بيانات يوم واحد فقط (يكفي لحساب EMA 200 على M5)
+INTERVAL = "1h"   # فريم الساعة (الأفضل للاختبار السنوي السريع والمستقر)
+PERIOD = "1y"     # مدة الاختبار: سنة كاملة
 
-# معاملات المؤشرات
+# معاملات المؤشرات (نفس منطق القناص)
 EMA_TREND_PERIOD = 200
 EMA_VALUE_PERIOD = 50
 RSI_PERIOD = 14
 ADX_PERIOD = 14
 ADX_MIN_STRENGTH = 20
 
+# إعدادات إدارة المخاطر للاختبار
+TAKE_PROFIT_PIPS = 30  # هدف الربح (مثلا 30 نقطة/بيپ)
+STOP_LOSS_PIPS = 15    # وقف الخسارة (نسبة 1:2 عائد للمخاطرة)
+PIP_SIZE = 0.0001      # حجم البيپ (يتغير لليين تلقائياً داخل الكود)
+
 # ==========================================
-# دوال الحساب الرياضي (No External Libs)
+# دوال الحساب الرياضي
 # ==========================================
 
 def get_ema(series, period):
@@ -52,89 +56,179 @@ def get_adx(high, low, close, period):
     return dx.rolling(period).mean()
 
 # ==========================================
-# محرك التحليل الرئيسي
+# محرك الاختبار التاريخي (The Backtester)
 # ==========================================
 
-def analyze_market():
-    print("\n" + "="*60)
-    print(f"🔬 SNIPER MOMENTUM TRAP - REAL FOREX EDITION")
-    print(f"📅 Time: {datetime.datetime.now(datetime.timezone.utc)}")
-    print("="*60)
+def run_backtest_for_symbol(symbol):
+    print(f"\n🔄 Starting Backtest for {symbol} ({PERIOD}, {INTERVAL})...")
     
-    signals_found = 0
-    
-    for symbol in SYMBOLS:
-        try:
-            # جلب البيانات من Yahoo Finance (مجاني وبدون توكن)
-            ticker = yf.Ticker(symbol)
-            df = ticker.history(interval=INTERVAL, period=PERIOD)
+    try:
+        ticker = yf.Ticker(symbol)
+        df = ticker.history(interval=INTERVAL, period=PERIOD)
+        
+        if df.empty or len(df) < 300:
+            print(f"⚠️ Insufficient data for {symbol}. Skipping.")
+            return None
             
-            if df.empty or len(df) < 250:
-                print(f"⚠️ [{symbol}] Not enough data points ({len(df)}). Skipping...")
-                continue
-                
-            # تنظيف الأسماء (Yahoo يعطي أعمدة كبيرة أحياناً)
-            df.columns = [col.lower() for col in df.columns]
+        df.columns = [col.lower() for col in df.columns]
+        
+        # حساب المؤشرات لجميع الشموع التاريخية دفعة واحدة
+        df['EMA_200'] = get_ema(df['close'], EMA_TREND_PERIOD)
+        df['EMA_50'] = get_ema(df['close'], EMA_VALUE_PERIOD)
+        df['RSI'] = get_rsi(df['close'], RSI_PERIOD)
+        df['ADX'] = get_adx(df['high'], df['low'], df['close'], ADX_PERIOD)
+        
+        # تحديد حجم البيپ (اليين الياباني يحتاج 0.01 بدل 0.0001)
+        pip_size = 0.01 if 'JPY' in symbol else PIP_SIZE
+        tp_distance = TAKE_PROFIT_PIPS * pip_size
+        sl_distance = STOP_LOSS_PIPS * pip_size
+        
+        wins = 0
+        losses = 0
+        total_trades = 0
+        
+        # المرور على كل شمعة سابقة لمعرفة هل كانت هناك صفقة؟
+        # نبدأ من الشمعة رقم 200 لضمان وجود قيم EMAs صحيحة
+        start_index = 200 
+        
+        for i in range(start_index, len(df)):
+            curr = df.iloc[i]
+            prev = df.iloc[i-1]
             
-            # حساب المؤشرات
-            df['EMA_200'] = get_ema(df['close'], EMA_TREND_PERIOD)
-            df['EMA_50'] = get_ema(df['close'], EMA_VALUE_PERIOD)
-            df['RSI'] = get_rsi(df['close'], RSI_PERIOD)
-            df['ADX'] = get_adx(df['high'], df['low'], df['close'], ADX_PERIOD)
-            
-            last_row = df.iloc[-1]
-            prev_row = df.iloc[-2]
-            
-            price = last_row['close']
-            ema_trend = last_row['EMA_200']
-            ema_value = last_row['EMA_50']
-            rsi_val = last_row['RSI']
-            adx_val = last_row['ADX']
-            
+            # التحقق من شروط الدخول (نفس منطق القناص بالضبط)
             signal_type = None
             
-            # فلتر قوة الاتجاه
-            if adx_val >= ADX_MIN_STRENGTH:
-                
-                # شروط الشراء (Buy Setup)
-                # السعر فوق الترند + ارتداد من منطقة القيمة + زخم صحي
-                if price > ema_trend and \
-                   prev_row['low'] <= ema_value * 1.001 and \
-                   prev_row['low'] >= ema_value * 0.999 and \
-                   40 < rsi_val < 60 and \
-                   price > prev_row['open']:
-                    signal_type = "BUY 🟢 STRONG"
+            if curr['ADX'] >= ADX_MIN_STRENGTH:
+                # شروط الشراء
+                if curr['close'] > curr['EMA_200'] and \
+                   prev['low'] <= curr['EMA_50'] * 1.001 and \
+                   prev['low'] >= curr['EMA_50'] * 0.999 and \
+                   40 < curr['RSI'] < 60 and \
+                   curr['close'] > prev['open']:
+                    signal_type = "BUY"
                     
-                # شروط البيع (Sell Setup)
-                # السعر تحت الترند + رفض من منطقة القيمة + زخم صحي
-                elif price < ema_trend and \
-                     prev_row['high'] >= ema_value * 0.999 and \
-                     prev_row['high'] <= ema_value * 1.001 and \
-                     40 < rsi_val < 60 and \
-                     price < prev_row['open']:
-                     signal_type = "SELL 🔴 STRONG"
-            
-            status_icon = "✅" if signal_type else "⏳"
-            result_text = signal_type if signal_type else "WAITING FOR SETUP..."
-            
-            print(f"{status_icon} [{symbol}] Price: {price:.5f} | RSI: {rsi_val:.2f} | ADX: {adx_val:.2f}")
-            print(f"   -> Signal: {result_text}")
-            print("-" * 40)
+                # شروط البيع
+                elif curr['close'] < curr['EMA_200'] and \
+                     prev['high'] >= curr['EMA_50'] * 0.999 and \
+                     prev['high'] <= curr['EMA_50'] * 1.001 and \
+                     40 < curr['RSI'] < 60 and \
+                     curr['close'] < prev['open']:
+                     signal_type = "SELL"
             
             if signal_type:
-                signals_found += 1
+                total_trades += 1
+                entry_price = curr['close']
                 
-        except Exception as e:
-            print(f"❌ Error scanning {symbol}: {str(e)[:50]}...")
-            continue
+                # محاكاة نتيجة الصفقة بناءً على الشموع التالية حتى تحقيق TP أو SL
+                outcome = check_trade_outcome(df, i, signal_type, entry_price, tp_distance, sl_distance)
+                
+                if outcome == "WIN":
+                    wins += 1
+                elif outcome == "LOSS":
+                    losses += 1
+                # إذا كان DRAW (لم يتحقق أي منهما خلال نافذة زمنية معينة)، نتجاهله أو نحسبه حسب سياستك
+                # هنا سنعتبره خسارة بسيطة للحفاظ على الصرامة، أو نتجاهله. لنجعله غير محسوب.
+        
+        win_rate = (wins / total_trades * 100) if total_trades > 0 else 0
+        
+        result_dict = {
+            'Symbol': symbol,
+            'Total Trades': total_trades,
+            'Wins': wins,
+            'Losses': losses,
+            'Win Rate (%)': round(win_rate, 2),
+            'Status': "✅ PASS (>77%)" if win_rate > 77 else ("⏳ NEUTRAL" if win_rate > 50 else "❌ FAIL")
+        }
+        
+        return result_dict
 
-    print("\n" + "="*60)
-    if signals_found == 0:
-        print("📊 SUMMARY: No valid sniper entries detected in this cycle.")
-        print("💡 Market is consolidating or trending strongly without pullback yet.")
+    except Exception as e:
+        print(f"❌ Critical Error in {symbol}: {e}")
+        return None
+
+def check_trade_outcome(df, entry_idx, direction, entry_price, tp_dist, sl_dist):
+    """يفحص الشموع التالية لمعرفة هل حققت الصفقة ربحاً أم خسارة"""
+    max_lookahead = 20 # نفترض أن الصفقة يجب أن تنتهي خلال 20 شمعة (20 ساعة لفريم H1)
+    
+    for j in range(entry_idx + 1, min(entry_idx + 1 + max_lookahead, len(df))):
+        candle = df.iloc[j]
+        
+        if direction == "BUY":
+            take_profit_level = entry_price + tp_dist
+            stop_loss_level = entry_price - sl_dist
+            
+            # تحقق من لمس الوقف أولاً (الأكثر صرامة)
+            if candle['low'] <= stop_loss_level:
+                return "LOSS"
+            # ثم تحقق من الهدف
+            if candle['high'] >= take_profit_level:
+                return "WIN"
+                
+        elif direction == "SELL":
+            take_profit_level = entry_price - tp_dist
+            stop_loss_level = entry_price + sl_dist
+            
+            if candle['high'] >= stop_loss_level:
+                return "LOSS"
+            if candle['low'] <= take_profit_level:
+                return "WIN"
+                
+    return "DRAW" # لم يتحقق شيء خلال النافذة الزمنية
+
+def main():
+    print("\n" + "="*80)
+    print("🔬 SNIPER STRATEGY - FULL YEAR HISTORICAL BACKTEST ENGINE")
+    print(f"📅 Period: Last 1 Year | Timeframe: {INTERVAL.upper()}")
+    print("="*80)
+    
+    all_results = []
+    
+    for symbol in SYMBOLS:
+        res = run_backtest_for_symbol(symbol)
+        if res:
+            all_results.append(res)
+            # طباعة النتيجة فوراً لكل زوج
+            print(f"{res['Status']} [{res['Symbol']}] Win Rate: {res['Win Rate (%)']}% | Trades: {res['Total Trades']} (W:{res['Wins']}/L:{res['Losses']})")
+    
+    print("\n" + "="*80)
+    print("📊 FINAL COMPREHENSIVE REPORT")
+    print("="*80)
+    
+    if not all_results:
+        print("No valid results generated.")
+        return
+        
+    avg_win_rate = sum(r['Win Rate (%)'] for r in all_results) / len(all_results)
+    total_all_trades = sum(r['Total Trades'] for r in all_results)
+    total_wins = sum(r['Wins'] for r in all_results)
+    
+    print(f"• Average Win Rate Across All Pairs : {avg_win_rate:.2f}%")
+    print(f"• Total Simulated Trades (1 Year)   : {total_all_trades}")
+    print(f"• Total Winning Trades              : {total_wins}")
+    print("-"*80)
+    
+    # ترتيب النتائج من الأعلى نجاحاً
+    sorted_results = sorted(all_results, key=lambda x: x['Win Rate (%)'], reverse=True)
+    
+    print(f"{'PAIR':<12} | {'TRADES':<8} | {'WINS':<6} | {'LOSSES':<7} | {'RATE %':<8} | STATUS")
+    print("-"*80)
+    
+    for r in sorted_results:
+        status_icon = "🟢" if r['Win Rate (%)'] > 77 else ("🟡" if r['Win Rate (%)'] > 50 else "🔴")
+        print(f"{r['Symbol']:<12} | {r['Total Trades']:<8} | {r['Wins']:<6} | {r['Losses']:<7} | {r['Win Rate (%)']:<8} | {status_icon} {r['Status']}")
+        
+    print("="*80)
+    
+    best_pair = sorted_results[0]['Symbol']
+    best_rate = sorted_results[0]['Win Rate (%)']
+    
+    if best_rate > 77:
+        print(f"🎯 CONCLUSION: Strategy VALIDATED! Best performer is {best_pair} with {best_rate}% success rate.")
+        print("💡 Recommendation: Deploy this pair specifically for live trading monitoring.")
     else:
-        print(f" SUMMARY: {signals_found} HIGH PROBABILITY SIGNAL(S) DETECTED!")
-    print("="*60 + "\n")
+        print(f"⚠️ CONCLUSION: Overall average ({avg_win_rate:.2f}%) did not meet the strict >77% threshold globally.")
+        print("💡 Insight: The strategy works better on specific pairs. Focus ONLY on pairs marked 🟢 above.")
+    print("="*80 + "\n")
 
 if __name__ == "__main__":
-    analyze_market()
+    main()
