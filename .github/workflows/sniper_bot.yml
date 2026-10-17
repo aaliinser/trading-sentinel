@@ -1,4 +1,4 @@
-name: Sniper Momentum Trap Bot (Forex Edition)
+name: Sniper Momentum Trap Bot (Real Forex via YFinance)
 
 on:
   schedule:
@@ -21,13 +21,9 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        # تثبيت المكتبات الأساسية + مكتبة oandapyV20 للاتصال بالفوركس
-        pip install pandas numpy requests oandapyV20
+        # تثبيت المكتبات الأساسية للتحليل الرياضي + yfinance لجلب بيانات الفوركس
+        pip install pandas numpy yfinance
         
-    - name: Run Forex Analysis Engine
-      env:
-        # ضع بيانات حسابك التجريبي هنا إذا أردت، أو اتركها فارغة لاستخدام الوضع العام (Public Demo)
-        OANDA_ACCESS_TOKEN: ${{ secrets.OANDA_ACCESS_TOKEN }} 
-        ACCOUNT_ID: ${{ secrets.ACCOUNT_ID }}
+    - name: Run Real Forex Analysis Engine
       run: |
         python backtest_sniper_77.py
