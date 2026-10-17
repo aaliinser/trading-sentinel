@@ -1,35 +1,67 @@
-import ccxt
 import pandas as pd
 import numpy as np
 import datetime
+import os
+import json
+import urllib.request
 
-# --- إعدادات الاستراتيجية المحدثة لبيئة Binance ---
-# تم تغيير الرموز إلى أزواج كريبتو حقيقية موجودة على المنصة
+# --- إعدادات الاستراتيجية (Forex Real Pairs) ---
+# صيغة الرموز في OANDA تكون هكذا: EUR_USD وليس EUR/USD
 SYMBOLS = [
-    'BTC/USDT', 
-    'ETH/USDT', 
-    'BNB/USDT', 
-    'SOL/USDT', 
-    'XRP/USDT', 
-    'ADA/USDT', 
-    'DOGE/USDT',
-    'AVAX/USDT',
-    'LINK/USDT'
+    'EUR_USD', 'GBP_USD', 'USD_JPY', 'USD_CHF', 
+    'AUD_USD', 'NZD_USD', 'USD_CAD', 'EUR_GBP', 'EUR_JPY'
 ]
-TIMEFRAME = '5m'
-EXCHANGE_ID = 'binance'
+TIMEFRAME_GRANULARITY = "M5" # فريم 5 دقائق
+CANDLES_LIMIT = 300 # عدد الشموع المطلوبة للحساب
 
 # معاملات المؤشرات
 EMA_TREND_PERIOD = 200
 EMA_VALUE_PERIOD = 50
 RSI_PERIOD = 14
 ADX_PERIOD = 14
-ADX_MIN_STRENGTH = 20 # رفعنا الحد قليلاً للكريبتو لضمان قوة الحركة
+ADX_MIN_STRENGTH = 20
 
-exchange = getattr(ccxt, EXCHANGE_ID)({'enableRateLimit': True})
+# تهيئة الاتصال بـ OANDA (نستخدم الرابط العام للبيانات المجانية)
+BASE_URL = "https://api-fxpractice.oanda.com/v3/instruments/{instrument}/candles"
+
+def get_oanda_data(instrument):
+    """جلب بيانات الشموع من OANDA مجاناً"""
+    url = BASE_URL.format(instrument=instrument) + f"?granularity={TIMEFRAME_GRANULARITY}&count={CANDLES_LIMIT}"
+    
+    try:
+        req = urllib.request.Request(url, headers={'Content-Type': 'application/json'})
+        response = urllib.request.urlopen(req)
+        data = json.loads(response.read().decode())
+        
+        candles = data.get('candles', [])
+        if not candles:
+            return None
+            
+        df = pd.DataFrame(candles)
+        # تحويل الحقول إلى أرقام
+        df['mid'] = df['mid'].astype(float)
+        df['high'] = df['bid'].apply(lambda x: float(x)).astype(float) # تقريب بسيط
+        df['low'] = df['ask'].apply(lambda x: float(x)).astype(float)  # تقريب بسيط
+        df['close'] = df['mid'] 
+        
+        # تنظيف الأعمدة غير الضرورية
+        cols_to_keep = ['time', 'open', 'high', 'low', 'close', 'volume']
+        # OANDA يعطي open/high/low/close داخل كائنات فرعية أحياناً حسب النسخة، لذا نتأكد من وجودها
+        if 'o' in df.columns: df.rename(columns={'o':'open'}, inplace=True)
+        if 'h' in df.columns: df.rename(columns={'h':'high'}, inplace=True)
+        if 'l' in df.columns: df.rename(columns={'l':'low'}, inplace=True)
+        if 'c' in df.columns: df.rename(columns={'c':'close'}, inplace=True)
+        if 'v' in df.columns: df.rename(columns={'v':'volume'}, inplace=True)
+        
+        final_cols = [col for col in cols_to_keep if col in df.columns]
+        return df[final_cols].copy()
+
+    except Exception as e:
+        print(f"API Error {instrument}: {e}")
+        return None
 
 # ==========================================
-# دوال الحساب الرياضي (No External Libs)
+# دوال الحساب الرياضي (Same Logic as before)
 # ==========================================
 
 def get_ema(series, period):
@@ -66,7 +98,7 @@ def get_adx(high, low, close, period):
 
 def analyze_market():
     print("\n" + "="*60)
-    print(f"🔬 SNIPER MOMENTUM TRAP - BINANCE CRYPTO EDITION")
+    print(f"🔬 SNIPER MOMENTUM TRAP - FOREX REAL EDITION")
     print(f"📅 Time: {datetime.datetime.now(datetime.timezone.utc)}")
     print("="*60)
     
@@ -74,13 +106,12 @@ def analyze_market():
     
     for symbol in SYMBOLS:
         try:
-            # جلب البيانات
-            ohlcv = exchange.fetch_ohlcv(symbol, TIMEFRAME, limit=300)
-            if not ohlcv or len(ohlcv) < 250:
+            # جلب البيانات من OANDA
+            df = get_oanda_data(symbol)
+            
+            if df is None or len(df) < 250:
                 continue
                 
-            df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
-            
             # حساب المؤشرات
             df['EMA_200'] = get_ema(df['close'], EMA_TREND_PERIOD)
             df['EMA_50'] = get_ema(df['close'], EMA_VALUE_PERIOD)
@@ -90,20 +121,18 @@ def analyze_market():
             last_row = df.iloc[-1]
             prev_row = df.iloc[-2]
             
-            # استخراج القيم الحالية
             price = last_row['close']
             ema_trend = last_row['EMA_200']
             ema_value = last_row['EMA_50']
             rsi_val = last_row['RSI']
             adx_val = last_row['ADX']
             
-            # منطق الصفقة (Logic Check)
             signal_type = None
             
             # فلتر قوة الاتجاه
             if adx_val >= ADX_MIN_STRENGTH:
                 
-                # شروط الشراء (Buy Setup)
+                # شروط الشراء
                 if price > ema_trend and \
                    prev_row['low'] <= ema_value * 1.001 and \
                    prev_row['low'] >= ema_value * 0.999 and \
@@ -111,7 +140,7 @@ def analyze_market():
                    price > prev_row['open']:
                     signal_type = "BUY 🟢 STRONG"
                     
-                # شروط البيع (Sell Setup)
+                # شروط البيع
                 elif price < ema_trend and \
                      prev_row['high'] >= ema_value * 0.999 and \
                      prev_row['high'] <= ema_value * 1.001 and \
@@ -119,7 +148,6 @@ def analyze_market():
                      price < prev_row['open']:
                      signal_type = "SELL 🔴 STRONG"
             
-            # عرض النتيجة في اللوج
             status_icon = "✅" if signal_type else "⏳"
             result_text = signal_type if signal_type else "WAITING FOR SETUP..."
             
