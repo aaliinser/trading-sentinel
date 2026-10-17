@@ -1,12 +1,10 @@
-name: Sniper Momentum Trap Bot (Real Forex via YFinance)
+name: Sniper Strategy Backtest (1 Year Full Test)
 
 on:
-  schedule:
-    - cron: '*/5 * * * *' # يعمل كل 5 دقائق
-  workflow_dispatch: # للتشغيل اليدوي
+  workflow_dispatch: # نشغله يدوياً فقط عند الرغبة في الاختبار الشامل
 
 jobs:
-  run-bot:
+  backtest-engine:
     runs-on: ubuntu-latest
 
     steps:
@@ -21,9 +19,9 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        # تثبيت المكتبات الأساسية للتحليل الرياضي + yfinance لجلب بيانات الفوركس
-        pip install pandas numpy yfinance
+        # تثبيت المكتبات اللازمة للتحليل التاريخي الضخم
+        pip install pandas numpy yfinance matplotlib
         
-    - name: Run Real Forex Analysis Engine
+    - name: Run 1-Year Historical Backtest
       run: |
         python backtest_sniper_77.py
