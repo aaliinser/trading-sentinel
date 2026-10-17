@@ -2,9 +2,9 @@ name: Sniper Momentum Trap Bot
 
 on:
   schedule:
-    # يعمل كل 5 دقائق (UTC)
+    # يعمل كل 5 دقائق بتوقيت UTC
     - cron: '*/5 * * * *'
-  workflow_dispatch: # يسمح بالتشغيل اليدوي للاختبار
+  workflow_dispatch: # للتشغيل اليدوي عند الحاجة
 
 jobs:
   run-bot:
@@ -12,12 +12,12 @@ jobs:
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
-        python-version: '3.9'
+        python-version: '3.10'  # <--- تم التعديل هنا من 3.9 إلى 3.10
 
     - name: Install dependencies
       run: |
