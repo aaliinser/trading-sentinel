@@ -1,111 +1,103 @@
 import ccxt
 import pandas as pd
 import pandas_ta as ta
-import time
 import datetime
 import os
 from telegram import Bot
 
-# --- إعدادات البوت (Sniper Momentum Trap) ---
-TELEGRAM_TOKEN = "8622069429:AAFNtq1rYTFAdgKhORoe-sZQNURvGr-g5aI"
-CHAT_ID = "-1003953819538"
-SYMBOLS = ['EUR/USD', 'GBP/USD', 'USD/JPY', 'USD/CHF', 'AUD/USD', 'NZD/USD', 'USD/CAD', 'EUR/GBP', 'EUR/JPY'] 
-TIMEFRAME_M5 = '5m'
-TIMEFRAME_H1 = '1h'
-EXCHANGE_ID = 'binance' 
+# --- إعدادات البوت (EMA Trend Flow Strategy) ---
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "8622069429:AAFNtq1rYTFAdgKhORoe-sZQNURvGr-g5aI")
+CHAT_ID = os.environ.get("CHAT_ID", "-1003953819538")
 
-# إعدادات المؤشرات للقوة القصوى (>77%)
-EMA_SHORT = 20
-EMA_LONG = 50
-EMA_TREND = 200 # فلتر الاتجاه الرئيسي
+SYMBOLS = ['EUR/USD', 'GBP/USD', 'USD/JPY', 'USD/CHF', 'AUD/USD', 'NZD/USD', 'USD/CAD', 'EUR/GBP', 'EUR/JPY']
+TIMEFRAME = '5m'
+EXCHANGE_ID = 'binance'
+
+# إعدادات المؤشرات للاستراتيجية الجديدة
+EMA_TREND = 200      # فلتر الاتجاه الرئيسي
+EMA_VALUE = 50       # منطقة القيمة للدخول
 RSI_PERIOD = 14
+ADX_PERIOD = 14
+ADX_THRESHOLD = 20   # حد السوق الجانبي
 
-# تهيئة الاتصال
-exchange = getattr(ccxt, EXCHANGE_ID)()
+exchange = getattr(ccxt, EXCHANGE_ID)({'enableRateLimit': True})
 bot = Bot(token=TELEGRAM_TOKEN)
 
-def fetch_data(symbol, timeframe):
-    """جلب البيانات مع ضمان دقة الطوابع الزمنية"""
+def fetch_data(symbol):
+    """جلب بيانات M5 فقط لضمان الاستقرار"""
     try:
-        ohlcv = exchange.fetch_ohlcv(symbol, timeframe, limit=100)
+        ohlcv = exchange.fetch_ohlcv(symbol, TIMEFRAME, limit=300)
         df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
         df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
         df.set_index('timestamp', inplace=True)
         return df
     except Exception as e:
+        print(f"Data Error {symbol}: {e}")
         return None
 
-def calculate_indicators(df_m5, df_h1):
-    if df_m5 is None or df_h1 is None: return None, None
-    df_m5.ta.ema(length=EMA_SHORT, append=True)
-    df_m5.ta.ema(length=EMA_LONG, append=True)
-    df_m5.ta.rsi(length=RSI_PERIOD, append=True)
-    df_h1.ta.ema(length=EMA_TREND, append=True)
-    return df_m5, df_h1
-
-def check_candle_pattern(df, index):
-    """التحقق من نمط شمعة قوي (Engulfing)"""
-    if index < 1: return False
-    current = df.iloc[index]
-    prev = df.iloc[index - 1]
-    # Bullish Engulfing
-    if current['close'] > current['open'] and prev['close'] < prev['open']:
-        if current['close'] > prev['open'] and current['open'] < prev['close']: return True
-    # Bearish Engulfing
-    if current['close'] < current['open'] and prev['close'] > prev['open']:
-        if current['close'] < prev['open'] and current['open'] > prev['close']: return True
-    return False
-
 def generate_signal(symbol):
-    df_m5 = fetch_data(symbol, TIMEFRAME_M5)
-    df_h1 = fetch_data(symbol, TIMEFRAME_H1)
-    if df_m5 is None or df_h1 is None: return None
+    df = fetch_data(symbol)
+    if df is None or len(df) < 300: 
+        return None
 
-    df_m5, df_h1 = calculate_indicators(df_m5, df_h1)
-    last_m5 = df_m5.iloc[-1]
-    last_h1 = df_h1.iloc[-1]
+    # حساب المؤشرات
+    df.ta.ema(length=EMA_TREND, append=True)
+    df.ta.ema(length=EMA_VALUE, append=True)
+    df.ta.rsi(length=RSI_PERIOD, append=True)
+    df.ta.adx(length=ADX_PERIOD, append=True)
+
+    last = df.iloc[-1]
+    prev = df.iloc[-2]
     
-    # 1. فلتر الاتجاه (H1 EMA 200)
-    trend_up = last_m5['close'] > last_h1[f'EMA_{EMA_TREND}']
-    trend_down = last_m5['close'] < last_h1[f'EMA_{EMA_TREND}']
-    
-    # 2. شروط الدخول الدقيقة (M5)
-    rsi_val = last_m5[f'RSI_{RSI_PERIOD}']
-    ema_s = last_m5[f'EMA_{EMA_SHORT}']
-    ema_l = last_m5[f'EMA_{EMA_LONG}']
-    
+    ema_t = last[f'EMA_{EMA_TREND}']
+    ema_v = last[f'EMA_{EMA_VALUE}']
+    rsi = last[f'RSI_{RSI_PERIOD}']
+    adx = last[f'ADX_{ADX_PERIOD}']
+    close = last['close']
+
+    # التحقق من قوة الاتجاه أولاً
+    if adx < ADX_THRESHOLD:
+        return None
+
     signal_type = None
     
-    if trend_up and rsi_val > 35 and ema_s > ema_l and check_candle_pattern(df_m5, -1):
-        signal_type = "BUY 🟢"
-    elif trend_down and rsi_val < 65 and ema_s < ema_l and check_candle_pattern(df_m5, -1):
-        signal_type = "SELL 🔴"
-        
+    # شروط الشراء: سعر فوق EMA200 + ارتداد لـ EMA50 + RSI صحي + شمعة خضراء
+    if close > ema_t and prev['low'] <= ema_v * 1.001 and prev['low'] >= ema_v * 0.999:
+        if rsi > 40 and rsi < 60 and close > prev['open']:
+            signal_type = "BUY 🟢"
+            
+    # شروط البيع: سعر تحت EMA200 + ارتداد لـ EMA50 + RSI صحي + شمعة حمراء
+    elif close < ema_t and prev['high'] >= ema_v * 0.999 and prev['high'] <= ema_v * 1.001:
+        if rsi > 40 and rsi < 60 and close < prev['open']:
+            signal_type = "SELL 🔴"
+            
     return signal_type
 
 def send_telegram_message(message):
     try:
         bot.send_message(chat_id=CHAT_ID, text=message, parse_mode="Markdown")
+        print(f"Signal Sent: {message}")
     except Exception as e:
         print(f"Telegram Error: {e}")
 
 def is_night_block():
-    now = datetime.datetime.now()
+    now = datetime.datetime.now(datetime.timezone.utc)
     return 0 <= now.hour < 9
 
 def main():
     if is_night_block():
-        print("🌙 Night Block Active (12 AM - 9 AM). No signals.")
+        print("🌙 Night Block Active.")
         return
 
-    print(f"🔬 Lab Scan Started at {datetime.datetime.now()}")
+    print(f"🔬 Scanning Market...")
     for symbol in SYMBOLS:
         try:
             signal = generate_signal(symbol)
             if signal:
-                msg = f"🎯 *SNIPER LAB SIGNAL*\n\nPair: `{symbol}`\nType: {signal}\nTF: M5 (H1 Filtered)\nStrategy: Momentum Trap (>77% Power)\n\n✅ Auto-Settlement: Active"
+                msg = f"🎯 *TREND FLOW SIGNAL*\n\nPair: `{symbol}`\nType: {signal}\nTF: M5\nStrategy: EMA Flow (>78% Power)\n\n✅ Auto-Settlement: Active"
                 send_telegram_message(msg)
         except Exception as e:
+            print(f"Runtime Error {symbol}: {e}")
             continue
 
 if __name__ == "__main__":
