@@ -1,6 +1,17 @@
 {
-  "pending_trades": [],
+  "pending_trades": [
+    {
+      "id": "23e93f1c",
+      "symbol": "GBPUSD=X",
+      "direction": "CALL",
+      "entry_price": 1.332906723022461,
+      "entry_time": "2026-10-19T08:00:00+00:00",
+      "telegram_message_id": true
+    }
+  ],
   "history": [],
-  "processed_candles": [],
+  "processed_candles": [
+    "GBPUSD=X_2026-10-19T08:00:00+00:00"
+  ],
   "last_daily_report_date": ""
 }
