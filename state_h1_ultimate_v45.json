@@ -1,5 +1,14 @@
 {
-  "pending_trades": [],
+  "pending_trades": [
+    {
+      "id": "1969c13b",
+      "symbol": "EURGBP=X",
+      "direction": "PUT",
+      "entry_price": 0.8426899909973145,
+      "entry_time": "2026-10-19T18:00:00+00:00",
+      "telegram_message_id": true
+    }
+  ],
   "history": [
     {
       "id": "23e93f1c",
@@ -62,7 +71,8 @@
     "USDCHF=X_2026-10-19T11:00:00+00:00",
     "EURCHF=X_2026-10-19T13:00:00+00:00",
     "EURCHF=X_2026-10-19T16:00:00+00:00",
-    "USDCHF=X_2026-10-19T16:00:00+00:00"
+    "USDCHF=X_2026-10-19T16:00:00+00:00",
+    "EURGBP=X_2026-10-19T18:00:00+00:00"
   ],
   "last_daily_report_date": ""
 }
