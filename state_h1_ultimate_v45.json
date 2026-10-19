@@ -1,22 +1,5 @@
 {
-  "pending_trades": [
-    {
-      "id": "d5764a26",
-      "symbol": "EURCHF=X",
-      "direction": "PUT",
-      "entry_price": 0.9261800050735474,
-      "entry_time": "2026-10-19T16:00:00+00:00",
-      "telegram_message_id": true
-    },
-    {
-      "id": "f714106d",
-      "symbol": "USDCHF=X",
-      "direction": "PUT",
-      "entry_price": 0.8260899782180786,
-      "entry_time": "2026-10-19T16:00:00+00:00",
-      "telegram_message_id": true
-    }
-  ],
+  "pending_trades": [],
   "history": [
     {
       "id": "23e93f1c",
@@ -50,6 +33,28 @@
       "resolved_at": "2026-10-19T15:03:29.895755+00:00",
       "status": "RESOLVED",
       "pips": 4.5996904373168945
+    },
+    {
+      "id": "d5764a26",
+      "symbol": "EURCHF=X",
+      "direction": "PUT",
+      "entry_price": 0.9261800050735474,
+      "exit_price": 0.926289975643158,
+      "win": false,
+      "resolved_at": "2026-10-19T18:03:30.424377+00:00",
+      "status": "RESOLVED",
+      "pips": 1.099705696105957
+    },
+    {
+      "id": "f714106d",
+      "symbol": "USDCHF=X",
+      "direction": "PUT",
+      "entry_price": 0.8260899782180786,
+      "exit_price": 0.8258699774742126,
+      "win": true,
+      "resolved_at": "2026-10-19T18:03:30.424377+00:00",
+      "status": "RESOLVED",
+      "pips": 2.200007438659668
     }
   ],
   "processed_candles": [
