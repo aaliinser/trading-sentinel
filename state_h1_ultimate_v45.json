@@ -1,14 +1,5 @@
 {
-  "pending_trades": [
-    {
-      "id": "1969c13b",
-      "symbol": "EURGBP=X",
-      "direction": "PUT",
-      "entry_price": 0.8426899909973145,
-      "entry_time": "2026-10-19T18:00:00+00:00",
-      "telegram_message_id": true
-    }
-  ],
+  "pending_trades": [],
   "history": [
     {
       "id": "23e93f1c",
@@ -64,6 +55,17 @@
       "resolved_at": "2026-10-19T18:03:30.424377+00:00",
       "status": "RESOLVED",
       "pips": 2.200007438659668
+    },
+    {
+      "id": "1969c13b",
+      "symbol": "EURGBP=X",
+      "direction": "PUT",
+      "entry_price": 0.8426899909973145,
+      "exit_price": 0.8427000045776367,
+      "win": null,
+      "resolved_at": "2026-10-19T20:03:29.593697+00:00",
+      "status": "VOID_FLAT",
+      "pips": 0.10013580322265625
     }
   ],
   "processed_candles": [
