@@ -1,5 +1,22 @@
 {
-  "pending_trades": [],
+  "pending_trades": [
+    {
+      "id": "d5764a26",
+      "symbol": "EURCHF=X",
+      "direction": "PUT",
+      "entry_price": 0.9261800050735474,
+      "entry_time": "2026-10-19T16:00:00+00:00",
+      "telegram_message_id": true
+    },
+    {
+      "id": "f714106d",
+      "symbol": "USDCHF=X",
+      "direction": "PUT",
+      "entry_price": 0.8260899782180786,
+      "entry_time": "2026-10-19T16:00:00+00:00",
+      "telegram_message_id": true
+    }
+  ],
   "history": [
     {
       "id": "23e93f1c",
@@ -38,7 +55,9 @@
   "processed_candles": [
     "GBPUSD=X_2026-10-19T08:00:00+00:00",
     "USDCHF=X_2026-10-19T11:00:00+00:00",
-    "EURCHF=X_2026-10-19T13:00:00+00:00"
+    "EURCHF=X_2026-10-19T13:00:00+00:00",
+    "EURCHF=X_2026-10-19T16:00:00+00:00",
+    "USDCHF=X_2026-10-19T16:00:00+00:00"
   ],
   "last_daily_report_date": ""
 }
