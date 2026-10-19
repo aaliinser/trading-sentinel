@@ -1,14 +1,5 @@
 {
-  "pending_trades": [
-    {
-      "id": "a3a860e6",
-      "symbol": "USDCHF=X",
-      "direction": "PUT",
-      "entry_price": 0.8249800205230713,
-      "entry_time": "2026-10-19T11:00:00+00:00",
-      "telegram_message_id": true
-    }
-  ],
+  "pending_trades": [],
   "history": [
     {
       "id": "23e93f1c",
@@ -20,6 +11,17 @@
       "resolved_at": "2026-10-19T10:03:25.091921+00:00",
       "status": "RESOLVED",
       "pips": 3.9076805114746094
+    },
+    {
+      "id": "a3a860e6",
+      "symbol": "USDCHF=X",
+      "direction": "PUT",
+      "entry_price": 0.8249800205230713,
+      "exit_price": 0.8250899910926819,
+      "win": false,
+      "resolved_at": "2026-10-19T13:03:29.700598+00:00",
+      "status": "RESOLVED",
+      "pips": 1.099705696105957
     }
   ],
   "processed_candles": [
