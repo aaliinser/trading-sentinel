@@ -1,14 +1,5 @@
 {
-  "pending_trades": [
-    {
-      "id": "c48aa4a9",
-      "symbol": "EURCHF=X",
-      "direction": "PUT",
-      "entry_price": 0.9257500171661377,
-      "entry_time": "2026-10-19T13:00:00+00:00",
-      "telegram_message_id": true
-    }
-  ],
+  "pending_trades": [],
   "history": [
     {
       "id": "23e93f1c",
@@ -31,6 +22,17 @@
       "resolved_at": "2026-10-19T13:03:29.700598+00:00",
       "status": "RESOLVED",
       "pips": 1.099705696105957
+    },
+    {
+      "id": "c48aa4a9",
+      "symbol": "EURCHF=X",
+      "direction": "PUT",
+      "entry_price": 0.9257500171661377,
+      "exit_price": 0.9262099862098694,
+      "win": false,
+      "resolved_at": "2026-10-19T15:03:29.895755+00:00",
+      "status": "RESOLVED",
+      "pips": 4.5996904373168945
     }
   ],
   "processed_candles": [
