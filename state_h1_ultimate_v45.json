@@ -1,5 +1,14 @@
 {
-  "pending_trades": [],
+  "pending_trades": [
+    {
+      "id": "a3a860e6",
+      "symbol": "USDCHF=X",
+      "direction": "PUT",
+      "entry_price": 0.8249800205230713,
+      "entry_time": "2026-10-19T11:00:00+00:00",
+      "telegram_message_id": true
+    }
+  ],
   "history": [
     {
       "id": "23e93f1c",
@@ -14,7 +23,8 @@
     }
   ],
   "processed_candles": [
-    "GBPUSD=X_2026-10-19T08:00:00+00:00"
+    "GBPUSD=X_2026-10-19T08:00:00+00:00",
+    "USDCHF=X_2026-10-19T11:00:00+00:00"
   ],
   "last_daily_report_date": ""
 }
