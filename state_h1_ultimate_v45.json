@@ -1,14 +1,5 @@
 {
-  "pending_trades": [
-    {
-      "id": "af48f822",
-      "symbol": "CHFJPY=X",
-      "direction": "CALL",
-      "entry_price": 191.7169952392578,
-      "entry_time": "2026-10-20T07:00:00+00:00",
-      "telegram_message_id": true
-    }
-  ],
+  "pending_trades": [],
   "history": [
     {
       "id": "23e93f1c",
@@ -86,6 +77,17 @@
       "resolved_at": "2026-10-20T08:03:30.434980+00:00",
       "status": "RESOLVED",
       "pips": 1.49993896484375
+    },
+    {
+      "id": "af48f822",
+      "symbol": "CHFJPY=X",
+      "direction": "CALL",
+      "entry_price": 191.7169952392578,
+      "exit_price": 191.7259979248047,
+      "win": true,
+      "resolved_at": "2026-10-20T09:03:26.324853+00:00",
+      "status": "RESOLVED",
+      "pips": 0.9002685546875
     }
   ],
   "processed_candles": [
