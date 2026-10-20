@@ -1,5 +1,14 @@
 {
-  "pending_trades": [],
+  "pending_trades": [
+    {
+      "id": "5bb2ce0b",
+      "symbol": "USDCHF=X",
+      "direction": "PUT",
+      "entry_price": 0.8251699805259705,
+      "entry_time": "2026-10-20T17:00:00+00:00",
+      "telegram_message_id": true
+    }
+  ],
   "history": [
     {
       "id": "23e93f1c",
@@ -98,7 +107,8 @@
     "USDCHF=X_2026-10-19T16:00:00+00:00",
     "EURGBP=X_2026-10-19T18:00:00+00:00",
     "AUDJPY=X_2026-10-20T06:00:00+00:00",
-    "CHFJPY=X_2026-10-20T07:00:00+00:00"
+    "CHFJPY=X_2026-10-20T07:00:00+00:00",
+    "USDCHF=X_2026-10-20T17:00:00+00:00"
   ],
   "last_daily_report_date": "2026-10-20"
 }
