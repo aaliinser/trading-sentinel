@@ -1,5 +1,14 @@
 {
-  "pending_trades": [],
+  "pending_trades": [
+    {
+      "id": "41005378",
+      "symbol": "AUDJPY=X",
+      "direction": "CALL",
+      "entry_price": 110.61199951171875,
+      "entry_time": "2026-10-20T06:00:00+00:00",
+      "telegram_message_id": true
+    }
+  ],
   "history": [
     {
       "id": "23e93f1c",
@@ -74,7 +83,8 @@
     "EURCHF=X_2026-10-19T13:00:00+00:00",
     "EURCHF=X_2026-10-19T16:00:00+00:00",
     "USDCHF=X_2026-10-19T16:00:00+00:00",
-    "EURGBP=X_2026-10-19T18:00:00+00:00"
+    "EURGBP=X_2026-10-19T18:00:00+00:00",
+    "AUDJPY=X_2026-10-20T06:00:00+00:00"
   ],
   "last_daily_report_date": "2026-10-20"
 }
