@@ -1,11 +1,11 @@
 {
   "pending_trades": [
     {
-      "id": "41005378",
-      "symbol": "AUDJPY=X",
+      "id": "af48f822",
+      "symbol": "CHFJPY=X",
       "direction": "CALL",
-      "entry_price": 110.61199951171875,
-      "entry_time": "2026-10-20T06:00:00+00:00",
+      "entry_price": 191.7169952392578,
+      "entry_time": "2026-10-20T07:00:00+00:00",
       "telegram_message_id": true
     }
   ],
@@ -75,6 +75,17 @@
       "resolved_at": "2026-10-19T20:03:29.593697+00:00",
       "status": "VOID_FLAT",
       "pips": 0.10013580322265625
+    },
+    {
+      "id": "41005378",
+      "symbol": "AUDJPY=X",
+      "direction": "CALL",
+      "entry_price": 110.61199951171875,
+      "exit_price": 110.59700012207031,
+      "win": false,
+      "resolved_at": "2026-10-20T08:03:30.434980+00:00",
+      "status": "RESOLVED",
+      "pips": 1.49993896484375
     }
   ],
   "processed_candles": [
@@ -84,7 +95,8 @@
     "EURCHF=X_2026-10-19T16:00:00+00:00",
     "USDCHF=X_2026-10-19T16:00:00+00:00",
     "EURGBP=X_2026-10-19T18:00:00+00:00",
-    "AUDJPY=X_2026-10-20T06:00:00+00:00"
+    "AUDJPY=X_2026-10-20T06:00:00+00:00",
+    "CHFJPY=X_2026-10-20T07:00:00+00:00"
   ],
   "last_daily_report_date": "2026-10-20"
 }
