@@ -1,5 +1,14 @@
 {
-  "pending_trades": [],
+  "pending_trades": [
+    {
+      "id": "efbec196",
+      "symbol": "EURUSD=X",
+      "direction": "CALL",
+      "entry_price": 1.1225864887237549,
+      "entry_time": "2026-10-21T05:00:00+00:00",
+      "telegram_message_id": true
+    }
+  ],
   "history": [
     {
       "id": "23e93f1c",
@@ -110,7 +119,8 @@
     "EURGBP=X_2026-10-19T18:00:00+00:00",
     "AUDJPY=X_2026-10-20T06:00:00+00:00",
     "CHFJPY=X_2026-10-20T07:00:00+00:00",
-    "USDCHF=X_2026-10-20T17:00:00+00:00"
+    "USDCHF=X_2026-10-20T17:00:00+00:00",
+    "EURUSD=X_2026-10-21T05:00:00+00:00"
   ],
   "last_daily_report_date": "2026-10-21"
 }
