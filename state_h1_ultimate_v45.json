@@ -1,14 +1,5 @@
 {
-  "pending_trades": [
-    {
-      "id": "efbec196",
-      "symbol": "EURUSD=X",
-      "direction": "CALL",
-      "entry_price": 1.1225864887237549,
-      "entry_time": "2026-10-21T05:00:00+00:00",
-      "telegram_message_id": true
-    }
-  ],
+  "pending_trades": [],
   "history": [
     {
       "id": "23e93f1c",
@@ -108,6 +99,17 @@
       "resolved_at": "2026-10-20T19:03:36.193620+00:00",
       "status": "RESOLVED",
       "pips": 4.000067710876465
+    },
+    {
+      "id": "efbec196",
+      "symbol": "EURUSD=X",
+      "direction": "CALL",
+      "entry_price": 1.1225864887237549,
+      "exit_price": 1.1223344802856445,
+      "win": false,
+      "resolved_at": "2026-10-21T07:03:29.995877+00:00",
+      "status": "RESOLVED",
+      "pips": 2.5200843811035156
     }
   ],
   "processed_candles": [
