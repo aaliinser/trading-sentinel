@@ -1,5 +1,14 @@
 {
-  "pending_trades": [],
+  "pending_trades": [
+    {
+      "id": "3c47b75c",
+      "symbol": "USDCAD=X",
+      "direction": "PUT",
+      "entry_price": 1.4058899879455566,
+      "entry_time": "2026-10-21T14:00:00+00:00",
+      "telegram_message_id": true
+    }
+  ],
   "history": [
     {
       "id": "23e93f1c",
@@ -134,7 +143,8 @@
     "CHFJPY=X_2026-10-20T07:00:00+00:00",
     "USDCHF=X_2026-10-20T17:00:00+00:00",
     "EURUSD=X_2026-10-21T05:00:00+00:00",
-    "CHFJPY=X_2026-10-21T12:00:00+00:00"
+    "CHFJPY=X_2026-10-21T12:00:00+00:00",
+    "USDCAD=X_2026-10-21T14:00:00+00:00"
   ],
   "last_daily_report_date": "2026-10-21"
 }
