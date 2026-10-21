@@ -1,14 +1,5 @@
 {
-  "pending_trades": [
-    {
-      "id": "3c47b75c",
-      "symbol": "USDCAD=X",
-      "direction": "PUT",
-      "entry_price": 1.4058899879455566,
-      "entry_time": "2026-10-21T14:00:00+00:00",
-      "telegram_message_id": true
-    }
-  ],
+  "pending_trades": [],
   "history": [
     {
       "id": "23e93f1c",
@@ -130,6 +121,17 @@
       "resolved_at": "2026-10-21T14:03:30.988239+00:00",
       "status": "RESOLVED",
       "pips": 2.29949951171875
+    },
+    {
+      "id": "3c47b75c",
+      "symbol": "USDCAD=X",
+      "direction": "PUT",
+      "entry_price": 1.4058899879455566,
+      "exit_price": 1.4063299894332886,
+      "win": false,
+      "resolved_at": "2026-10-21T16:03:29.503597+00:00",
+      "status": "RESOLVED",
+      "pips": 4.400014877319336
     }
   ],
   "processed_candles": [
