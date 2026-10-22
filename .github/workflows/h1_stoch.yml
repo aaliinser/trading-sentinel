@@ -60,7 +60,14 @@ jobs:
             
             # نتحقق هل هناك تغييرات حقيقية في الملف تستحق الحفظ؟
             if ! git diff --cached --quiet; then
-              git commit -m "chore: auto-persist H1 bot state $(date +%Y-%m-%d_%H:%M)"
+              # ★★ الإصلاح الجراحي: إضافة [skip ci] لمنع الحلقة المفرغة ★★
+              # هذه العبارة تخبر GitHub Actions بعدم إعادة تشغيل الـ Workflow بعد هذا الـ Push
+              git commit -m "chore: auto-persist H1 bot state [skip ci]"
+              
+              # نسحب أحدث التغييرات أولاً لتجنب التعارض (Race Condition)
+              git pull --rebase --autostash origin ${{ github.ref_name }} || true
+              
+              # ندفع التغييرات المحفوظة
               git push origin HEAD:${{ github.ref_name }} || echo "Push failed or no remote access."
               echo ">>> State pushed to repository successfully."
             else
