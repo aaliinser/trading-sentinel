@@ -4,18 +4,18 @@
 H1 Stochastic Ultimate Bot - v4.6 (Guaranteed-Reports & Fresh-Data Release)
 الإصلاحات الجذرية في v4.6:
 1. ★★ إصلاح قاتل للتأخير الزمني: نافذة حذف الشمعة الجارية كانت 90 دقيقة، فمع أي تأخر
-   بسيط من yfinance كانت تُحذف الشمعة المغلقة الطازجة ويُحلل على شمعة عمرها 65+ دقيقة
+   بسيط من yfinance كانت تُحذف الشمعة المغلقة الطازجة ويٌحلل على شمعة عمرها 65+ دقيقة
    → إشارات متأخرة وتقاطعات انعكست قبل الدخول (هذا سبب "قليلة وخاسرة" بشكل رئيسي).
-   أصبحت 62 دقيقة (60 إغلاق + دقيقتان هامش بيانات) — شمعة مغلقة دائمًا طازجة.
+   أصبحت 62 دقيقة (60 إغلاق + دقيقتان هامش بيانات) — شمعة مغلقة دائمًَا طازجة.
 2. ★★ تقارير مضمونة التسليم: إلغاء نافذة 00:00-00:10 بالكامل — يُحاول الإرسال في كل
    نبضة بعد منتصف الليل حتى ينجح مرة واحدة (مانع التكرار last_daily_report_date)،
    مع رسالة "لم تُسجَّل صفقات" عند الفراغ بدل الصمت، وتواريخ عربية واضحة.
-3. ★★ ZoneInfo("Asia/Gaza") مع fallback آمن — ضبط التوقيت الصيفي/الشتوي تلقائيًا
+3. ★★ ZoneInfo("Asia/Gaza") مع fallback آمن — ضبط التوقيت الصيفي/الشتوي تلقائيًَا
    بدل الإزاحة الثابتة +3 التي تُخرج الحظر الليلي والتقارير عن الصواب نصف السنة.
 4. إضافة فلتر عطلة نهاية الأسبوع (السبت والأحد بتوقيت غزة) — منع الإشارات على
-   بيانات سوق مغلق/متجمدة.
+   بيانات سوق مغلق/متجمد.
 5. جلب بيانات الحسم بنافذة 7 أيام بدل 3 (صفقات عطلة نهاية الأسبوع لا تضيع).
-6. Zero-Crash: تقرير محصّن ضد المفاتيح الناقصة والتواريخ التالفة (coerce+dropna).
+6. Zero-Crash: تقرير محصَّن ضد المفاتيح الناقصة والتواريخ التالفة (coerce+dropna).
 الإصلاحات النهائية والحاسمة (مطبقة من منطق الـ M15 v3.8.2):
 1. ★★ إصلاح جذري لنافذة زمنية الحسم (استخدام وقت بداية الشمعة بدقة رياضية) ★★
    - شمعة الدخول: entry_dt -> entry_dt + 60 دقيقة.
@@ -59,9 +59,15 @@ STATE_FILE = "state_h1_ultimate_v45.json" # ملف حالة جديد لضمان 
 LOG_LEVEL = logging.INFO
 
 TRADING_SYMBOLS = [
+    # الأزواج الرئيسية
     "EURUSD=X", "GBPUSD=X", "USDJPY=X", "AUDUSD=X",
-    "USDCAD=X", "CHFJPY=X", "NZDUSD=X", "EURCHF=X",
-    "GBPJPY=X", "EURGBP=X", "AUDJPY=X", "EURAUD=X", "USDCHF=X"
+    "USDCAD=X", "USDCHF=X", "NZDUSD=X",
+    # أزواج الين
+    "EURJPY=X", "GBPJPY=X", "AUDJPY=X", "CADJPY=X", "CHFJPY=X",
+    # الأزواج المتقاطعة والإضافية
+    "EURGBP=X", "EURAUD=X", "EURCAD=X",
+    "GBPAUD=X", "GBPCAD=X", "AUDCAD=X",
+    "EURNZD=X", "AUDNZD=X"
 ]
 
 K_PERIOD = 9
@@ -275,7 +281,7 @@ def calculate_indicators(df: pd.DataFrame):
 
 # ═══════════════════════════════════════════════
 # 5. منطق الاستراتيجية (لم يُمَس)
-# ═══════════════════════════════════════════════
+# ══════════════════════════════════════════════
 
 def check_signal_logic(df: pd.DataFrame):
     if df is None or len(df) < 2:
@@ -305,7 +311,7 @@ def check_signal_logic(df: pd.DataFrame):
         signal_direction = "PUT"
     return signal_direction
 
-# ═══════════════════════════════════════════════
+# ══════════════════════════════════════════════
 # 6. ★★★ الحسم التلقائي المصحح جذريا (منطق Kimi) ★★★
 # ═══════════════════════════════════════════════
 
@@ -381,7 +387,7 @@ def resolve_pending_trades(sm: StateManager):
                 sm.archive_trade({
                     "id": trade['id'], "symbol": sym, "direction": dr,
                     "entry_price": entry_px, "exit_price": exit_px,
-                    "win": None, "resolved_at": now_utc.isoformat(),
+                    "win": None, "resolved_at": exit_candle_close.isoformat(),
                     "status": "VOID_FLAT", "pips": pips_diff
                 })
                 resolved_ids.append(trade['id'])
@@ -403,7 +409,7 @@ def resolve_pending_trades(sm: StateManager):
             sm.archive_trade({
                 "id": trade['id'], "symbol": sym, "direction": dr,
                 "entry_price": entry_px, "exit_price": exit_px,
-                "win": bool(win), "resolved_at": now_utc.isoformat(),
+                "win": bool(win), "resolved_at": exit_candle_close.isoformat(),
                 "status": "RESOLVED", "pips": pips_diff
             })
             resolved_ids.append(trade['id'])
