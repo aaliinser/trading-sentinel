@@ -1,7 +1,21 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-H1 Stochastic Ultimate Bot - v4.5 (Kimi Logic Applied & Fixed Resolution)
+H1 Stochastic Ultimate Bot - v4.6 (Guaranteed-Reports & Fresh-Data Release)
+الإصلاحات الجذرية في v4.6:
+1. ★★ إصلاح قاتل للتأخير الزمني: نافذة حذف الشمعة الجارية كانت 90 دقيقة، فمع أي تأخر
+   بسيط من yfinance كانت تُحذف الشمعة المغلقة الطازجة ويُحلل على شمعة عمرها 65+ دقيقة
+   → إشارات متأخرة وتقاطعات انعكست قبل الدخول (هذا سبب "قليلة وخاسرة" بشكل رئيسي).
+   أصبحت 62 دقيقة (60 إغلاق + دقيقتان هامش بيانات) — شمعة مغلقة دائمًا طازجة.
+2. ★★ تقارير مضمونة التسليم: إلغاء نافذة 00:00-00:10 بالكامل — يُحاول الإرسال في كل
+   نبضة بعد منتصف الليل حتى ينجح مرة واحدة (مانع التكرار last_daily_report_date)،
+   مع رسالة "لم تُسجَّل صفقات" عند الفراغ بدل الصمت، وتواريخ عربية واضحة.
+3. ★★ ZoneInfo("Asia/Gaza") مع fallback آمن — ضبط التوقيت الصيفي/الشتوي تلقائيًا
+   بدل الإزاحة الثابتة +3 التي تُخرج الحظر الليلي والتقارير عن الصواب نصف السنة.
+4. إضافة فلتر عطلة نهاية الأسبوع (السبت والأحد بتوقيت غزة) — منع الإشارات على
+   بيانات سوق مغلق/متجمدة.
+5. جلب بيانات الحسم بنافذة 7 أيام بدل 3 (صفقات عطلة نهاية الأسبوع لا تضيع).
+6. Zero-Crash: تقرير محصّن ضد المفاتيح الناقصة والتواريخ التالفة (coerce+dropna).
 الإصلاحات النهائية والحاسمة (مطبقة من منطق الـ M15 v3.8.2):
 1. ★★ إصلاح جذري لنافذة زمنية الحسم (استخدام وقت بداية الشمعة بدقة رياضية) ★★
    - شمعة الدخول: entry_dt -> entry_dt + 60 دقيقة.
@@ -15,6 +29,7 @@ H1 Stochastic Ultimate Bot - v4.5 (Kimi Logic Applied & Fixed Resolution)
 """
 import os, sys, time, json, logging, uuid
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from pathlib import Path
 import requests
 import numpy as np
@@ -27,10 +42,19 @@ try:
 except ImportError:
     print("pip install yfinance"); sys.exit(1)
 
+try:
+    GAZA_TZ = ZoneInfo("Asia/Gaza")
+except Exception:
+    GAZA_TZ = timezone(timedelta(hours=3))
+
+def get_gaza_now() -> datetime:
+    """توقيت غزة الحقيقي مع دعم التوقيت الصيفي/الشتوي"""
+    return datetime.now(timezone.utc).astimezone(GAZA_TZ)
+
 # ═══════════════════════════════════════════════
 # 1. الإعدادات العامة
 # ═══════════════════════════════════════════════
-BOT_NAME = "H1_Ultimate_Bot_V4_5_Gaza_Time_Fixed"
+BOT_NAME = "H1_Ultimate_Bot_V4_6_Guaranteed_Reports"
 STATE_FILE = "state_h1_ultimate_v45.json" # ملف حالة جديد لضمان النظافة
 LOG_LEVEL = logging.INFO
 
@@ -95,6 +119,17 @@ def send_telegram(msg: str):
             elif resp.status_code == 429:
                 wait = resp.json().get('parameters', {}).get('retry_after', 5)
                 time.sleep(wait)
+            elif resp.status_code == 400:
+                log.warning("TG Markdown parse error, retrying as plain text...")
+                plain = {"chat_id": TG_CHAT, "text": msg.replace("*", "").replace("`", "").replace("_", "")}
+                try:
+                    resp_plain = requests.post(url, json=plain, timeout=15)
+                    if resp_plain.status_code == 200:
+                        log.info("Message sent successfully to Telegram (plain).")
+                        return True
+                except Exception:
+                    pass
+                break
             else:
                 log.error(f"Telegram API Error: {resp.status_code} - {resp.text}")
                 break
@@ -215,8 +250,8 @@ def fetch_h1_data(symbol: str, period_days: int = 7):
         df = df[~df.index.duplicated()].sort_index().dropna()
         
         now_utc = pd.Timestamp.now(tz="UTC")
-        # حذف الشمعة الجارية (فهرس yfinance = بداية الشمعة؛ الشمعة جارية إذا لم تكتمل ساعتها)
-        if not df.empty and df.index[-1] + pd.Timedelta(hours=1, minutes=30) > now_utc:
+        # حذف الشمعة الجارية فقط: 62 د = ساعة إغلاق + دقيقتان هامش بيانات (لا تحذف الشمعة المغلقة الطازجة)
+        if not df.empty and df.index[-1] + pd.Timedelta(minutes=62) > now_utc:
             df = df.iloc[:-1]
             
         return df
@@ -306,7 +341,7 @@ def resolve_pending_trades(sm: StateManager):
             
             log.info(f"Resolving {sym} | Target Exit Close: {exit_candle_close}")
             
-            df_exit_full = fetch_h1_data(sym, period_days=3)
+            df_exit_full = fetch_h1_data(sym, period_days=7)  # v4.6: نافذة أوسع لتغطية عطلة الأسبوع
             if df_exit_full is None or df_exit_full.empty:
                 log.warning(f"No exit data for {sym}. Retry next cycle.")
                 continue
@@ -384,80 +419,100 @@ def resolve_pending_trades(sm: StateManager):
 # 7. نظام التقارير (معدل لمنع السبام)
 # ═══════════════════════════════════════════════
 
+AR_MONTHS = {
+    "01": "يناير", "02": "فبراير", "03": "مارس", "04": "أبريل",
+    "05": "مايو", "06": "يونيو", "07": "يوليو", "08": "أغسطس",
+    "09": "سبتمبر", "10": "أكتوبر", "11": "نوفمبر", "12": "ديسمبر"
+}
+AR_DAYS = {0: 'الاثنين', 1: 'الثلاثاء', 2: 'الأربعاء', 3: 'الخميس',
+           4: 'الجمعة', 5: 'السبت', 6: 'الأحد'}
+
+
 def generate_reports(sm: StateManager):
-    now_utc = datetime.now(timezone.utc)
-    hebron_tz = timezone(timedelta(hours=3))
-    local_now = now_utc.astimezone(hebron_tz)
-    
-    # ★★ الشرط الزمني: 00:00 - 00:10 بتوقيت غزة فقط ★★
-    if not (local_now.hour == 0 and local_now.minute < 10):
+    """
+    ★★ v4.6 — تقرير يومي مضمون التسليم ★★
+    لا يوجد أي قيد hour/minute. يُحاول الإرسال في كل نبضة بعد منتصف الليل بتوقيت غزة
+    حتى ينجح مرة واحدة فقط (last_daily_report_date يخزن تاريخ "أمس" ويمنع التكرار).
+    """
+    local_now = get_gaza_now()
+    yesterday = local_now - timedelta(days=1)
+    yesterday_str = yesterday.strftime("%Y-%m-%d")
+    period_name = f"{AR_DAYS[yesterday.weekday()]} {yesterday.day} {AR_MONTHS[yesterday.strftime('%m')]} {yesterday.year}"
+
+    # التقرير مستحق طالما لم نُرسله لأمس بعد — بأي ساعة من الليل أو النهار
+    if sm.data.get("last_daily_report_date") == yesterday_str:
         return
 
-    # ★★ التحقق من عدم إرسال التقرير لهذا اليوم مسبقاُ ★★
-    today_local_str = local_now.strftime("%Y-%m-%d")
-    if sm.data.get("last_daily_report_date") == today_local_str:
-        log.debug("Daily report already sent for today. Skipping.")
-        return
+    log.info(f"Daily report due for {yesterday_str} — attempting send...")
 
-    history = sm.data.get("history", [])
-    if not history:
-        return
-
-    # تحديد نطاق "أمس" بتوقيت غزة المحلي
-    yesterday_local_date = (local_now - timedelta(days=1)).date()
-    
+    # جمع صفقات أمس بتواريخ محصّنة (coerce + skip تالف) — Zero-Crash
     daily_trades = []
-    for t in history:
+    for t in sm.data.get("history", []):
         try:
             exit_time_str = t.get('resolved_at', '')
-            if not exit_time_str: continue
-            
-            exit_dt_utc = datetime.fromisoformat(exit_time_str)
-            if exit_dt_utc.tzinfo is None:
-                exit_dt_utc = exit_dt_utc.replace(tzinfo=timezone.utc)
-                
-            exit_dt_gaza = exit_dt_utc.astimezone(hebron_tz)
-            
-            if exit_dt_gaza.date() == yesterday_local_date:
+            if not exit_time_str:
+                continue
+            exit_dt_utc = pd.to_datetime(exit_time_str, utc=True, errors='coerce')
+            if pd.isna(exit_dt_utc):
+                continue
+            exit_dt_gaza = exit_dt_utc.tz_convert(GAZA_TZ)
+            if exit_dt_gaza.date() == yesterday.date():
                 daily_trades.append(t)
         except Exception:
             continue
 
     if not daily_trades:
-        log.info(f"No trades resolved on {yesterday_local_date}. Marking report as sent.")
-        sm.data["last_daily_report_date"] = today_local_str
-        sm.save()
+        # ★★ v4.6: رسالة اطمئنان بدل الصمت التام ★★
+        msg = (
+            f"*🌙 ملخص أداء H1 ({period_name})*\n\n"
+            f"📊 *إجمالي الصفقات:* `0`\n"
+            f"ℹ️ _لم تُسجَّل صفقات خلال هذه الفترة._\n\n"
+            f"_البوت يعمل بكفاءة ويراقب السوق بانتظار الفرص القادمة!_"
+        )
+        if send_telegram(msg):
+            sm.data["last_daily_report_date"] = yesterday_str
+            sm.save()
+            log.info(f"Empty daily report CONFIRMED for {yesterday_str}")
+        else:
+            log.warning("Daily report send failed — will retry on next pulse (guaranteed delivery).")
         return
 
     total = len(daily_trades)
     wins = sum(1 for t in daily_trades if t.get('win') is True)
     losses = sum(1 for t in daily_trades if t.get('win') is False)
     voids = total - wins - losses
-    
-    wr = (wins / total * 100) if total > 0 else 0.0
-    
-    net_pips = sum(t.get('pips', 0) for t in daily_trades if t.get('win') is True) - \
-               sum(t.get('pips', 0) for t in daily_trades if t.get('win') is False)
 
+    # صافي النقاط الموجّه (ربح موجب / خسارة سالبة / لاغي صفر)
+    net_pips = 0.0
+    for t in daily_trades:
+        try:
+            p = float(t.get('pips', 0) or 0)
+        except (TypeError, ValueError):
+            p = 0.0
+        if t.get('win') is True:
+            net_pips += p
+        elif t.get('win') is False:
+            net_pips -= p
+
+    wr = (wins / (wins + losses) * 100.0) if (wins + losses) > 0 else 0.0
     emoji_wr = "🟢 ممتاز" if wr >= 60 else ("🟡 جيد" if wr >= 40 else "🔴 يحتاج مراجعة")
-    
+
     report_msg = (
-        f"*🌙 ملخص أداء السوق H1 ({yesterday_local_date})*\n\n"
+        f"*🌙 ملخص أداء H1 ({period_name})*\n\n"
         f"📊 *إجمالي الصفقات:* `{total}`\n"
         f"✅ *الرابحة:* `{wins}` | ❌ *الخاسرة:* `{losses}` | ⚪ *لاغية:* `{voids}`\n\n"
         f"🏆 *نسبة الفوز:* {emoji_wr} `{wr:.1f}%`\n"
-        f"💰 *صافي الحركة:* `{net_pips:+.1f} Pips`\n\n"
-        f"_انتهت جلسة التداول اليومية._"
+        f"💰 *صافي النقاط:* `{net_pips:+.1f} Pips`\n\n"
+        f"_انتهت جلسة التقرير اليومي. استمر في الانضباط!_"
     )
-    
-    success = send_telegram(report_msg)
-    
-    if success:
-        sm.data["last_daily_report_date"] = today_local_str
+
+    if send_telegram(report_msg):
+        sm.data["last_daily_report_date"] = yesterday_str
         sm.save()
-        log.info(f"Daily Report Sent Successfully for {yesterday_local_date}.")
+        log.info(f"Daily report CONFIRMED for {yesterday_str}")
     else:
-        log.error("Failed to send Daily Report. Will retry in next cycle within window.")
+        log.warning("Daily report send failed — will retry on next pulse (guaranteed delivery).")
+
 
 # ═══════════════════════════════════════════════
 # 8. مسح الإشارات
@@ -465,11 +520,13 @@ def generate_reports(sm: StateManager):
 
 def scan_and_alert(sm: StateManager):
     log.info(">>> Scanning market for new signals...")
-    now_utc = datetime.now(timezone.utc)
-    
-    hebron_tz = timezone(timedelta(hours=3)) 
-    local_now = now_utc.astimezone(hebron_tz)
-    
+    local_now = get_gaza_now()
+
+    # ★★ v4.6: فلتر عطلة نهاية الأسبوع — منع الإشارات على بيانات سوق متجمدة ★★
+    if local_now.weekday() >= 5:
+        log.info("Weekend (Sat/Sun Gaza). Skipping scan.")
+        return
+
     if NIGHT_START_HOUR <= local_now.hour < NIGHT_END_HOUR:
         log.info(f"Night ban active ({local_now.strftime('%H:%M')} Local Time). Skipping scan.")
         return
