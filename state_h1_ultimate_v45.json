@@ -1,22 +1,5 @@
 {
-  "pending_trades": [
-    {
-      "id": "ce0eabef",
-      "symbol": "GBPJPY=X",
-      "direction": "CALL",
-      "entry_price": 210.802001953125,
-      "entry_time": "2026-10-22T07:00:00+00:00",
-      "telegram_message_id": true
-    },
-    {
-      "id": "18cded39",
-      "symbol": "CADJPY=X",
-      "direction": "CALL",
-      "entry_price": 112.18199920654297,
-      "entry_time": "2026-10-22T07:00:00+00:00",
-      "telegram_message_id": true
-    }
-  ],
+  "pending_trades": [],
   "history": [
     {
       "id": "23e93f1c",
@@ -149,6 +132,28 @@
       "resolved_at": "2026-10-21T16:03:29.503597+00:00",
       "status": "RESOLVED",
       "pips": 4.400014877319336
+    },
+    {
+      "id": "ce0eabef",
+      "symbol": "GBPJPY=X",
+      "direction": "CALL",
+      "entry_price": 210.802001953125,
+      "exit_price": 210.51199340820312,
+      "win": false,
+      "resolved_at": "2026-10-22T09:00:00+00:00",
+      "status": "RESOLVED",
+      "pips": 29.0008544921875
+    },
+    {
+      "id": "18cded39",
+      "symbol": "CADJPY=X",
+      "direction": "CALL",
+      "entry_price": 112.18199920654297,
+      "exit_price": 112.03099822998047,
+      "win": false,
+      "resolved_at": "2026-10-22T09:00:00+00:00",
+      "status": "RESOLVED",
+      "pips": 15.10009765625
     }
   ],
   "processed_candles": [
