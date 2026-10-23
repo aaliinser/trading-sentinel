@@ -1,5 +1,14 @@
 {
-  "pending_trades": [],
+  "pending_trades": [
+    {
+      "id": "39fb7462",
+      "symbol": "AUDUSD=X",
+      "direction": "CALL",
+      "entry_price": 0.7014098763465881,
+      "entry_time": "2026-10-23T05:00:00+00:00",
+      "telegram_message_id": true
+    }
+  ],
   "history": [
     {
       "id": "23e93f1c",
@@ -194,7 +203,8 @@
     "GBPJPY=X_2026-10-22T07:00:00+00:00",
     "CADJPY=X_2026-10-22T07:00:00+00:00",
     "AUDUSD=X_2026-10-22T11:00:00+00:00",
-    "NZDUSD=X_2026-10-22T11:00:00+00:00"
+    "NZDUSD=X_2026-10-22T11:00:00+00:00",
+    "AUDUSD=X_2026-10-23T05:00:00+00:00"
   ],
   "last_daily_report_date": "2026-10-22"
 }
