@@ -1,22 +1,5 @@
 {
-  "pending_trades": [
-    {
-      "id": "4a4dd739",
-      "symbol": "USDJPY=X",
-      "direction": "PUT",
-      "entry_price": 156.96099853515625,
-      "entry_time": "2026-10-23T07:00:00+00:00",
-      "telegram_message_id": true
-    },
-    {
-      "id": "6e223477",
-      "symbol": "EURGBP=X",
-      "direction": "PUT",
-      "entry_price": 0.837119996547699,
-      "entry_time": "2026-10-23T07:00:00+00:00",
-      "telegram_message_id": true
-    }
-  ],
+  "pending_trades": [],
   "history": [
     {
       "id": "23e93f1c",
@@ -204,6 +187,28 @@
       "resolved_at": "2026-10-23T07:00:00+00:00",
       "status": "RESOLVED",
       "pips": 7.879734039306641
+    },
+    {
+      "id": "4a4dd739",
+      "symbol": "USDJPY=X",
+      "direction": "PUT",
+      "entry_price": 156.96099853515625,
+      "exit_price": 156.81100463867188,
+      "win": true,
+      "resolved_at": "2026-10-23T09:00:00+00:00",
+      "status": "RESOLVED",
+      "pips": 14.9993896484375
+    },
+    {
+      "id": "6e223477",
+      "symbol": "EURGBP=X",
+      "direction": "PUT",
+      "entry_price": 0.837119996547699,
+      "exit_price": 0.8365100026130676,
+      "win": true,
+      "resolved_at": "2026-10-23T09:00:00+00:00",
+      "status": "RESOLVED",
+      "pips": 6.099939346313477
     }
   ],
   "processed_candles": [
