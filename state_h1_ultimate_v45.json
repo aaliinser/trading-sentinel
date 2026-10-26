@@ -1,27 +1,11 @@
 {
   "pending_trades": [
     {
-      "id": "f29f64b3",
-      "symbol": "GBPUSD=X",
+      "id": "af278f85",
+      "symbol": "AUDUSD=X",
       "direction": "CALL",
-      "entry_price": 1.334614634513855,
-      "entry_time": "2026-10-26T14:00:00+00:00",
-      "telegram_message_id": true
-    },
-    {
-      "id": "308d2ad8",
-      "symbol": "USDJPY=X",
-      "direction": "PUT",
-      "entry_price": 157.49200439453125,
-      "entry_time": "2026-10-26T14:00:00+00:00",
-      "telegram_message_id": true
-    },
-    {
-      "id": "e8d2b7f4",
-      "symbol": "NZDUSD=X",
-      "direction": "CALL",
-      "entry_price": 0.5680204629898071,
-      "entry_time": "2026-10-26T14:00:00+00:00",
+      "entry_price": 0.702049970626831,
+      "entry_time": "2026-10-26T15:00:00+00:00",
       "telegram_message_id": true
     }
   ],
@@ -355,6 +339,39 @@
       "resolved_at": "2026-10-26T14:00:00+00:00",
       "status": "RESOLVED",
       "pips": 12.577176094055176
+    },
+    {
+      "id": "f29f64b3",
+      "symbol": "GBPUSD=X",
+      "direction": "CALL",
+      "entry_price": 1.334614634513855,
+      "exit_price": 1.3346858024597168,
+      "win": true,
+      "resolved_at": "2026-10-26T16:00:00+00:00",
+      "status": "RESOLVED",
+      "pips": 0.7116794586181641
+    },
+    {
+      "id": "308d2ad8",
+      "symbol": "USDJPY=X",
+      "direction": "PUT",
+      "entry_price": 157.49200439453125,
+      "exit_price": 157.5780029296875,
+      "win": false,
+      "resolved_at": "2026-10-26T16:00:00+00:00",
+      "status": "RESOLVED",
+      "pips": 8.599853515625
+    },
+    {
+      "id": "e8d2b7f4",
+      "symbol": "NZDUSD=X",
+      "direction": "CALL",
+      "entry_price": 0.5680204629898071,
+      "exit_price": 0.5682464241981506,
+      "win": true,
+      "resolved_at": "2026-10-26T16:00:00+00:00",
+      "status": "RESOLVED",
+      "pips": 2.2596120834350586
     }
   ],
   "processed_candles": [
@@ -390,7 +407,8 @@
     "NZDUSD=X_2026-10-26T12:00:00+00:00",
     "GBPUSD=X_2026-10-26T14:00:00+00:00",
     "USDJPY=X_2026-10-26T14:00:00+00:00",
-    "NZDUSD=X_2026-10-26T14:00:00+00:00"
+    "NZDUSD=X_2026-10-26T14:00:00+00:00",
+    "AUDUSD=X_2026-10-26T15:00:00+00:00"
   ],
   "last_daily_report_date": "2026-10-25"
 }
