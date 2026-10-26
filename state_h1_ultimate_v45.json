@@ -1,11 +1,19 @@
 {
   "pending_trades": [
     {
-      "id": "af278f85",
-      "symbol": "AUDUSD=X",
-      "direction": "CALL",
-      "entry_price": 0.702049970626831,
-      "entry_time": "2026-10-26T15:00:00+00:00",
+      "id": "057e3552",
+      "symbol": "USDJPY=X",
+      "direction": "PUT",
+      "entry_price": 157.50399780273438,
+      "entry_time": "2026-10-26T16:00:00+00:00",
+      "telegram_message_id": true
+    },
+    {
+      "id": "5f549bfd",
+      "symbol": "GBPJPY=X",
+      "direction": "PUT",
+      "entry_price": 210.21800231933594,
+      "entry_time": "2026-10-26T16:00:00+00:00",
       "telegram_message_id": true
     }
   ],
@@ -372,6 +380,17 @@
       "resolved_at": "2026-10-26T16:00:00+00:00",
       "status": "RESOLVED",
       "pips": 2.2596120834350586
+    },
+    {
+      "id": "af278f85",
+      "symbol": "AUDUSD=X",
+      "direction": "CALL",
+      "entry_price": 0.702049970626831,
+      "exit_price": 0.7020993232727051,
+      "win": null,
+      "resolved_at": "2026-10-26T17:00:00+00:00",
+      "status": "VOID_FLAT",
+      "pips": 0.4935264587402344
     }
   ],
   "processed_candles": [
@@ -408,7 +427,9 @@
     "GBPUSD=X_2026-10-26T14:00:00+00:00",
     "USDJPY=X_2026-10-26T14:00:00+00:00",
     "NZDUSD=X_2026-10-26T14:00:00+00:00",
-    "AUDUSD=X_2026-10-26T15:00:00+00:00"
+    "AUDUSD=X_2026-10-26T15:00:00+00:00",
+    "USDJPY=X_2026-10-26T16:00:00+00:00",
+    "GBPJPY=X_2026-10-26T16:00:00+00:00"
   ],
   "last_daily_report_date": "2026-10-25"
 }
