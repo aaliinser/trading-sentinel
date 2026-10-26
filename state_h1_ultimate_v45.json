@@ -1,5 +1,22 @@
 {
-  "pending_trades": [],
+  "pending_trades": [
+    {
+      "id": "35622073",
+      "symbol": "GBPUSD=X",
+      "direction": "CALL",
+      "entry_price": 1.3350956439971924,
+      "entry_time": "2026-10-26T10:00:00+00:00",
+      "telegram_message_id": true
+    },
+    {
+      "id": "57702050",
+      "symbol": "AUDCAD=X",
+      "direction": "PUT",
+      "entry_price": 0.9853399991989136,
+      "entry_time": "2026-10-26T10:00:00+00:00",
+      "telegram_message_id": true
+    }
+  ],
   "history": [
     {
       "id": "23e93f1c",
@@ -302,7 +319,9 @@
     "AUDNZD=X_2026-10-23T12:00:00+00:00",
     "AUDNZD=X_2026-10-23T14:00:00+00:00",
     "AUDUSD=X_2026-10-26T06:00:00+00:00",
-    "EURNZD=X_2026-10-26T08:00:00+00:00"
+    "EURNZD=X_2026-10-26T08:00:00+00:00",
+    "GBPUSD=X_2026-10-26T10:00:00+00:00",
+    "AUDCAD=X_2026-10-26T10:00:00+00:00"
   ],
   "last_daily_report_date": "2026-10-25"
 }
