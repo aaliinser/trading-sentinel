@@ -1,5 +1,30 @@
 {
-  "pending_trades": [],
+  "pending_trades": [
+    {
+      "id": "7027515c",
+      "symbol": "USDJPY=X",
+      "direction": "PUT",
+      "entry_price": 157.31100463867188,
+      "entry_time": "2026-10-26T12:00:00+00:00",
+      "telegram_message_id": true
+    },
+    {
+      "id": "78943138",
+      "symbol": "USDCHF=X",
+      "direction": "PUT",
+      "entry_price": 0.8254299759864807,
+      "entry_time": "2026-10-26T12:00:00+00:00",
+      "telegram_message_id": true
+    },
+    {
+      "id": "b8758c15",
+      "symbol": "NZDUSD=X",
+      "direction": "CALL",
+      "entry_price": 0.5685048699378967,
+      "entry_time": "2026-10-26T12:00:00+00:00",
+      "telegram_message_id": true
+    }
+  ],
   "history": [
     {
       "id": "23e93f1c",
@@ -326,7 +351,10 @@
     "AUDUSD=X_2026-10-26T06:00:00+00:00",
     "EURNZD=X_2026-10-26T08:00:00+00:00",
     "GBPUSD=X_2026-10-26T10:00:00+00:00",
-    "AUDCAD=X_2026-10-26T10:00:00+00:00"
+    "AUDCAD=X_2026-10-26T10:00:00+00:00",
+    "USDJPY=X_2026-10-26T12:00:00+00:00",
+    "USDCHF=X_2026-10-26T12:00:00+00:00",
+    "NZDUSD=X_2026-10-26T12:00:00+00:00"
   ],
   "last_daily_report_date": "2026-10-25"
 }
