@@ -1,22 +1,5 @@
 {
-  "pending_trades": [
-    {
-      "id": "35622073",
-      "symbol": "GBPUSD=X",
-      "direction": "CALL",
-      "entry_price": 1.3350956439971924,
-      "entry_time": "2026-10-26T10:00:00+00:00",
-      "telegram_message_id": true
-    },
-    {
-      "id": "57702050",
-      "symbol": "AUDCAD=X",
-      "direction": "PUT",
-      "entry_price": 0.9853399991989136,
-      "entry_time": "2026-10-26T10:00:00+00:00",
-      "telegram_message_id": true
-    }
-  ],
+  "pending_trades": [],
   "history": [
     {
       "id": "23e93f1c",
@@ -292,6 +275,28 @@
       "resolved_at": "2026-10-26T10:00:00+00:00",
       "status": "RESOLVED",
       "pips": 5.199909210205078
+    },
+    {
+      "id": "35622073",
+      "symbol": "GBPUSD=X",
+      "direction": "CALL",
+      "entry_price": 1.3350956439971924,
+      "exit_price": 1.3347570896148682,
+      "win": false,
+      "resolved_at": "2026-10-26T12:00:00+00:00",
+      "status": "RESOLVED",
+      "pips": 3.3855438232421875
+    },
+    {
+      "id": "57702050",
+      "symbol": "AUDCAD=X",
+      "direction": "PUT",
+      "entry_price": 0.9853399991989136,
+      "exit_price": 0.9847099781036377,
+      "win": true,
+      "resolved_at": "2026-10-26T12:00:00+00:00",
+      "status": "RESOLVED",
+      "pips": 6.300210952758789
     }
   ],
   "processed_candles": [
