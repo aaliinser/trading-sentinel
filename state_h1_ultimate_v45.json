@@ -1,14 +1,5 @@
 {
-  "pending_trades": [
-    {
-      "id": "6ceac6ba",
-      "symbol": "AUDUSD=X",
-      "direction": "CALL",
-      "entry_price": 0.7030371427536011,
-      "entry_time": "2026-10-26T06:00:00+00:00",
-      "telegram_message_id": true
-    }
-  ],
+  "pending_trades": [],
   "history": [
     {
       "id": "23e93f1c",
@@ -262,6 +253,17 @@
       "resolved_at": "2026-10-23T16:00:00+00:00",
       "status": "VOID_FLAT",
       "pips": 0.2002716064453125
+    },
+    {
+      "id": "6ceac6ba",
+      "symbol": "AUDUSD=X",
+      "direction": "CALL",
+      "entry_price": 0.7030371427536011,
+      "exit_price": 0.7029382586479187,
+      "win": false,
+      "resolved_at": "2026-10-26T08:00:00+00:00",
+      "status": "RESOLVED",
+      "pips": 0.9888410568237305
     }
   ],
   "processed_candles": [
