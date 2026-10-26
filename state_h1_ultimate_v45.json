@@ -1,30 +1,5 @@
 {
-  "pending_trades": [
-    {
-      "id": "7027515c",
-      "symbol": "USDJPY=X",
-      "direction": "PUT",
-      "entry_price": 157.31100463867188,
-      "entry_time": "2026-10-26T12:00:00+00:00",
-      "telegram_message_id": true
-    },
-    {
-      "id": "78943138",
-      "symbol": "USDCHF=X",
-      "direction": "PUT",
-      "entry_price": 0.8254299759864807,
-      "entry_time": "2026-10-26T12:00:00+00:00",
-      "telegram_message_id": true
-    },
-    {
-      "id": "b8758c15",
-      "symbol": "NZDUSD=X",
-      "direction": "CALL",
-      "entry_price": 0.5685048699378967,
-      "entry_time": "2026-10-26T12:00:00+00:00",
-      "telegram_message_id": true
-    }
-  ],
+  "pending_trades": [],
   "history": [
     {
       "id": "23e93f1c",
@@ -322,6 +297,39 @@
       "resolved_at": "2026-10-26T12:00:00+00:00",
       "status": "RESOLVED",
       "pips": 6.300210952758789
+    },
+    {
+      "id": "7027515c",
+      "symbol": "USDJPY=X",
+      "direction": "PUT",
+      "entry_price": 157.31100463867188,
+      "exit_price": 157.48699951171875,
+      "win": false,
+      "resolved_at": "2026-10-26T14:00:00+00:00",
+      "status": "RESOLVED",
+      "pips": 17.5994873046875
+    },
+    {
+      "id": "78943138",
+      "symbol": "USDCHF=X",
+      "direction": "PUT",
+      "entry_price": 0.8254299759864807,
+      "exit_price": 0.8267800211906433,
+      "win": false,
+      "resolved_at": "2026-10-26T14:00:00+00:00",
+      "status": "RESOLVED",
+      "pips": 13.500452041625977
+    },
+    {
+      "id": "b8758c15",
+      "symbol": "NZDUSD=X",
+      "direction": "CALL",
+      "entry_price": 0.5685048699378967,
+      "exit_price": 0.5672471523284912,
+      "win": false,
+      "resolved_at": "2026-10-26T14:00:00+00:00",
+      "status": "RESOLVED",
+      "pips": 12.577176094055176
     }
   ],
   "processed_candles": [
