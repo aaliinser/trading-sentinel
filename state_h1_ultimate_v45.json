@@ -1,14 +1,5 @@
 {
-  "pending_trades": [
-    {
-      "id": "aa525ad2",
-      "symbol": "EURNZD=X",
-      "direction": "PUT",
-      "entry_price": 1.9702399969100952,
-      "entry_time": "2026-10-26T08:00:00+00:00",
-      "telegram_message_id": true
-    }
-  ],
+  "pending_trades": [],
   "history": [
     {
       "id": "23e93f1c",
@@ -273,6 +264,17 @@
       "resolved_at": "2026-10-26T08:00:00+00:00",
       "status": "RESOLVED",
       "pips": 0.9888410568237305
+    },
+    {
+      "id": "aa525ad2",
+      "symbol": "EURNZD=X",
+      "direction": "PUT",
+      "entry_price": 1.9702399969100952,
+      "exit_price": 1.9697200059890747,
+      "win": true,
+      "resolved_at": "2026-10-26T10:00:00+00:00",
+      "status": "RESOLVED",
+      "pips": 5.199909210205078
     }
   ],
   "processed_candles": [
