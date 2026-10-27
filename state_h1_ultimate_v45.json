@@ -1,22 +1,5 @@
 {
-  "pending_trades": [
-    {
-      "id": "1cbacf98",
-      "symbol": "USDCAD=X",
-      "direction": "PUT",
-      "entry_price": 1.404860019683838,
-      "entry_time": "2026-10-27T20:00:00+00:00",
-      "telegram_message_id": true
-    },
-    {
-      "id": "f0e1afdc",
-      "symbol": "CHFJPY=X",
-      "direction": "PUT",
-      "entry_price": 190.46499633789062,
-      "entry_time": "2026-10-27T20:00:00+00:00",
-      "telegram_message_id": true
-    }
-  ],
+  "pending_trades": [],
   "history": [
     {
       "id": "23e93f1c",
@@ -457,6 +440,28 @@
       "resolved_at": "2026-10-27T21:00:00+00:00",
       "status": "RESOLVED",
       "pips": 4.524588584899902
+    },
+    {
+      "id": "1cbacf98",
+      "symbol": "USDCAD=X",
+      "direction": "PUT",
+      "entry_price": 1.404860019683838,
+      "exit_price": 1.4043899774551392,
+      "win": true,
+      "resolved_at": "2026-10-27T22:00:00+00:00",
+      "status": "RESOLVED",
+      "pips": 4.700422286987305
+    },
+    {
+      "id": "f0e1afdc",
+      "symbol": "CHFJPY=X",
+      "direction": "PUT",
+      "entry_price": 190.46499633789062,
+      "exit_price": 190.36199951171875,
+      "win": true,
+      "resolved_at": "2026-10-27T22:00:00+00:00",
+      "status": "RESOLVED",
+      "pips": 10.2996826171875
     }
   ],
   "processed_candles": [
@@ -503,5 +508,5 @@
     "USDCAD=X_2026-10-27T20:00:00+00:00",
     "CHFJPY=X_2026-10-27T20:00:00+00:00"
   ],
-  "last_daily_report_date": "2026-10-26"
+  "last_daily_report_date": "2026-10-27"
 }
