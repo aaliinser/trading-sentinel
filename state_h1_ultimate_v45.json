@@ -1,11 +1,11 @@
 {
   "pending_trades": [
     {
-      "id": "39ea596b",
-      "symbol": "USDCAD=X",
-      "direction": "PUT",
-      "entry_price": 1.4048999547958374,
-      "entry_time": "2026-10-27T18:00:00+00:00",
+      "id": "81d1bd16",
+      "symbol": "NZDUSD=X",
+      "direction": "CALL",
+      "entry_price": 0.5687311887741089,
+      "entry_time": "2026-10-27T19:00:00+00:00",
       "telegram_message_id": true
     }
   ],
@@ -427,6 +427,17 @@
       "resolved_at": "2026-10-27T19:00:00+00:00",
       "status": "RESOLVED",
       "pips": 9.299516677856445
+    },
+    {
+      "id": "39ea596b",
+      "symbol": "USDCAD=X",
+      "direction": "PUT",
+      "entry_price": 1.4048999547958374,
+      "exit_price": 1.4049700498580933,
+      "win": false,
+      "resolved_at": "2026-10-27T20:00:00+00:00",
+      "status": "RESOLVED",
+      "pips": 0.7009506225585938
     }
   ],
   "processed_candles": [
@@ -468,7 +479,8 @@
     "GBPJPY=X_2026-10-26T16:00:00+00:00",
     "CHFJPY=X_2026-10-27T08:00:00+00:00",
     "GBPCAD=X_2026-10-27T17:00:00+00:00",
-    "USDCAD=X_2026-10-27T18:00:00+00:00"
+    "USDCAD=X_2026-10-27T18:00:00+00:00",
+    "NZDUSD=X_2026-10-27T19:00:00+00:00"
   ],
   "last_daily_report_date": "2026-10-26"
 }
