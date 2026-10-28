@@ -1,5 +1,14 @@
 {
-  "pending_trades": [],
+  "pending_trades": [
+    {
+      "id": "b1bf4ff9",
+      "symbol": "EURJPY=X",
+      "direction": "PUT",
+      "entry_price": 176.30299377441406,
+      "entry_time": "2026-10-28T16:00:00+00:00",
+      "telegram_message_id": true
+    }
+  ],
   "history": [
     {
       "id": "23e93f1c",
@@ -578,7 +587,8 @@
     "AUDJPY=X_2026-10-28T10:00:00+00:00",
     "EURCAD=X_2026-10-28T10:00:00+00:00",
     "EURUSD=X_2026-10-28T13:00:00+00:00",
-    "EURGBP=X_2026-10-28T13:00:00+00:00"
+    "EURGBP=X_2026-10-28T13:00:00+00:00",
+    "EURJPY=X_2026-10-28T16:00:00+00:00"
   ],
   "last_daily_report_date": "2026-10-27"
 }
