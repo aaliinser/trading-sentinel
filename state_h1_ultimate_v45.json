@@ -1,22 +1,5 @@
 {
-  "pending_trades": [
-    {
-      "id": "0cfef03d",
-      "symbol": "EURUSD=X",
-      "direction": "PUT",
-      "entry_price": 1.113709807395935,
-      "entry_time": "2026-10-28T13:00:00+00:00",
-      "telegram_message_id": true
-    },
-    {
-      "id": "814da236",
-      "symbol": "EURGBP=X",
-      "direction": "PUT",
-      "entry_price": 0.8374500274658203,
-      "entry_time": "2026-10-28T13:00:00+00:00",
-      "telegram_message_id": true
-    }
-  ],
+  "pending_trades": [],
   "history": [
     {
       "id": "23e93f1c",
@@ -523,6 +506,28 @@
       "resolved_at": "2026-10-28T12:00:00+00:00",
       "status": "RESOLVED",
       "pips": 11.099576950073242
+    },
+    {
+      "id": "0cfef03d",
+      "symbol": "EURUSD=X",
+      "direction": "PUT",
+      "entry_price": 1.113709807395935,
+      "exit_price": 1.1138337850570679,
+      "win": false,
+      "resolved_at": "2026-10-28T15:00:00+00:00",
+      "status": "RESOLVED",
+      "pips": 1.239776611328125
+    },
+    {
+      "id": "814da236",
+      "symbol": "EURGBP=X",
+      "direction": "PUT",
+      "entry_price": 0.8374500274658203,
+      "exit_price": 0.8371999859809875,
+      "win": true,
+      "resolved_at": "2026-10-28T15:00:00+00:00",
+      "status": "RESOLVED",
+      "pips": 2.5004148483276367
     }
   ],
   "processed_candles": [
