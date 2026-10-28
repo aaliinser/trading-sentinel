@@ -1,22 +1,5 @@
 {
-  "pending_trades": [
-    {
-      "id": "9405e6e1",
-      "symbol": "EURNZD=X",
-      "direction": "CALL",
-      "entry_price": 1.9823299646377563,
-      "entry_time": "2026-10-28T18:00:00+00:00",
-      "telegram_message_id": true
-    },
-    {
-      "id": "327ab70d",
-      "symbol": "AUDNZD=X",
-      "direction": "CALL",
-      "entry_price": 1.2526500225067139,
-      "entry_time": "2026-10-28T18:00:00+00:00",
-      "telegram_message_id": true
-    }
-  ],
+  "pending_trades": [],
   "history": [
     {
       "id": "23e93f1c",
@@ -589,6 +572,28 @@
       "resolved_at": "2026-10-28T19:00:00+00:00",
       "status": "RESOLVED",
       "pips": 5.695223808288574
+    },
+    {
+      "id": "9405e6e1",
+      "symbol": "EURNZD=X",
+      "direction": "CALL",
+      "entry_price": 1.9823299646377563,
+      "exit_price": 1.98225998878479,
+      "win": false,
+      "resolved_at": "2026-10-28T20:00:00+00:00",
+      "status": "RESOLVED",
+      "pips": 0.6997585296630859
+    },
+    {
+      "id": "327ab70d",
+      "symbol": "AUDNZD=X",
+      "direction": "CALL",
+      "entry_price": 1.2526500225067139,
+      "exit_price": 1.253600001335144,
+      "win": true,
+      "resolved_at": "2026-10-28T20:00:00+00:00",
+      "status": "RESOLVED",
+      "pips": 9.499788284301758
     }
   ],
   "processed_candles": [
