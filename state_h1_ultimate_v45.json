@@ -1,11 +1,27 @@
 {
   "pending_trades": [
     {
-      "id": "b1bf4ff9",
-      "symbol": "EURJPY=X",
+      "id": "94340738",
+      "symbol": "EURUSD=X",
       "direction": "PUT",
-      "entry_price": 176.30299377441406,
-      "entry_time": "2026-10-28T16:00:00+00:00",
+      "entry_price": 1.1140819787979126,
+      "entry_time": "2026-10-28T17:00:00+00:00",
+      "telegram_message_id": true
+    },
+    {
+      "id": "3fb5783b",
+      "symbol": "GBPUSD=X",
+      "direction": "PUT",
+      "entry_price": 1.3301055431365967,
+      "entry_time": "2026-10-28T17:00:00+00:00",
+      "telegram_message_id": true
+    },
+    {
+      "id": "e1b519ce",
+      "symbol": "NZDUSD=X",
+      "direction": "PUT",
+      "entry_price": 0.562208354473114,
+      "entry_time": "2026-10-28T17:00:00+00:00",
       "telegram_message_id": true
     }
   ],
@@ -537,6 +553,17 @@
       "resolved_at": "2026-10-28T15:00:00+00:00",
       "status": "RESOLVED",
       "pips": 2.5004148483276367
+    },
+    {
+      "id": "b1bf4ff9",
+      "symbol": "EURJPY=X",
+      "direction": "PUT",
+      "entry_price": 176.30299377441406,
+      "exit_price": 176.12600708007812,
+      "win": true,
+      "resolved_at": "2026-10-28T18:00:00+00:00",
+      "status": "RESOLVED",
+      "pips": 17.69866943359375
     }
   ],
   "processed_candles": [
@@ -588,7 +615,10 @@
     "EURCAD=X_2026-10-28T10:00:00+00:00",
     "EURUSD=X_2026-10-28T13:00:00+00:00",
     "EURGBP=X_2026-10-28T13:00:00+00:00",
-    "EURJPY=X_2026-10-28T16:00:00+00:00"
+    "EURJPY=X_2026-10-28T16:00:00+00:00",
+    "EURUSD=X_2026-10-28T17:00:00+00:00",
+    "GBPUSD=X_2026-10-28T17:00:00+00:00",
+    "NZDUSD=X_2026-10-28T17:00:00+00:00"
   ],
   "last_daily_report_date": "2026-10-27"
 }
