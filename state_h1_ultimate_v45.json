@@ -1,27 +1,19 @@
 {
   "pending_trades": [
     {
-      "id": "94340738",
-      "symbol": "EURUSD=X",
-      "direction": "PUT",
-      "entry_price": 1.1140819787979126,
-      "entry_time": "2026-10-28T17:00:00+00:00",
+      "id": "9405e6e1",
+      "symbol": "EURNZD=X",
+      "direction": "CALL",
+      "entry_price": 1.9823299646377563,
+      "entry_time": "2026-10-28T18:00:00+00:00",
       "telegram_message_id": true
     },
     {
-      "id": "3fb5783b",
-      "symbol": "GBPUSD=X",
-      "direction": "PUT",
-      "entry_price": 1.3301055431365967,
-      "entry_time": "2026-10-28T17:00:00+00:00",
-      "telegram_message_id": true
-    },
-    {
-      "id": "e1b519ce",
-      "symbol": "NZDUSD=X",
-      "direction": "PUT",
-      "entry_price": 0.562208354473114,
-      "entry_time": "2026-10-28T17:00:00+00:00",
+      "id": "327ab70d",
+      "symbol": "AUDNZD=X",
+      "direction": "CALL",
+      "entry_price": 1.2526500225067139,
+      "entry_time": "2026-10-28T18:00:00+00:00",
       "telegram_message_id": true
     }
   ],
@@ -564,6 +556,39 @@
       "resolved_at": "2026-10-28T18:00:00+00:00",
       "status": "RESOLVED",
       "pips": 17.69866943359375
+    },
+    {
+      "id": "94340738",
+      "symbol": "EURUSD=X",
+      "direction": "PUT",
+      "entry_price": 1.1140819787979126,
+      "exit_price": 1.1155734062194824,
+      "win": false,
+      "resolved_at": "2026-10-28T19:00:00+00:00",
+      "status": "RESOLVED",
+      "pips": 14.914274215698242
+    },
+    {
+      "id": "3fb5783b",
+      "symbol": "GBPUSD=X",
+      "direction": "PUT",
+      "entry_price": 1.3301055431365967,
+      "exit_price": 1.3319835662841797,
+      "win": false,
+      "resolved_at": "2026-10-28T19:00:00+00:00",
+      "status": "RESOLVED",
+      "pips": 18.780231475830078
+    },
+    {
+      "id": "e1b519ce",
+      "symbol": "NZDUSD=X",
+      "direction": "PUT",
+      "entry_price": 0.562208354473114,
+      "exit_price": 0.5627778768539429,
+      "win": false,
+      "resolved_at": "2026-10-28T19:00:00+00:00",
+      "status": "RESOLVED",
+      "pips": 5.695223808288574
     }
   ],
   "processed_candles": [
@@ -618,7 +643,9 @@
     "EURJPY=X_2026-10-28T16:00:00+00:00",
     "EURUSD=X_2026-10-28T17:00:00+00:00",
     "GBPUSD=X_2026-10-28T17:00:00+00:00",
-    "NZDUSD=X_2026-10-28T17:00:00+00:00"
+    "NZDUSD=X_2026-10-28T17:00:00+00:00",
+    "EURNZD=X_2026-10-28T18:00:00+00:00",
+    "AUDNZD=X_2026-10-28T18:00:00+00:00"
   ],
   "last_daily_report_date": "2026-10-27"
 }
