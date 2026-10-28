@@ -1,30 +1,5 @@
 {
-  "pending_trades": [
-    {
-      "id": "8a88d9d2",
-      "symbol": "AUDUSD=X",
-      "direction": "CALL",
-      "entry_price": 0.7030865550041199,
-      "entry_time": "2026-10-28T10:00:00+00:00",
-      "telegram_message_id": true
-    },
-    {
-      "id": "32dd870b",
-      "symbol": "AUDJPY=X",
-      "direction": "CALL",
-      "entry_price": 110.97100067138672,
-      "entry_time": "2026-10-28T10:00:00+00:00",
-      "telegram_message_id": true
-    },
-    {
-      "id": "13b4b20c",
-      "symbol": "EURCAD=X",
-      "direction": "PUT",
-      "entry_price": 1.5630300045013428,
-      "entry_time": "2026-10-28T10:00:00+00:00",
-      "telegram_message_id": true
-    }
-  ],
+  "pending_trades": [],
   "history": [
     {
       "id": "23e93f1c",
@@ -498,6 +473,39 @@
       "resolved_at": "2026-10-28T08:00:00+00:00",
       "status": "RESOLVED",
       "pips": 2.9993057250976562
+    },
+    {
+      "id": "8a88d9d2",
+      "symbol": "AUDUSD=X",
+      "direction": "CALL",
+      "entry_price": 0.7030865550041199,
+      "exit_price": 0.7037792801856995,
+      "win": true,
+      "resolved_at": "2026-10-28T12:00:00+00:00",
+      "status": "RESOLVED",
+      "pips": 6.927251815795898
+    },
+    {
+      "id": "32dd870b",
+      "symbol": "AUDJPY=X",
+      "direction": "CALL",
+      "entry_price": 110.97100067138672,
+      "exit_price": 111.0770034790039,
+      "win": true,
+      "resolved_at": "2026-10-28T12:00:00+00:00",
+      "status": "RESOLVED",
+      "pips": 10.60028076171875
+    },
+    {
+      "id": "13b4b20c",
+      "symbol": "EURCAD=X",
+      "direction": "PUT",
+      "entry_price": 1.5630300045013428,
+      "exit_price": 1.5619200468063354,
+      "win": true,
+      "resolved_at": "2026-10-28T12:00:00+00:00",
+      "status": "RESOLVED",
+      "pips": 11.099576950073242
     }
   ],
   "processed_candles": [
