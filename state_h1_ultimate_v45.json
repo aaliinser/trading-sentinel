@@ -1,14 +1,5 @@
 {
-  "pending_trades": [
-    {
-      "id": "b76ddb73",
-      "symbol": "EURJPY=X",
-      "direction": "PUT",
-      "entry_price": 176.21400451660156,
-      "entry_time": "2026-10-29T20:00:00+00:00",
-      "telegram_message_id": true
-    }
-  ],
+  "pending_trades": [],
   "history": [
     {
       "id": "23e93f1c",
@@ -669,6 +660,17 @@
       "resolved_at": "2026-10-29T20:00:00+00:00",
       "status": "RESOLVED",
       "pips": 1.245737075805664
+    },
+    {
+      "id": "b76ddb73",
+      "symbol": "EURJPY=X",
+      "direction": "PUT",
+      "entry_price": 176.21400451660156,
+      "exit_price": 176.16200256347656,
+      "win": true,
+      "resolved_at": "2026-10-29T22:00:00+00:00",
+      "status": "RESOLVED",
+      "pips": 5.2001953125
     }
   ],
   "processed_candles": [
@@ -734,5 +736,5 @@
     "EURUSD=X_2026-10-29T18:00:00+00:00",
     "EURJPY=X_2026-10-29T20:00:00+00:00"
   ],
-  "last_daily_report_date": "2026-10-28"
+  "last_daily_report_date": "2026-10-29"
 }
