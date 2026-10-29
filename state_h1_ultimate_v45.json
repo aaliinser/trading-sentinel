@@ -1,14 +1,5 @@
 {
-  "pending_trades": [
-    {
-      "id": "d130735e",
-      "symbol": "AUDNZD=X",
-      "direction": "CALL",
-      "entry_price": 1.2497600317001343,
-      "entry_time": "2026-10-29T15:00:00+00:00",
-      "telegram_message_id": true
-    }
-  ],
+  "pending_trades": [],
   "history": [
     {
       "id": "23e93f1c",
@@ -647,6 +638,17 @@
       "resolved_at": "2026-10-29T16:00:00+00:00",
       "status": "RESOLVED",
       "pips": 24.799108505249023
+    },
+    {
+      "id": "d130735e",
+      "symbol": "AUDNZD=X",
+      "direction": "CALL",
+      "entry_price": 1.2497600317001343,
+      "exit_price": 1.2496999502182007,
+      "win": false,
+      "resolved_at": "2026-10-29T17:00:00+00:00",
+      "status": "RESOLVED",
+      "pips": 0.6008148193359375
     }
   ],
   "processed_candles": [
