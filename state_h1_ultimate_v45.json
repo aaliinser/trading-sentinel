@@ -1,14 +1,5 @@
 {
-  "pending_trades": [
-    {
-      "id": "1dede907",
-      "symbol": "EURAUD=X",
-      "direction": "PUT",
-      "entry_price": 1.5842499732971191,
-      "entry_time": "2026-10-29T12:00:00+00:00",
-      "telegram_message_id": true
-    }
-  ],
+  "pending_trades": [],
   "history": [
     {
       "id": "23e93f1c",
@@ -614,6 +605,17 @@
       "resolved_at": "2026-10-29T12:00:00+00:00",
       "status": "RESOLVED",
       "pips": 4.950761795043945
+    },
+    {
+      "id": "1dede907",
+      "symbol": "EURAUD=X",
+      "direction": "PUT",
+      "entry_price": 1.5842499732971191,
+      "exit_price": 1.5864399671554565,
+      "win": false,
+      "resolved_at": "2026-10-29T14:00:00+00:00",
+      "status": "RESOLVED",
+      "pips": 21.899938583374023
     }
   ],
   "processed_candles": [
