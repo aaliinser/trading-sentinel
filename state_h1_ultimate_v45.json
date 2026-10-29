@@ -1,19 +1,11 @@
 {
   "pending_trades": [
     {
-      "id": "2d34e76d",
-      "symbol": "AUDUSD=X",
+      "id": "d130735e",
+      "symbol": "AUDNZD=X",
       "direction": "CALL",
-      "entry_price": 0.7029382586479187,
-      "entry_time": "2026-10-29T14:00:00+00:00",
-      "telegram_message_id": true
-    },
-    {
-      "id": "e19eb63a",
-      "symbol": "EURAUD=X",
-      "direction": "PUT",
-      "entry_price": 1.5883599519729614,
-      "entry_time": "2026-10-29T14:00:00+00:00",
+      "entry_price": 1.2497600317001343,
+      "entry_time": "2026-10-29T15:00:00+00:00",
       "telegram_message_id": true
     }
   ],
@@ -633,6 +625,28 @@
       "resolved_at": "2026-10-29T14:00:00+00:00",
       "status": "RESOLVED",
       "pips": 21.899938583374023
+    },
+    {
+      "id": "2d34e76d",
+      "symbol": "AUDUSD=X",
+      "direction": "CALL",
+      "entry_price": 0.7029382586479187,
+      "exit_price": 0.7042253613471985,
+      "win": true,
+      "resolved_at": "2026-10-29T16:00:00+00:00",
+      "status": "RESOLVED",
+      "pips": 12.871026992797852
+    },
+    {
+      "id": "e19eb63a",
+      "symbol": "EURAUD=X",
+      "direction": "PUT",
+      "entry_price": 1.5883599519729614,
+      "exit_price": 1.5858800411224365,
+      "win": true,
+      "resolved_at": "2026-10-29T16:00:00+00:00",
+      "status": "RESOLVED",
+      "pips": 24.799108505249023
     }
   ],
   "processed_candles": [
@@ -693,7 +707,8 @@
     "AUDUSD=X_2026-10-29T10:00:00+00:00",
     "EURAUD=X_2026-10-29T12:00:00+00:00",
     "AUDUSD=X_2026-10-29T14:00:00+00:00",
-    "EURAUD=X_2026-10-29T14:00:00+00:00"
+    "EURAUD=X_2026-10-29T14:00:00+00:00",
+    "AUDNZD=X_2026-10-29T15:00:00+00:00"
   ],
   "last_daily_report_date": "2026-10-28"
 }
