@@ -1,5 +1,14 @@
 {
-  "pending_trades": [],
+  "pending_trades": [
+    {
+      "id": "1dede907",
+      "symbol": "EURAUD=X",
+      "direction": "PUT",
+      "entry_price": 1.5842499732971191,
+      "entry_time": "2026-10-29T12:00:00+00:00",
+      "telegram_message_id": true
+    }
+  ],
   "history": [
     {
       "id": "23e93f1c",
@@ -662,7 +671,8 @@
     "NZDUSD=X_2026-10-28T17:00:00+00:00",
     "EURNZD=X_2026-10-28T18:00:00+00:00",
     "AUDNZD=X_2026-10-28T18:00:00+00:00",
-    "AUDUSD=X_2026-10-29T10:00:00+00:00"
+    "AUDUSD=X_2026-10-29T10:00:00+00:00",
+    "EURAUD=X_2026-10-29T12:00:00+00:00"
   ],
   "last_daily_report_date": "2026-10-28"
 }
