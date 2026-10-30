@@ -1,11 +1,11 @@
 {
   "pending_trades": [
     {
-      "id": "1efec272",
-      "symbol": "NZDUSD=X",
+      "id": "3db8db59",
+      "symbol": "GBPCAD=X",
       "direction": "PUT",
-      "entry_price": 0.5647484064102173,
-      "entry_time": "2026-10-30T11:00:00+00:00",
+      "entry_price": 1.8716800212860107,
+      "entry_time": "2026-10-30T12:00:00+00:00",
       "telegram_message_id": true
     }
   ],
@@ -680,6 +680,17 @@
       "resolved_at": "2026-10-29T22:00:00+00:00",
       "status": "RESOLVED",
       "pips": 5.2001953125
+    },
+    {
+      "id": "1efec272",
+      "symbol": "NZDUSD=X",
+      "direction": "PUT",
+      "entry_price": 0.5647484064102173,
+      "exit_price": 0.5638886094093323,
+      "win": true,
+      "resolved_at": "2026-10-30T13:00:00+00:00",
+      "status": "RESOLVED",
+      "pips": 8.597970008850098
     }
   ],
   "processed_candles": [
@@ -744,7 +755,8 @@
     "AUDNZD=X_2026-10-29T15:00:00+00:00",
     "EURUSD=X_2026-10-29T18:00:00+00:00",
     "EURJPY=X_2026-10-29T20:00:00+00:00",
-    "NZDUSD=X_2026-10-30T11:00:00+00:00"
+    "NZDUSD=X_2026-10-30T11:00:00+00:00",
+    "GBPCAD=X_2026-10-30T12:00:00+00:00"
   ],
   "last_daily_report_date": "2026-10-29"
 }
