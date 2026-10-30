@@ -1,14 +1,5 @@
 {
-  "pending_trades": [
-    {
-      "id": "3db8db59",
-      "symbol": "GBPCAD=X",
-      "direction": "PUT",
-      "entry_price": 1.8716800212860107,
-      "entry_time": "2026-10-30T12:00:00+00:00",
-      "telegram_message_id": true
-    }
-  ],
+  "pending_trades": [],
   "history": [
     {
       "id": "23e93f1c",
@@ -691,6 +682,17 @@
       "resolved_at": "2026-10-30T13:00:00+00:00",
       "status": "RESOLVED",
       "pips": 8.597970008850098
+    },
+    {
+      "id": "3db8db59",
+      "symbol": "GBPCAD=X",
+      "direction": "PUT",
+      "entry_price": 1.8716800212860107,
+      "exit_price": 1.8689899444580078,
+      "win": true,
+      "resolved_at": "2026-10-30T14:00:00+00:00",
+      "status": "RESOLVED",
+      "pips": 26.900768280029297
     }
   ],
   "processed_candles": [
