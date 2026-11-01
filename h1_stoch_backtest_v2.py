@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-H1 STOCHASTIC EXTREME REVERSAL - BACKTEST ENGINE v2.1 (Bug Fixed)
-الإصلاحات الجوهرية مقارنة بالنسخة السابقة (v2.0):
-1. ★★ إصلاح خطأ AttributeError:
-   تم تمرير المتغير 'symbol' بشكل صحيح إلى دالة الاختبار لحساب معامل النقاط (Pip Multiplier).
-   النسخة السابقة كانت تحاول قراءة '.symbol' من كائن التاريخ (Timestamp) مما سبب الانهيار.
-2. ★★ تحسين دقة الحسابات:
-   استخدام المعامل الصحيح للأزواج التي تحتوي على JPY (×100) مقابل غيرها (×10000).
+H1 STOCHASTIC EXTREME REVERSAL - BACKTEST ENGINE v3.0 (Hybrid Strategy)
+الإصلاحات الجوهرية مقارنة بالنسخة السابقة (v2.1):
+1. ★★ دمج المنطق الهجين (Hybrid Logic):
+   تم إضافة حسابات Bollinger Bands كفلتر مكاني (Spatial Filter) بجانب فلتر الاتجاه EMA200.
+   الآن لا ندخل فقط لأن الرقم صغير (<20)، بل لأن السعر لمس حداً حقيقياً للانعكاس (BB Lower).
+2. ★★ توسيع نطاق التشبع (Wider Thresholds):
+   رفعنا حدود الدخول من 5/95 إلى 20/80 لزيادة عدد الفرص المتاحة إحصائياً (Sample Size).
+3. ★★ الحفاظ على نموذج التكلفة الواقعي:
+   استمر خصم السبريد الافتراضي (2 نقطة) لضمان أن النتائج تعكس الواقع المالي الحقيقي وليس الوهم النظري.
 """
 import numpy as np
 import pandas as pd
@@ -16,8 +18,8 @@ import warnings
 warnings.filterwarnings('ignore')
 
 # ==========================================
-# CONFIGURATION: H1 STOCHASTIC EXTREME REVERSAL v2.1
-# Strategy: Instant Entry at Extremes + Trend Filter + Spread Protection
+# CONFIGURATION: H1 STOCHASTIC + BOLLINGER HYBRID v3.0
+# Strategy: Spatial Reversal (BB Touch) + Momentum Trigger (Stoch Extreme) + Trend Filter (EMA200)
 # Timeframe: 1 Hour | Expiry: 1 Candle (60m)
 # Payout Assumption: 90% (Break-even WR ~52.63%)
 # ==========================================
@@ -32,12 +34,19 @@ PERIOD_LIMIT = "2y"
 BREAK_EVEN_WR = 0.5263 
 
 # --- STRATEGY PARAMETERS (OPTIMIZED FOR LIVE TRADING) ---
-STOCH_K_PERIOD = 14      # Standard Wilder Period for Slow Stochastics
-STOCH_D_PERIOD = 3       # Smoothing Factor for %D
-OVERBOUGHT_LEVEL = 95    # Stricter Threshold (>90) to avoid noise
-OVERSOLD_LEVEL = 5       # Stricter Threshold (<10) to avoid noise
-EMA_TREND_PERIOD = 200   # Long-term Trend Filter
-SPREAD_COST_PIPS = 2.0   # Estimated spread cost per trade (in pips)
+# Stochastic Settings
+STOCH_K_PERIOD = 14      
+STOCH_D_PERIOD = 3       
+OVERBOUGHT_LEVEL = 80    # Expanded range for better sample size
+OVERSOLD_LEVEL = 20      # Expanded range for better sample size
+
+# Bollinger Bands Settings (New Addition)
+BB_PERIOD = 20           # Standard period for BB calculation
+BB_STD_DEV = 2.0         # Standard deviation multiplier
+
+# Trend & Cost Settings
+EMA_TREND_PERIOD = 200   
+SPREAD_COST_PIPS = 2.0   
 
 def flatten_columns(df):
     if isinstance(df.columns, pd.MultiIndex):
@@ -71,10 +80,11 @@ def get_data(symbol, period=PERIOD_LIMIT, interval=TIMEFRAME):
         print(f"Error fetching {symbol}: {e}")
         return None
 
-def calculate_wilder_smoothed_stochastic(df):
+def calculate_hybrid_indicators(df):
     """
-    ★★ CORRECT MATHEMATICAL IMPLEMENTATION OF SLOW STOCHASTICS ★★
+    ★★ CORRECT MATHEMATICAL IMPLEMENTATION OF SLOW STOCHASTICS + BOLLINGER BANDS ★★
     Matches MT4/MT5/Broker algorithms exactly using Wilder's Smoothing Method.
+    Adds Bollinger Bands as spatial filters for reversal points.
     """
     c = df['Close']
     h = df['High']
@@ -103,17 +113,25 @@ def calculate_wilder_smoothed_stochastic(df):
     # 4. Exponential Moving Average (Trend Filter)
     ema_200 = c.ewm(span=EMA_TREND_PERIOD, adjust=False).mean()
     
+    # 5. NEW: Calculate Bollinger Bands (Spatial Filter)
+    sma_bb = c.rolling(window=BB_PERIOD).mean()
+    std_bb = c.rolling(window=BB_PERIOD).std(ddof=0)
+    bb_upper = sma_bb + (BB_STD_DEV * std_bb)
+    bb_lower = sma_bb - (BB_STD_DEV * std_bb)
+    
     return df.assign(
         STOC_SLOW_K=slow_k,
         STOC_D=stoch_d,
-        EMA_200=ema_200
+        EMA_200=ema_200,
+        BB_UPPER=bb_upper,
+        BB_LOWER=bb_lower
     )
 
-def run_backtest_v2(df, symbol_name): # ★★ التعديل هنا: إضافة parameter جديد
+def run_backtest_v3(df, symbol_name): 
     """
-    Executes STRICT ENTRY RULES v2.1:
-    CALL: Close > EMA200 AND Slow_Stoch_K < OVERSOLD_LEVEL
-    PUT:  Close < EMA200 AND Slow_Stoch_K > OVERBOUGHT_LEVEL
+    Executes STRICT ENTRY RULES v3.0 (HYBRID LOGIC):
+    CALL: Close > EMA200 AND Low touches/crosses BB_Lower AND Stoch_K < OVERSOLD_LEVEL
+    PUT:  Close < EMA200 AND High touches/crosses BB_Upper AND Stoch_K > OVERBOUGHT_LEVEL
     
     Includes SPREAD COST MODELING for realistic P&L calculation.
     """
@@ -121,7 +139,8 @@ def run_backtest_v2(df, symbol_name): # ★★ التعديل هنا: إضافة
     timestamps = []
     n = len(df)
     
-    start_idx = max(STOCH_K_PERIOD, STOCH_D_PERIOD, EMA_TREND_PERIOD) + 1
+    # Start after indicators are stable (considering longest lookback)
+    start_idx = max(STOCH_K_PERIOD, STOCH_D_PERIOD, EMA_TREND_PERIOD, BB_PERIOD) + 1
     
     # ★★ تحديد المعامل بناءً على اسم الزوج المُمرر الآن بشكل صحيح ★★
     pip_mult = 100.0 if "JPY" in symbol_name else 10000.0
@@ -131,21 +150,28 @@ def run_backtest_v2(df, symbol_name): # ★★ التعديل هنا: إضافة
         next_close = df['Close'].iloc[i+1]
         timestamp = df.index[i]
         
-        # Skip ties
-        if curr_close == next_close:
-            continue
-            
+        # Get current values
         k_curr = df['STOC_SLOW_K'].iloc[i]
         ema_200 = df['EMA_200'].iloc[i]
+        low_curr = df['Low'].iloc[i]
+        high_curr = df['High'].iloc[i]
+        bb_lower = df['BB_LOWER'].iloc[i]
+        bb_upper = df['BB_UPPER'].iloc[i]
         
         direction = 0 # 0=None, 1=CALL, -1=PUT
         
-        # --- BUY RULE (CALL) ---
-        if curr_close > ema_200 and k_curr < OVERSOLD_LEVEL:
+        # --- BUY RULE (CALL) - HYBRID ---
+        # Condition 1: Uptrend Context (Price above long-term average)
+        # Condition 2: Spatial Touch (Price hit the lower volatility boundary)
+        # Condition 3: Momentum Extreme (Stochastic confirms oversold condition)
+        if curr_close > ema_200 and low_curr <= bb_lower and k_curr < OVERSOLD_LEVEL:
             direction = 1
             
-        # --- SELL RULE (PUT) ---
-        elif curr_close < ema_200 and k_curr > OVERBOUGHT_LEVEL:
+        # --- SELL RULE (PUT) - HYBRID ---
+        # Condition 1: Downtrend Context (Price below long-term average)
+        # Condition 2: Spatial Touch (Price hit the upper volatility boundary)
+        # Condition 3: Momentum Extreme (Stochastic confirms overbought condition)
+        elif curr_close < ema_200 and high_curr >= bb_upper and k_curr > OVERBOUGHT_LEVEL:
             direction = -1
             
         if direction != 0:
@@ -204,9 +230,10 @@ def analyze_results(all_trades, all_timestamps):
 
 def main():
     print("="*70)
-    print("VALIDATING: H1 STOCHASTIC EXTREME REVERSAL v2.1 (Strict Quant Mode)")
+    print("VALIDATING: H1 STOCHASTIC + BOLLINGER HYBRID v3.0 (Strict Quant Mode)")
     print(f"Timeframe: {TIMEFRAME} | Period: {PERIOD_LIMIT} | Symbols: {len(SYMBOLS)}")
     print(f"Params: K={STOCH_K_PERIOD}, D={STOCH_D_PERIOD}, OB={OVERBOUGHT_LEVEL}, OS={OVERSOLD_LEVEL}")
+    print(f"Bollinger Params: Period={BB_PERIOD}, StdDev={BB_STD_DEV}")
     print(f"Cost Model: Spread={SPREAD_COST_PIPS} pips deducted from edge.")
     print("="*70)
     
@@ -217,9 +244,9 @@ def main():
         print(f"Processing {sym}...", end=" ")
         df = get_data(sym)
         if df is not None:
-            enriched_df = calculate_wilder_smoothed_stochastic(df)
+            enriched_df = calculate_hybrid_indicators(df)
             # ★★ التعديل هنا: تمرير اسم الرمز للدالة ★★
-            trades, ts = run_backtest_v2(enriched_df, sym)
+            trades, ts = run_backtest_v3(enriched_df, sym)
             global_trades.extend(trades)
             global_timestamps.extend(ts)
             print(f"Done ({len(trades)} signals)")
@@ -229,7 +256,7 @@ def main():
     stats = analyze_results(global_trades, global_timestamps)
     
     print("\n" + "-"*70)
-    print("FINAL STATISTICAL REPORT (v2.1 REALISTIC SIMULATION)")
+    print("FINAL STATISTICAL REPORT (v3.0 HYBRID SIMULATION)")
     print("-"*70)
     print(f"Total Signals Generated: {stats['count']}")
     print(f"Overall Win Rate:        {stats['wr']*100:.2f}%")
