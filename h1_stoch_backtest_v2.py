@@ -1,19 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-H1 STOCHASTIC EXTREME REVERSAL - BACKTEST ENGINE v2.0 (Production Grade)
-الإصلاحات الجوهرية مقارنة بالنسخة الخام (v1):
-1. ★★ تصحيح المعادلة الرياضية للستوكاستيك (Wilder's Smoothing Fix):
-   تم استبدال rolling().mean() بمعادلة التنعيم الصحيحة المطابقة لمنصات التداول (MT4/5).
-   الآن %K و %D محسوبان بدقة 100% مطابقة للواقع.
-2. ★★ تغيير منطق الدخول (Eliminate Lag):
-   حذف شرط التقاطع البطيء (Crossover). الدخول الآن فوري عند لمس مناطق التشبع الحاد (<5 / >95)
-   متزامناً مع فلتر الاتجاه EMA200. هذا يحل مشكلة "الدخول المتأخر".
-3. ★★ إضافة حاجز السبريد (Spread Buffer & Cost Modeling):
-   خصم تكلفة سبريد افتراضية (2 نقطة) من هامش الربح قبل احتساب الفوز/الخسارة.
-   إذا كان الربح المتوقع < التكلفة، تُصنف الصفقة كـ "لاغي" أو خسارة.
-4. ★★ تحسين معالجة البيانات (Gap Handling):
-   إضافة تحقق صارم من الفجوات الزمنية (Missing Bars) لتجنب حساب المؤشرات على بيانات ناقصة.
+H1 STOCHASTIC EXTREME REVERSAL - BACKTEST ENGINE v2.1 (Bug Fixed)
+الإصلاحات الجوهرية مقارنة بالنسخة السابقة (v2.0):
+1. ★★ إصلاح خطأ AttributeError:
+   تم تمرير المتغير 'symbol' بشكل صحيح إلى دالة الاختبار لحساب معامل النقاط (Pip Multiplier).
+   النسخة السابقة كانت تحاول قراءة '.symbol' من كائن التاريخ (Timestamp) مما سبب الانهيار.
+2. ★★ تحسين دقة الحسابات:
+   استخدام المعامل الصحيح للأزواج التي تحتوي على JPY (×100) مقابل غيرها (×10000).
 """
 import numpy as np
 import pandas as pd
@@ -22,7 +16,7 @@ import warnings
 warnings.filterwarnings('ignore')
 
 # ==========================================
-# CONFIGURATION: H1 STOCHASTIC EXTREME REVERSAL v2.0
+# CONFIGURATION: H1 STOCHASTIC EXTREME REVERSAL v2.1
 # Strategy: Instant Entry at Extremes + Trend Filter + Spread Protection
 # Timeframe: 1 Hour | Expiry: 1 Candle (60m)
 # Payout Assumption: 90% (Break-even WR ~52.63%)
@@ -69,10 +63,6 @@ def get_data(symbol, period=PERIOD_LIMIT, interval=TIMEFRAME):
         # ★★ GAP HANDLING: Remove duplicate indices and ensure continuity
         df = df[~df.index.duplicated(keep='first')]
         
-        # Check for significant time gaps (optional but recommended for robustness)
-        # If there are gaps larger than expected hours, we might want to flag them
-        # For this backtest, we assume continuous market hours for FX pairs provided by Yahoo
-        
         if len(df) < 250:
             return None
             
@@ -101,8 +91,6 @@ def calculate_wilder_smoothed_stochastic(df):
     raw_k = raw_k.fillna(50) # Neutral fill for flat markets
     
     # 2. Apply Wilder's Smoothing to get Slow %K
-    # Formula: K_slow[t] = (K_raw[t] + (n-1)*K_slow[t-1]) / n
-    # We use EWM with alpha=1/n which is equivalent to Wilder's smoothing
     slow_k = raw_k.ewm(alpha=1/STOCH_D_PERIOD, adjust=False).mean()
     
     # 3. Calculate %D as Simple Moving Average of Slow %K
@@ -121,11 +109,11 @@ def calculate_wilder_smoothed_stochastic(df):
         EMA_200=ema_200
     )
 
-def run_backtest_v2(df):
+def run_backtest_v2(df, symbol_name): # ★★ التعديل هنا: إضافة parameter جديد
     """
-    Executes STRICT ENTRY RULES v2.0:
-    CALL: Close > EMA200 AND Slow_Stoch_K < OVERSOLD_LEVEL (Instant Entry, No Crossover Wait)
-    PUT:  Close < EMA200 AND Slow_Stoch_K > OVERBOUGHT_LEVEL (Instant Entry, No Crossover Wait)
+    Executes STRICT ENTRY RULES v2.1:
+    CALL: Close > EMA200 AND Slow_Stoch_K < OVERSOLD_LEVEL
+    PUT:  Close < EMA200 AND Slow_Stoch_K > OVERBOUGHT_LEVEL
     
     Includes SPREAD COST MODELING for realistic P&L calculation.
     """
@@ -134,6 +122,9 @@ def run_backtest_v2(df):
     n = len(df)
     
     start_idx = max(STOCH_K_PERIOD, STOCH_D_PERIOD, EMA_TREND_PERIOD) + 1
+    
+    # ★★ تحديد المعامل بناءً على اسم الزوج المُمرر الآن بشكل صحيح ★★
+    pip_mult = 100.0 if "JPY" in symbol_name else 10000.0
     
     for i in range(start_idx, n - 1):
         curr_close = df['Close'].iloc[i]
@@ -150,50 +141,32 @@ def run_backtest_v2(df):
         direction = 0 # 0=None, 1=CALL, -1=PUT
         
         # --- BUY RULE (CALL) ---
-        # Condition 1: Price > EMA200 (Uptrend Context)
-        # Condition 2: Extreme Oversold Zone ONLY (No crossover requirement)
         if curr_close > ema_200 and k_curr < OVERSOLD_LEVEL:
             direction = 1
             
         # --- SELL RULE (PUT) ---
-        # Condition 1: Price < EMA200 (Downtrend Context)
-        # Condition 2: Extreme Overbought Zone ONLY (No crossover requirement)
         elif curr_close < ema_200 and k_curr > OVERBOUGHT_LEVEL:
             direction = -1
             
         if direction != 0:
-            # Calculate Gross Profit/Loss in Pips
-            pip_mult = 100.0 if "JPY" in str(timestamp.symbol) else 10000.0 # Note: timestamp doesn't have symbol here, need to pass it or infer from context. 
-            # Correction: Since we iterate symbols outside, let's handle pip_mult inside the loop properly or pass it.
-            # For simplicity in this function structure, I will assume standard FX unless specified otherwise.
-            # Actually, better approach: Pass pip_multiplier as argument or determine based on global config.
-            # Let's refine: We'll calculate difference first.
-            
-            diff_pips = abs(next_close - curr_close) * 10000 # Approximate multiplier for non-JPY
+            # Calculate Gross Profit/Loss in Price Difference
+            price_diff = next_close - curr_close
             
             # Determine Win/Loss considering Spread Cost
-            gross_win = False
+            # We convert spread from Pips to Price units based on the pair type
+            spread_in_price = SPREAD_COST_PIPS / pip_mult
+            
             net_profitable = False
             
             if direction == 1: # CALL
-                gross_win = next_close > curr_close
-                # Net profitability check: Did price move more than spread cost?
-                net_profitable = (next_close - curr_close) > (SPREAD_COST_PIPS / 10000.0)
+                # Need price rise greater than spread cost
+                net_profitable = price_diff > spread_in_price
                 
             else: # PUT
-                gross_win = next_close < curr_close
-                net_profitable = (curr_close - next_close) > (SPREAD_COST_PIPS / 10000.0)
+                # Need price drop magnitude greater than spread cost
+                net_profitable = (-price_diff) > spread_in_price
             
-            # Classification Logic:
-            # 1. If Gross Loss -> Definitely Loss (False)
-            # 2. If Gross Win BUT Net Unprofitable (due to spread) -> Treat as Void/Loss depending on broker policy. 
-            #    Here we treat it as LOSS because binary options usually require exceeding strike significantly or just closing above/below.
-            #    However, most BO platforms pay out if close > open regardless of spread size visually, BUT effectively you lose edge.
-            #    To be conservative and realistic for algorithmic trading viability:
-            
-            final_result = net_profitable 
-            
-            trades.append(final_result)
+            trades.append(net_profitable)
             timestamps.append(timestamp)
             
     return trades, timestamps
@@ -231,7 +204,7 @@ def analyze_results(all_trades, all_timestamps):
 
 def main():
     print("="*70)
-    print("VALIDATING: H1 STOCHASTIC EXTREME REVERSAL v2.0 (Strict Quant Mode)")
+    print("VALIDATING: H1 STOCHASTIC EXTREME REVERSAL v2.1 (Strict Quant Mode)")
     print(f"Timeframe: {TIMEFRAME} | Period: {PERIOD_LIMIT} | Symbols: {len(SYMBOLS)}")
     print(f"Params: K={STOCH_K_PERIOD}, D={STOCH_D_PERIOD}, OB={OVERBOUGHT_LEVEL}, OS={OVERSOLD_LEVEL}")
     print(f"Cost Model: Spread={SPREAD_COST_PIPS} pips deducted from edge.")
@@ -245,7 +218,8 @@ def main():
         df = get_data(sym)
         if df is not None:
             enriched_df = calculate_wilder_smoothed_stochastic(df)
-            trades, ts = run_backtest_v2(enriched_df)
+            # ★★ التعديل هنا: تمرير اسم الرمز للدالة ★★
+            trades, ts = run_backtest_v2(enriched_df, sym)
             global_trades.extend(trades)
             global_timestamps.extend(ts)
             print(f"Done ({len(trades)} signals)")
@@ -255,7 +229,7 @@ def main():
     stats = analyze_results(global_trades, global_timestamps)
     
     print("\n" + "-"*70)
-    print("FINAL STATISTICAL REPORT (v2.0 REALISTIC SIMULATION)")
+    print("FINAL STATISTICAL REPORT (v2.1 REALISTIC SIMULATION)")
     print("-"*70)
     print(f"Total Signals Generated: {stats['count']}")
     print(f"Overall Win Rate:        {stats['wr']*100:.2f}%")
