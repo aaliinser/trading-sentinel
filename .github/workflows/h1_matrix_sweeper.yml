@@ -1,0 +1,61 @@
+name: H1 Strategy Matrix Sweeper (Quant Engine v1.0)
+
+on:
+  # التشغيل اليدوي فقط لتجنب استهلاك الموارد تلقائياَ
+  workflow_dispatch:
+  
+  # يمكنك تفعيل هذا الجزء إذا أردت تشغيله تلقائياَ عند تعديل ملف الكود
+  # push:
+  #   paths:
+  #     - 'h1_strategy_matrix_sweeper.py'
+
+jobs:
+  sweep-job-matrix-v1:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          # تثبيت المكتبات المطلوبة للمحرك الكمي
+          pip install pandas numpy yfinance
+      
+      - name: Run H1 Strategy Matrix Sweeper Script (v1.0)
+        env:
+          PYTHONUNBUFFERED: "1"
+        run: |
+          echo "=================================================="
+          echo "STARTING: H1 STRATEGY MATRIX SWEEPER ENGINE"
+          echo "VERSION: 1.0 (Massive Quantitative Sweep)"
+          echo "SCRIPT: h1_strategy_matrix_sweeper.py"
+          echo "GOAL: Find True Edge via Z-Score > 2.0 & OOS Validation"
+          echo "=================================================="
+          
+          # تنفيذ السكربت وحفظ المخرجات في ملف نصي للسهولة في القراءة لاحقاَ
+          # نستخدم timeout اختياري لمنع التعليق اللانهائي (60 دقيقة كحد أقصى)
+          timeout 3600s python h1_strategy_matrix_sweeper.py > h1_matrix_results.txt || echo "Process finished or timed out."
+          
+          # عرض النتائج على شاشة الـ Log فوراَ
+          cat h1_matrix_results.txt
+          
+          echo "=================================================="
+          echo "SWEEP COMPLETED."
+          echo "Results saved to: h1_matrix_results.txt"
+          echo "=================================================="
+          
+      - name: Upload Results Artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: h1-strategy-matrix-sweep-results
+          path: h1_matrix_results.txt
+          retention-days: 7
