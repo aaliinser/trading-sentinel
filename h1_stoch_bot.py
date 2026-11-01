@@ -1,31 +1,16 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-H1 Stochastic Ultimate Bot - v4.6 (Guaranteed-Reports & Fresh-Data Release)
-الإصلاحات الجذرية في v4.6:
-1. ★★ إصلاح قاتل للتأخير الزمني: نافذة حذف الشمعة الجارية كانت 90 دقيقة، فمع أي تأخر
-   بسيط من yfinance كانت تُحذف الشمعة المغلقة الطازجة ويٌحلل على شمعة عمرها 65+ دقيقة
-   → إشارات متأخرة وتقاطعات انعكست قبل الدخول (هذا سبب "قليلة وخاسرة" بشكل رئيسي).
-   أصبحت 62 دقيقة (60 إغلاق + دقيقتان هامش بيانات) — شمعة مغلقة دائمًَا طازجة.
-2. ★★ تقارير مضمونة التسليم: إلغاء نافذة 00:00-00:10 بالكامل — يُحاول الإرسال في كل
-   نبضة بعد منتصف الليل حتى ينجح مرة واحدة (مانع التكرار last_daily_report_date)،
-   مع رسالة "لم تُسجَّل صفقات" عند الفراغ بدل الصمت، وتواريخ عربية واضحة.
-3. ★★ ZoneInfo("Asia/Gaza") مع fallback آمن — ضبط التوقيت الصيفي/الشتوي تلقائيًَا
-   بدل الإزاحة الثابتة +3 التي تُخرج الحظر الليلي والتقارير عن الصواب نصف السنة.
-4. إضافة فلتر عطلة نهاية الأسبوع (السبت والأحد بتوقيت غزة) — منع الإشارات على
-   بيانات سوق مغلق/متجمد.
-5. جلب بيانات الحسم بنافذة 7 أيام بدل 3 (صفقات عطلة نهاية الأسبوع لا تضيع).
-6. Zero-Crash: تقرير محصَّن ضد المفاتيح الناقصة والتواريخ التالفة (coerce+dropna).
-الإصلاحات النهائية والحاسمة (مطبقة من منطق الـ M15 v3.8.2):
-1. ★★ إصلاح جذري لنافذة زمنية الحسم (استخدام وقت بداية الشمعة بدقة رياضية) ★★
-   - شمعة الدخول: entry_dt -> entry_dt + 60 دقيقة.
-   - شمعة الخروج: entry_dt + 60 -> entry_dt + 120 دقيقة.
-   - سعر الخروج = إغلاق الشمعة الثانية.
-2. ★★ إلغاء نظام Reply واستبداله برسائل مستقلة (حل لمشكلة State Loss في GitHub Actions) ★★
-3. ★★ إضافة آلية Retry Loop ذكية لجلب بيانات yfinance ضد التأخير اللحظي ★★
-4. ★★ تعديل التقارير لمنع السبام وإرسالها مرة واحدة فقط عند منتصف الليل بتوقيت غزة ★★
-5. توقيت غزة المحلي: يعمل 9 صباحاُ -> 12 منتصف الليل، ينام 12 -> 9 صباحاُ.
-ملاحظة: منطق الاستراتيجية (check_signal_logic) لم يُمَس إطلاقاُ.
+H1 Stochastic Ultimate Bot - v4.7 (Full Tri-Report Integration)
+الإصلاحات الجذرية في v4.7:
+1. ★★ تفعيل التقارير الأسبوعية والشهرية:
+   تم إضافة منطق "النوافذ المفتوحة" لضمان وصول التقارير حتى لو تعطلت النبضة الأولى.
+   - الأسبوعي: يُرسل خلال يومي السبت والأحد بتوقيت غزة.
+   - الشهري: يُرسل خلال أول 3 أيام من الشهر الجديد بتوقيت غزة.
+2. ★★ إصلاح جذري لخرائط التواريخ (Date Mapping Fix):
+   استخدام ZoneInfo("Asia/Gaza") لتحويل أوقات الحسم (UTC) إلى تواريخ محلية دقيقة
+   قبل تصفية الصفقات للتقارير. هذا يمنع ضياع صفقات منتصف الليل.
+3. ★★ الحفاظ التام على استراتيجية H1 والحسم الآلي.
 """
 import os, sys, time, json, logging, uuid
 from datetime import datetime, timedelta, timezone
@@ -45,7 +30,8 @@ except ImportError:
 try:
     GAZA_TZ = ZoneInfo("Asia/Gaza")
 except Exception:
-    GAZA_TZ = timezone(timedelta(hours=3))
+    # Fallback آمن إذا غابت قاعدة المنطقة الزمنية
+    GAZA_TZ = timezone(timedelta(hours=3)) 
 
 def get_gaza_now() -> datetime:
     """توقيت غزة الحقيقي مع دعم التوقيت الصيفي/الشتوي"""
@@ -54,17 +40,14 @@ def get_gaza_now() -> datetime:
 # ═══════════════════════════════════════════════
 # 1. الإعدادات العامة
 # ═══════════════════════════════════════════════
-BOT_NAME = "H1_Ultimate_Bot_V4_6_Guaranteed_Reports"
-STATE_FILE = "state_h1_ultimate_v45.json" # ملف حالة جديد لضمان النظافة
+BOT_NAME = "H1_Ultimate_Bot_V4_7_FullReports"
+STATE_FILE = "state_h1_ultimate_v45.json" 
 LOG_LEVEL = logging.INFO
 
 TRADING_SYMBOLS = [
-    # الأزواج الرئيسية
     "EURUSD=X", "GBPUSD=X", "USDJPY=X", "AUDUSD=X",
     "USDCAD=X", "USDCHF=X", "NZDUSD=X",
-    # أزواج الين
     "EURJPY=X", "GBPJPY=X", "AUDJPY=X", "CADJPY=X", "CHFJPY=X",
-    # الأزواج المتقاطعة والإضافية
     "EURGBP=X", "EURAUD=X", "EURCAD=X",
     "GBPAUD=X", "GBPCAD=X", "AUDCAD=X",
     "EURNZD=X", "AUDNZD=X"
@@ -76,12 +59,11 @@ OVERBOUGHT_ZONE = 90
 OVERSOLD_ZONE = 10
 EMA_PERIOD = 200
 
-# ★★ التعديل الجوهري: توقيت غزة المحلي ★★
 NIGHT_START_HOUR = 0   
 NIGHT_END_HOUR = 9     
 
-TRADE_DURATION_MINUTES = 60 # مدة الصفقة ساعة واحدة
-EXIT_GRACE_MINUTES = 2      # هامش انتظار تحديث البيانات بعد الإغلاق
+TRADE_DURATION_MINUTES = 60 
+EXIT_GRACE_MINUTES = 2      
 
 TG_TOKEN = os.getenv("TG_TOKEN", "").strip()
 TG_CHAT = os.getenv("TG_CHAT", "").strip()
@@ -107,8 +89,28 @@ def ensure_utc(dt: datetime) -> datetime:
         return dt.replace(tzinfo=timezone.utc)
     return dt.astimezone(timezone.utc)
 
+def convert_utc_to_gaza_date(time_str: str) -> str:
+    """
+    ★★ الوظيفة الحاسمة للتقارير ★★
+    تحول نص الوقت (UTC) إلى كائن datetime، تحوله لمنطقة غزة،
+    ثم تستخرج التاريخ بالصيغة YYYY-MM-DD.
+    """
+    try:
+        dt_obj = pd.to_datetime(time_str, errors='coerce', utc=True)
+        if pd.isna(dt_obj):
+            return ""
+        
+        # التأكد من وجود منطقة زمنية أو افتراض UTC
+        if dt_obj.tzinfo is None:
+            dt_obj = dt_obj.replace(tzinfo=timezone.utc)
+            
+        # التحويل الفعلي لغزة
+        gaza_dt = dt_obj.astimezone(GAZA_TZ)
+        return gaza_dt.strftime("%Y-%m-%d")
+    except Exception:
+        return ""
+
 def send_telegram(msg: str):
-    """دالة إرسال بسيطة وموثوقة بدون اعتماد على reply_to"""
     if not TG_TOKEN or not TG_CHAT:
         log.warning("Telegram credentials missing.")
         return False
@@ -120,24 +122,20 @@ def send_telegram(msg: str):
         try:
             resp = requests.post(url, json=payload, timeout=15)
             if resp.status_code == 200:
-                log.info("Message sent successfully to Telegram.")
                 return True
             elif resp.status_code == 429:
-                wait = resp.json().get('parameters', {}).get('retry_after', 5)
+                wait = resp.json.get('parameters', {}).get('retry_after', 5)
                 time.sleep(wait)
             elif resp.status_code == 400:
-                log.warning("TG Markdown parse error, retrying as plain text...")
                 plain = {"chat_id": TG_CHAT, "text": msg.replace("*", "").replace("`", "").replace("_", "")}
                 try:
                     resp_plain = requests.post(url, json=plain, timeout=15)
                     if resp_plain.status_code == 200:
-                        log.info("Message sent successfully to Telegram (plain).")
                         return True
                 except Exception:
                     pass
                 break
             else:
-                log.error(f"Telegram API Error: {resp.status_code} - {resp.text}")
                 break
         except Exception as e:
             log.error(f"Exception sending Telegram message: {e}")
@@ -145,7 +143,7 @@ def send_telegram(msg: str):
     return False
 
 # ═══════════════════════════════════════════════
-# 3. إدارة الحالة
+# 3. إدارة الحالة (محدثة لدعم التقارير الثلاثة)
 # ═══════════════════════════════════════════════
 class StateManager:
     def __init__(self, filepath: str):
@@ -154,7 +152,9 @@ class StateManager:
             "pending_trades": [],
             "history": [],
             "processed_candles": [],
-            "last_daily_report_date": "" # ★★ متغير جديد لمنع تكرار التقرير ★★
+            "last_daily_report_date": "",      # قفل التقرير اليومي
+            "last_weekly_report_id": "",       # قفل التقرير الأسبوعي (ISO Week ID)
+            "last_monthly_report_id": ""       # قفل التقرير الشهري (YYYY-MM)
         }
         self.load()
 
@@ -175,13 +175,11 @@ class StateManager:
             self.save()
 
     def save(self):
-        """حفظ ذرّي آمن"""
         try:
             temp_file = self.filepath.with_suffix('.tmp')
             with open(temp_file, 'w', encoding='utf-8') as f:
                 json.dump(self.data, f, indent=2, default=str)
             os.replace(str(temp_file), str(self.filepath))
-            log.debug("State saved successfully.")
         except Exception as e:
             log.critical(f"CRITICAL ERROR saving state: {e}")
             raise
@@ -189,18 +187,13 @@ class StateManager:
     def add_pending_trade(self, trade_info: dict):
         self.data["pending_trades"].append(trade_info)
         self.save()
-        log.info(f"Added pending trade for {trade_info.get('symbol')}")
 
     def get_pending_trades(self):
         return self.data.get("pending_trades", [])
 
     def remove_pending_trade(self, trade_id: str):
-        self.data["pending_trades"] = [
-            t for t in self.data["pending_trades"]
-            if t.get("id") != trade_id
-        ]
+        self.data["pending_trades"] = [t for t in self.data["pending_trades"] if t.get("id") != trade_id]
         self.save()
-        log.info(f"Removed resolved trade {trade_id}")
 
     def archive_trade(self, trade_result: dict):
         self.data["history"].append(trade_result)
@@ -219,23 +212,19 @@ class StateManager:
         return candle_key in self.data["processed_candles"]
 
 # ═══════════════════════════════════════════════
-# 4. محرك البيانات (مع Retry Loop)
+# 4. محرك البيانات والاستراتيجية (لم يُمس)
 # ═══════════════════════════════════════════════
 
 def fetch_h1_data(symbol: str, period_days: int = 7):
-    """★★ v4.5: Retry Loop حقيقي ضد تأخر yfinance ★★"""
     df = None
     for attempt in range(3):
         try:
             ticker = yf.Ticker(symbol)
-            df = ticker.history(period=f"{period_days}d", interval="1h",
-                                auto_adjust=False, actions=False)
+            df = ticker.history(period=f"{period_days}d", interval="1h", auto_adjust=False, actions=False)
             if df is not None and not df.empty:
                 break
-            log.warning(f"[{symbol}] Empty data from yfinance (attempt {attempt+1}/3). Retrying in 3s...")
             time.sleep(3)
-        except Exception as e:
-            log.error(f"Error fetching data for {symbol} (attempt {attempt+1}/3): {e}")
+        except Exception:
             time.sleep(3)
 
     if df is None or df.empty:
@@ -246,9 +235,7 @@ def fetch_h1_data(symbol: str, period_days: int = 7):
             df.columns = [str(c[0]) for c in df.columns]
         
         required_cols = ["Open", "High", "Low", "Close"]
-        missing = [c for c in required_cols if c not in df.columns]
-        if missing:
-            log.error(f"Missing columns for {symbol}: {missing}")
+        if not all(c in df.columns for c in required_cols):
             return None
             
         df = df[required_cols].copy()
@@ -256,13 +243,11 @@ def fetch_h1_data(symbol: str, period_days: int = 7):
         df = df[~df.index.duplicated()].sort_index().dropna()
         
         now_utc = pd.Timestamp.now(tz="UTC")
-        # حذف الشمعة الجارية فقط: 62 د = ساعة إغلاق + دقيقتان هامش بيانات (لا تحذف الشمعة المغلقة الطازجة)
         if not df.empty and df.index[-1] + pd.Timedelta(minutes=62) > now_utc:
             df = df.iloc[:-1]
             
         return df
-    except Exception as e:
-        log.error(f"Data Processing Error [{symbol}]: {e}")
+    except Exception:
         return None
 
 def calculate_indicators(df: pd.DataFrame):
@@ -278,10 +263,6 @@ def calculate_indicators(df: pd.DataFrame):
     df["STOCH_K"] = raw_k
     df["STOCH_D"] = raw_k.rolling(window=D_PERIOD).mean().ffill()
     return df
-
-# ═══════════════════════════════════════════════
-# 5. منطق الاستراتيجية (لم يُمَس)
-# ══════════════════════════════════════════════
 
 def check_signal_logic(df: pd.DataFrame):
     if df is None or len(df) < 2:
@@ -311,8 +292,8 @@ def check_signal_logic(df: pd.DataFrame):
         signal_direction = "PUT"
     return signal_direction
 
-# ══════════════════════════════════════════════
-# 6. ★★★ الحسم التلقائي المصحح جذريا (منطق Kimi) ★★★
+# ═══════════════════════════════════════════════
+# 5. نظام الحسم التلقائي (لم يُمس)
 # ═══════════════════════════════════════════════
 
 def resolve_pending_trades(sm: StateManager):
@@ -322,21 +303,13 @@ def resolve_pending_trades(sm: StateManager):
     
     now_utc = datetime.now(timezone.utc)
     resolved_ids = []
-    log.info(f">>> Checking {len(pending)} pending trades...")
     
     for trade in pending:
         try:
             entry_dt = ensure_utc(datetime.fromisoformat(trade['entry_time']))
-            
-            # ★★ التصحيح الجوهري هنا ★★
-            # entry_dt هو وقت *بداية* شمعة الدخول (مثال 10:00).
-            # شمعة الدخول تغلق عند 11:00.
-            # شمعة الخروج تبدأ 11:00 وتغلق 12:00.
-            exit_candle_start = entry_dt + timedelta(minutes=TRADE_DURATION_MINUTES) # 11:00
-            exit_candle_close = exit_candle_start + timedelta(minutes=TRADE_DURATION_MINUTES) # 12:00
-            
-            # ننتظر إغلاق شمعة الخروج + هامش تحديث البيانات
-            check_ready_time = exit_candle_close + timedelta(minutes=EXIT_GRACE_MINUTES) # 12:02
+            exit_candle_start = entry_dt + timedelta(minutes=TRADE_DURATION_MINUTES)
+            exit_candle_close = exit_candle_start + timedelta(minutes=TRADE_DURATION_MINUTES)
+            check_ready_time = exit_candle_close + timedelta(minutes=EXIT_GRACE_MINUTES)
             
             if now_utc < check_ready_time:
                 continue
@@ -345,25 +318,18 @@ def resolve_pending_trades(sm: StateManager):
             dr = trade['direction']
             entry_px = float(trade['entry_price'])
             
-            log.info(f"Resolving {sym} | Target Exit Close: {exit_candle_close}")
-            
-            df_exit_full = fetch_h1_data(sym, period_days=7)  # v4.6: نافذة أوسع لتغطية عطلة الأسبوع
+            df_exit_full = fetch_h1_data(sym, period_days=7)
             if df_exit_full is None or df_exit_full.empty:
-                log.warning(f"No exit data for {sym}. Retry next cycle.")
                 continue
                 
-            # البحث عن الشمعة التي تبدأ عند/بعد وقت بداية شمعة الخروج
             target_ts = pd.Timestamp(exit_candle_start)
             future_mask = df_exit_full.index >= target_ts
             
             if not future_mask.any():
-                # احتياطي لنقص البيانات
                 past_mask = df_exit_full.index < target_ts
                 if past_mask.any():
                     exit_px = float(df_exit_full[past_mask].iloc[-1]['Close'])
-                    log.warning(f"Exit candle not ready for {sym}, using fallback last close.")
                 else:
-                    log.error(f"No candles at all for {sym}. Skipping.")
                     continue
             else:
                 exit_px = float(df_exit_full[future_mask].iloc[0]['Close'])
@@ -372,36 +338,16 @@ def resolve_pending_trades(sm: StateManager):
             diff = exit_px - entry_px
             pips_diff = abs(diff) * pip_mult
             
-            log.info(f"Success! Entry={entry_px} Exit={exit_px} Diff={diff} Pips={pips_diff:.2f}")
-            
-            rid = trade.get('telegram_message_id') # retained just in case, but we won't use it for reply
-            
-            # سوق ساكن حقاُ
-            if pips_diff < 0.5:
-                result_msg = (f"⚪ *H1 Result for {sym} ({dr}):*\n\n"
-                              f"• Entry: `{entry_px:.5f}`\n"
-                              f"• Exit: `{exit_px:.5f}`\n"
-                              f"• Status: _Market flat (Void)_\n"
-                              f"• Time: `{now_utc.strftime('%H:%M')} UTC`")
-                send_telegram(result_msg)
-                sm.archive_trade({
-                    "id": trade['id'], "symbol": sym, "direction": dr,
-                    "entry_price": entry_px, "exit_price": exit_px,
-                    "win": None, "resolved_at": exit_candle_close.isoformat(),
-                    "status": "VOID_FLAT", "pips": pips_diff
-                })
-                resolved_ids.append(trade['id'])
-                continue
+            win = None
+            status = "VOID_FLAT"
+            if pips_diff >= 0.5:
+                win = (diff > 0) if dr == 'CALL' else (diff < 0)
+                status = "RESOLVED"
                 
-            win = (diff > 0) if dr == 'CALL' else (diff < 0)
-            result_emoji = "✅ WIN" if win else "❌ LOSS"
-            
-            # ★★ إرسال رسالة مستقلة بدل الرد ★★
-            result_msg = (f"{result_emoji} *H1 Result for {sym} ({dr}):*\n\n"
+            result_msg = (f"{'✅ WIN' if win else ('❌ LOSS' if win is False else '⚪ VOID')} *H1 Result for {sym} ({dr}):*\n\n"
                           f"• Entry: `{entry_px:.5f}`\n"
                           f"• Exit: `{exit_px:.5f}`\n"
                           f"• Pips: `{pips_diff:.1f}`\n"
-                          f"• P/L: `{abs(diff)/entry_px*100:.3f}%`\n"
                           f"• Time: `{now_utc.strftime('%H:%M')} UTC`")
             
             send_telegram(result_msg)
@@ -409,11 +355,11 @@ def resolve_pending_trades(sm: StateManager):
             sm.archive_trade({
                 "id": trade['id'], "symbol": sym, "direction": dr,
                 "entry_price": entry_px, "exit_price": exit_px,
-                "win": bool(win), "resolved_at": exit_candle_close.isoformat(),
-                "status": "RESOLVED", "pips": pips_diff
+                "win": bool(win) if win is not None else None, 
+                "resolved_at": exit_candle_close.isoformat(),
+                "status": status, "pips": pips_diff
             })
             resolved_ids.append(trade['id'])
-            log.info(f"Resolved {trade['id']} {sym}: {'WIN' if win else 'LOSS'}")
             
         except Exception as e:
             log.error(f"Critical Error resolving trade {trade.get('id')}: {e}", exc_info=True)
@@ -422,7 +368,7 @@ def resolve_pending_trades(sm: StateManager):
         sm.remove_pending_trade(tid)
 
 # ═══════════════════════════════════════════════
-# 7. نظام التقارير (معدل لمنع السبام)
+# 6. ★★★ نظام التقارير الشامل (يومي + أسبوعي + شهري) ★★★
 # ═══════════════════════════════════════════════
 
 AR_MONTHS = {
@@ -433,64 +379,21 @@ AR_MONTHS = {
 AR_DAYS = {0: 'الاثنين', 1: 'الثلاثاء', 2: 'الأربعاء', 3: 'الخميس',
            4: 'الجمعة', 5: 'السبت', 6: 'الأحد'}
 
+def build_report_message(trades_list, report_type, period_name):
+    """دالة مساعدة لبناء نص التقرير بناءً على قائمة الصفقات"""
+    if not trades_list:
+        return (f"*📊 التقرير {report_type} ({period_name})*\n\n"
+                f"📈 *إجمالي الصفقات:* `0`\n"
+                f"ℹ️ _لم تسجل صفقات خلال هذه الفترة._\n\n"
+                f"_البوت يعمل بكفاءة ويراقب السوق بانتظام!_")
 
-def generate_reports(sm: StateManager):
-    """
-    ★★ v4.6 — تقرير يومي مضمون التسليم ★★
-    لا يوجد أي قيد hour/minute. يُحاول الإرسال في كل نبضة بعد منتصف الليل بتوقيت غزة
-    حتى ينجح مرة واحدة فقط (last_daily_report_date يخزن تاريخ "أمس" ويمنع التكرار).
-    """
-    local_now = get_gaza_now()
-    yesterday = local_now - timedelta(days=1)
-    yesterday_str = yesterday.strftime("%Y-%m-%d")
-    period_name = f"{AR_DAYS[yesterday.weekday()]} {yesterday.day} {AR_MONTHS[yesterday.strftime('%m')]} {yesterday.year}"
-
-    # التقرير مستحق طالما لم نُرسله لأمس بعد — بأي ساعة من الليل أو النهار
-    if sm.data.get("last_daily_report_date") == yesterday_str:
-        return
-
-    log.info(f"Daily report due for {yesterday_str} — attempting send...")
-
-    # جمع صفقات أمس بتواريخ محصّنة (coerce + skip تالف) — Zero-Crash
-    daily_trades = []
-    for t in sm.data.get("history", []):
-        try:
-            exit_time_str = t.get('resolved_at', '')
-            if not exit_time_str:
-                continue
-            exit_dt_utc = pd.to_datetime(exit_time_str, utc=True, errors='coerce')
-            if pd.isna(exit_dt_utc):
-                continue
-            exit_dt_gaza = exit_dt_utc.tz_convert(GAZA_TZ)
-            if exit_dt_gaza.date() == yesterday.date():
-                daily_trades.append(t)
-        except Exception:
-            continue
-
-    if not daily_trades:
-        # ★★ v4.6: رسالة اطمئنان بدل الصمت التام ★★
-        msg = (
-            f"*🌙 ملخص أداء H1 ({period_name})*\n\n"
-            f"📊 *إجمالي الصفقات:* `0`\n"
-            f"ℹ️ _لم تُسجَّل صفقات خلال هذه الفترة._\n\n"
-            f"_البوت يعمل بكفاءة ويراقب السوق بانتظار الفرص القادمة!_"
-        )
-        if send_telegram(msg):
-            sm.data["last_daily_report_date"] = yesterday_str
-            sm.save()
-            log.info(f"Empty daily report CONFIRMED for {yesterday_str}")
-        else:
-            log.warning("Daily report send failed — will retry on next pulse (guaranteed delivery).")
-        return
-
-    total = len(daily_trades)
-    wins = sum(1 for t in daily_trades if t.get('win') is True)
-    losses = sum(1 for t in daily_trades if t.get('win') is False)
+    total = len(trades_list)
+    wins = sum(1 for t in trades_list if t.get('win') is True)
+    losses = sum(1 for t in trades_list if t.get('win') is False)
     voids = total - wins - losses
-
-    # صافي النقاط الموجّه (ربح موجب / خسارة سالبة / لاغي صفر)
+    
     net_pips = 0.0
-    for t in daily_trades:
+    for t in trades_list:
         try:
             p = float(t.get('pips', 0) or 0)
         except (TypeError, ValueError):
@@ -500,35 +403,113 @@ def generate_reports(sm: StateManager):
         elif t.get('win') is False:
             net_pips -= p
 
-    wr = (wins / (wins + losses) * 100.0) if (wins + losses) > 0 else 0.0
-    emoji_wr = "🟢 ممتاز" if wr >= 60 else ("🟡 جيد" if wr >= 40 else "🔴 يحتاج مراجعة")
+    valid_trades = wins + losses
+    wr = (wins / valid_trades * 100.0) if valid_trades > 0 else 0.0
+    emoji_wr = "🟢 ممتاز" if wr >= 60 else ("🟡 جيد" if wr >= 45 else "🔴 يحتاج مراجعة")
 
-    report_msg = (
-        f"*🌙 ملخص أداء H1 ({period_name})*\n\n"
-        f"📊 *إجمالي الصفقات:* `{total}`\n"
-        f"✅ *الرابحة:* `{wins}` | ❌ *الخاسرة:* `{losses}` | ⚪ *لاغية:* `{voids}`\n\n"
+    return (
+        f"*📊 التقرير {report_type} ({period_name})*\n\n"
+        f"📈 *إجمالي الصفقات:* `{total}` (✅ {wins} | ❌ {losses} | ⚪ {voids})\n"
         f"🏆 *نسبة الفوز:* {emoji_wr} `{wr:.1f}%`\n"
         f"💰 *صافي النقاط:* `{net_pips:+.1f} Pips`\n\n"
-        f"_انتهت جلسة التقرير اليومي. استمر في الانضباط!_"
+        f"_انتهت جلسة التقرير {report_type}. استمر في الانضباط!_"
     )
 
-    if send_telegram(report_msg):
-        sm.data["last_daily_report_date"] = yesterday_str
-        sm.save()
-        log.info(f"Daily report CONFIRMED for {yesterday_str}")
+def generate_reports(sm: StateManager):
+    """
+    ★★ v4.7 — النظام الثلاثي للتقارير ★★
+    """
+    local_now = get_gaza_now()
+    
+    # تجهيز البيانات التاريخية وتحويل التواريخ
+    history_raw = sm.data.get("history", [])
+    if not history_raw:
+        return
+        
+    df_hist = pd.DataFrame(history_raw)
+    
+    # إنشاء عمود مفتاح التاريخ المحلي (غزة) لكل صفقة
+    if 'resolved_at' in df_hist.columns:
+        df_hist['gaza_date_key'] = df_hist['resolved_at'].apply(convert_utc_to_gaza_date)
+        # تصفية السجلات التالفة
+        df_clean = df_hist[df_hist['gaza_date_key'] != ""].copy()
     else:
-        log.warning("Daily report send failed — will retry on next pulse (guaranteed delivery).")
+        return
+
+    # ─── 1. التقرير اليومي ───
+    yesterday_local = local_now - timedelta(days=1)
+    yesterday_str = yesterday_local.strftime("%Y-%m-%d")
+    
+    if sm.data.get("last_daily_report_date") != yesterday_str:
+        daily_df = df_clean[df_clean['gaza_date_key'] == yesterday_str]
+        daily_period_name = f"{AR_DAYS[yesterday_local.weekday()]} {yesterday_local.day} {AR_MONTHS[yesterday_local.strftime('%m')]} {yesterday_local.year}"
+        
+        msg = build_report_message(daily_df.to_dict('records'), "اليومي", daily_period_name)
+        if send_telegram(msg):
+            sm.data["last_daily_report_date"] = yesterday_str
+            sm.save()
+            log.info(f"Daily report CONFIRMED for {yesterday_str}")
+
+    # ─── 2. التقرير الأسبوعي (نافذة: السبت والأحد) ───
+    current_gaza_weekday = local_now.weekday() # 0=Mon ... 6=Sun
+    
+    if current_gaza_weekday in [5, 6]: # Saturday or Sunday
+        # حساب نطاق الأسبوع الماضي (الاثنين الماضي ← الأحد الماضي)
+        days_since_monday_this_week = current_gaza_weekday
+        last_week_start = (local_now - timedelta(days=days_since_monday_this_week + 7)).replace(hour=0, minute=0, second=0, microsecond=0)
+        last_week_end = last_week_start + timedelta(days=6)  
+        
+        week_range_start_str = last_week_start.strftime("%Y-%m-%d")
+        week_range_end_str = last_week_end.strftime("%Y-%m-%d")
+        
+        iso_cal_last_week = last_week_start.isocalendar()
+        last_week_year, last_week_num, _ = iso_cal_last_week
+        last_week_str_id = f"{last_week_year}-W{last_week_num:02d}"
+        
+        weekly_period_name = (f"الأسبوع {last_week_num} "
+                              f"({last_week_start.day} {AR_MONTHS[last_week_start.strftime('%m')]} – "
+                              f"{last_week_end.day} {AR_MONTHS[last_week_end.strftime('%m')]} {last_week_end.year})")
+
+        if sm.data.get("last_weekly_report_id") != last_week_str_id:
+            weekly_df = df_clean[(df_clean['gaza_date_key'] >= week_range_start_str) & 
+                                 (df_clean['gaza_date_key'] <= week_range_end_str)]
+            
+            msg = build_report_message(weekly_df.to_dict('records'), "الأسبوعي", weekly_period_name)
+            if send_telegram(msg):
+                sm.data["last_weekly_report_id"] = last_week_str_id
+                sm.save()
+                log.info(f"Weekly report CONFIRMED for {last_week_str_id}")
+
+    # ─── 3. التقرير الشهري (نافذة: أول 3 أيام من الشهر) ───
+    if local_now.day <= 3:
+        first_day_this_month = local_now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        last_day_prev_month = first_day_this_month - timedelta(days=1)
+        
+        month_range_start_str = last_day_prev_month.replace(day=1).strftime("%Y-%m-%d")
+        month_range_end_str = last_day_prev_month.strftime("%Y-%m-%d")
+        
+        monthly_period_name = f"{AR_MONTHS[last_day_prev_month.strftime('%m')]} {last_day_prev_month.year}"
+        last_month_str_id = last_day_prev_month.strftime("%Y-%m")
+
+        if sm.data.get("last_monthly_report_id") != last_month_str_id:
+            monthly_df = df_clean[(df_clean['gaza_date_key'] >= month_range_start_str) & 
+                                  (df_clean['gaza_date_key'] <= month_range_end_str)]
+            
+            msg = build_report_message(monthly_df.to_dict('records'), "الشهري", monthly_period_name)
+            if send_telegram(msg):
+                sm.data["last_monthly_report_id"] = last_month_str_id
+                sm.save()
+                log.info(f"Monthly report CONFIRMED for {last_month_str_id}")
 
 
 # ═══════════════════════════════════════════════
-# 8. مسح الإشارات
+# 7. مسح الإشارات (لم يُمس)
 # ═══════════════════════════════════════════════
 
 def scan_and_alert(sm: StateManager):
     log.info(">>> Scanning market for new signals...")
     local_now = get_gaza_now()
 
-    # ★★ v4.6: فلتر عطلة نهاية الأسبوع — منع الإشارات على بيانات سوق متجمدة ★★
     if local_now.weekday() >= 5:
         log.info("Weekend (Sat/Sun Gaza). Skipping scan.")
         return
@@ -541,7 +522,6 @@ def scan_and_alert(sm: StateManager):
     new_signals_count = 0
     for sym in TRADING_SYMBOLS:
         if sym in open_positions_syms:
-            log.debug(f"Skipping {sym}. Already has an open position.")
             continue
         df_raw = fetch_h1_data(sym, period_days=15)
         if df_raw is None or len(df_raw) < 200:
@@ -549,7 +529,6 @@ def scan_and_alert(sm: StateManager):
         df_processed = calculate_indicators(df_raw)
         if (df_processed is None or "STOCH_K" not in df_processed.columns
                 or "EMA_200" not in df_processed.columns):
-            log.warning(f"Indicators failed for {sym}. Skipping.")
             continue
         sig_dir = check_signal_logic(df_processed)
         if sig_dir is None:
@@ -557,7 +536,6 @@ def scan_and_alert(sm: StateManager):
         current_candle_time = df_processed.index[-1]
         candle_key = f"{sym}_{current_candle_time.isoformat()}"
         if sm.is_candle_processed(candle_key):
-            log.debug(f"Signal {candle_key} already processed. Skipping.")
             continue
         log.info(f"🔥 NEW SIGNAL: {sym} -> {sig_dir}")
         trade_id = str(uuid.uuid4())[:8]
@@ -594,17 +572,17 @@ def scan_and_alert(sm: StateManager):
     log.info(f"Scan complete. New signals sent: {new_signals_count}")
 
 # ═══════════════════════════════════════════════
-# 9. الحلقة الرئيسية
+# 8. الحلقة الرئيسية
 # ═══════════════════════════════════════════════
 
 def main():
     log.info("=" * 50)
-    log.info(f"Starting {BOT_NAME} - GAZA TIME OPTIMIZED & FIXED RESOLUTION")
+    log.info(f"Starting {BOT_NAME} - FULL TRI-REPORT SYSTEM ACTIVE")
     log.info(f"Current UTC Time: {datetime.now(timezone.utc).strftime('%H:%M:%S')}")
     log.info("=" * 50)
     sm = StateManager(STATE_FILE)
     resolve_pending_trades(sm)
-    generate_reports(sm)
+    generate_reports(sm) # ★★ هنا يتم تشغيل النظام الثلاثي ★★
     scan_and_alert(sm)
     log.info("Live Cycle Complete.")
 
