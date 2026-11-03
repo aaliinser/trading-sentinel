@@ -1,79 +1,62 @@
-name: H1 Stochastic Bot (State Persistent v4.6 - Guaranteed Reports)
+name: H1 Stochastic Bot (State Persistent v5.0 - Smart Sniper)
 
 on:
-  workflow_dispatch: # للتشغيل اليدوي الفوري عند الحاجة
-  schedule:
-    # ★ نبضة كل 30 دقيقة عند :05 و :35 ★
-    # هذا التوقيت مثالي لفريم الساعة، فهو يعطي منصة yfinance 5 دقائق 
-    # لإغلاق الشمعة وتحديث البيانات، مما يتوافق تماماً مع منطق الـ 62 دقيقة في الكود.
-    - cron: '5,35 * * * *'
-
-permissions:
-  contents: write   # ★ ضروري جداً: السماح للبوت بحفظ الحالة (Commit & Push) في المستودع ★
-
-concurrency:
-  group: h1-bot-v46 # يمنع تشغيل دورتين في نفس الوقت لتجنب تضارب ملفات الحالة
-  cancel-in-progress: false
+  # التشغيل عبر النبضات الخارجية من cron-job.org
+  repository_dispatch:
+    types: [trigger-h1-bot]
+  
+  # خيار احتياطي للتشغيل اليدوي إذا لزم الأمر
+  workflow_dispatch:
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
     
+    permissions:
+      contents: write # ★★ هام جداً: منح صلاحية الكتابة لحفظ ملف الحالة ★★
+      
     steps:
-      # 1. سحب الكود الحالي من المستودع
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }} # يستخدم توكن الوصول الافتراضي للمستودع
 
-      # 2. تثبيت بيئة بايثون (نسخة 3.10+ لدعم ZoneInfo بشكل أصلي)
-      - name: Set up Python
+      - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.11'
+          cache: 'pip'
 
-      # 3. تثبيت المكتبات المطلوبة
-      - name: Install dependencies
+      - name: Install Dependencies
         run: |
-          pip install yfinance pandas numpy requests tzdata
-          # ★ ملاحظة: إضافة tzdata ضرورية جداً لضمان عمل ZoneInfo("Asia/Gaza") على خوادم لينكس
+          python -m pip install --upgrade pip
+          pip install pandas numpy yfinance requests tzdata
 
-      # 4. تشغيل سكربت البوت
       - name: Run H1 Bot Script
         env:
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
           TG_CHAT: ${{ secrets.TG_CHAT }}
-        # ⚠️ تأكد أن اسم الملف هنا يطابق تماماً اسم الملف في مستودع GitHub الخاص بك
-        run: python h1_stoch_bot.py
-
-      # ★★ 5. الخطوة الحاسمة: حفظ حالة البوت كـ Commit في المستودع بأمان ★★
-      - name: Persist bot state (commit & push)
-        if: always() # نفذ هذه الخطوة دائماً، سواء نجح البوت أم فشل، للحفاظ على آخر حالة
         run: |
-          git config user.name "h1-bot-auto-save"
-          git config user.email "h1-bot@users.noreply.github.com"
+          echo "Starting H1 Smart Sniper Execution..."
+          python h1_stoch_bot.py
+          echo "Execution Finished."
+
+      # ★★ الخطوة الحاسمة: حفظ حالة البوت ومنع التكرار ★★
+      - name: Persist bot state (commit & push)
+        if: always() # تنفذ هذه الخطوة حتى لو فشل السكربت السابق قليلاََ
+        run: |
+          git config user.name github-actions
+          git config user.email github-actions@github.com
           
-          STATE_FILE="state_h1_ultimate_v45.json"
+          # إضافة ملف الحالة الجديد فقط
+          git add state_h1_smart_sniper_v5.json || true
           
-          # نتحقق هل الملف موجود فعلاً قبل محاولة إضافته لـ Git
-          if [ -f "$STATE_FILE" ]; then
-            echo ">>> State file found. Attempting to commit..."
-            git add "$STATE_FILE"
-            
-            # نتحقق هل هناك تغييرات حقيقية في الملف تستحق الحفظ؟
-            if ! git diff --cached --quiet; then
-              # ★★ الإصلاح الجراحي: إضافة [skip ci] لمنع الحلقة المفرغة ★★
-              # هذه العبارة تخبر GitHub Actions بعدم إعادة تشغيل الـ Workflow بعد هذا الـ Push
-              git commit -m "chore: auto-persist H1 bot state [skip ci]"
-              
-              # نسحب أحدث التغييرات أولاً لتجنب التعارض (Race Condition)
-              git pull --rebase --autostash origin ${{ github.ref_name }} || true
-              
-              # ندفع التغييرات المحفوظة
-              git push origin HEAD:${{ github.ref_name }} || echo "Push failed or no remote access."
-              echo ">>> State pushed to repository successfully."
-            else
-              echo ">>> No new data to save."
-            fi
-          else
-            echo ">>> Warning: State file '$STATE_FILE' was NOT created by the bot."
-            echo ">>> Skipping save step gracefully to prevent workflow crash."
-          fi
+          # محاولة الالتزام (Commit). إذا لم يتغير شيء، لن يفعل شيئاً.
+          git commit -m "chore: auto-persist H1 bot state [skip ci]" || echo "No changes to commit"
+          
+          # الدفع للمستودع مع إعادة المحاولة عند التعارض
+          git push || {
+            echo "Push failed, trying pull-rebase-push..."
+            git pull --rebase origin main
+            git push
+          }
