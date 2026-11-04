@@ -1,9 +1,47 @@
 {
-  "frozen_pairs": {},
-  "open_trades": [],
+  "frozen_pairs": {
+    "EURUSD=X": "2026-11-04T09:00:00+00:00",
+    "AUDUSD=X": "2026-11-04T09:00:00+00:00",
+    "EURCHF=X": "2026-11-04T09:00:00+00:00",
+    "USDCHF=X": "2026-11-04T09:00:00+00:00"
+  },
+  "open_trades": [
+    {
+      "id": "52b0c74f",
+      "symbol": "EURUSD=X",
+      "type": "CALL",
+      "entry_price": 1.1242270469665527,
+      "entry_time": "2026-11-04T07:00:00+00:00",
+      "msg_id": true
+    },
+    {
+      "id": "f63eb308",
+      "symbol": "AUDUSD=X",
+      "type": "PUT",
+      "entry_price": 0.6996921300888062,
+      "entry_time": "2026-11-04T07:00:00+00:00",
+      "msg_id": true
+    },
+    {
+      "id": "a94cc4ff",
+      "symbol": "EURCHF=X",
+      "type": "PUT",
+      "entry_price": 0.9172800183296204,
+      "entry_time": "2026-11-04T07:00:00+00:00",
+      "msg_id": true
+    },
+    {
+      "id": "5a20e78a",
+      "symbol": "USDCHF=X",
+      "type": "PUT",
+      "entry_price": 0.8162000179290771,
+      "entry_time": "2026-11-04T07:00:00+00:00",
+      "msg_id": true
+    }
+  ],
   "trade_history": [],
-  "daily_counter_date": "",
-  "daily_signal_count": 0,
+  "daily_counter_date": "2026-11-04",
+  "daily_signal_count": 4,
   "last_daily_report": "2026-11-03",
   "last_weekly_report": "",
   "last_monthly_report": ""
