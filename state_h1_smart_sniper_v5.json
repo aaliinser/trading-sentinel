@@ -1,6 +1,17 @@
 {
-  "frozen_pairs": {},
-  "open_trades": [],
+  "frozen_pairs": {
+    "GBPCAD=X": "2026-11-04T18:00:00+00:00"
+  },
+  "open_trades": [
+    {
+      "id": "33e0d891",
+      "symbol": "GBPCAD=X",
+      "type": "CALL",
+      "entry_price": 1.880210041999817,
+      "entry_time": "2026-11-04T16:00:00+00:00",
+      "msg_id": true
+    }
+  ],
   "trade_history": [
     {
       "id": "52b0c74f",
@@ -70,7 +81,7 @@
     }
   ],
   "daily_counter_date": "2026-11-04",
-  "daily_signal_count": 6,
+  "daily_signal_count": 7,
   "last_daily_report": "2026-11-03",
   "last_weekly_report": "",
   "last_monthly_report": ""
