@@ -1,14 +1,23 @@
 {
   "frozen_pairs": {
-    "CHFJPY=X": "2026-11-04T20:00:00+00:00"
+    "EURUSD=X": "2026-11-04T21:00:00+00:00",
+    "AUDJPY=X": "2026-11-04T21:00:00+00:00"
   },
   "open_trades": [
     {
-      "id": "f229a416",
-      "symbol": "CHFJPY=X",
+      "id": "c8e2364f",
+      "symbol": "EURUSD=X",
       "type": "CALL",
-      "entry_price": 193.8459930419922,
-      "entry_time": "2026-11-04T18:00:00+00:00",
+      "entry_price": 1.1225864887237549,
+      "entry_time": "2026-11-04T19:00:00+00:00",
+      "msg_id": true
+    },
+    {
+      "id": "066dd53c",
+      "symbol": "AUDJPY=X",
+      "type": "CALL",
+      "entry_price": 111.07499694824219,
+      "entry_time": "2026-11-04T19:00:00+00:00",
       "msg_id": true
     }
   ],
@@ -133,10 +142,21 @@
       "exit_time": "2026-11-04T19:00:00+00:00",
       "win": false,
       "pips": 4.3
+    },
+    {
+      "id": "f229a416",
+      "symbol": "CHFJPY=X",
+      "type": "CALL",
+      "entry_price": 193.8459930419922,
+      "exit_price": 193.9219970703125,
+      "entry_time": "2026-11-04T18:00:00+00:00",
+      "exit_time": "2026-11-04T20:00:00+00:00",
+      "win": true,
+      "pips": 7.6
     }
   ],
   "daily_counter_date": "2026-11-04",
-  "daily_signal_count": 12,
+  "daily_signal_count": 14,
   "last_daily_report": "2026-11-03",
   "last_weekly_report": "",
   "last_monthly_report": ""
