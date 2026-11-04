@@ -1,17 +1,6 @@
 {
-  "frozen_pairs": {
-    "NZDUSD=X": "2026-11-04T12:00:00+00:00"
-  },
-  "open_trades": [
-    {
-      "id": "8b739cb8",
-      "symbol": "NZDUSD=X",
-      "type": "PUT",
-      "entry_price": 0.5633485317230225,
-      "entry_time": "2026-11-04T10:00:00+00:00",
-      "msg_id": true
-    }
-  ],
+  "frozen_pairs": {},
+  "open_trades": [],
   "trade_history": [
     {
       "id": "52b0c74f",
@@ -56,6 +45,17 @@
       "exit_time": "2026-11-04T09:00:00+00:00",
       "win": true,
       "pips": 0.1
+    },
+    {
+      "id": "8b739cb8",
+      "symbol": "NZDUSD=X",
+      "type": "PUT",
+      "entry_price": 0.5633485317230225,
+      "exit_price": 0.5629363059997559,
+      "entry_time": "2026-11-04T10:00:00+00:00",
+      "exit_time": "2026-11-04T12:00:00+00:00",
+      "win": true,
+      "pips": 4.12
     }
   ],
   "daily_counter_date": "2026-11-04",
