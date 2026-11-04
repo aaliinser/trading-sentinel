@@ -1,41 +1,14 @@
 {
   "frozen_pairs": {
-    "EURUSD=X": "2026-11-04T19:00:00+00:00",
-    "GBPUSD=X": "2026-11-04T19:00:00+00:00",
-    "USDCAD=X": "2026-11-04T19:00:00+00:00",
-    "EURAUD=X": "2026-11-04T19:00:00+00:00"
+    "CHFJPY=X": "2026-11-04T20:00:00+00:00"
   },
   "open_trades": [
     {
-      "id": "fadf06bf",
-      "symbol": "EURUSD=X",
+      "id": "f229a416",
+      "symbol": "CHFJPY=X",
       "type": "CALL",
-      "entry_price": 1.123974323272705,
-      "entry_time": "2026-11-04T17:00:00+00:00",
-      "msg_id": true
-    },
-    {
-      "id": "fd9e6895",
-      "symbol": "GBPUSD=X",
-      "type": "CALL",
-      "entry_price": 1.3472731113433838,
-      "entry_time": "2026-11-04T17:00:00+00:00",
-      "msg_id": true
-    },
-    {
-      "id": "f1b2378d",
-      "symbol": "USDCAD=X",
-      "type": "PUT",
-      "entry_price": 1.3963199853897095,
-      "entry_time": "2026-11-04T17:00:00+00:00",
-      "msg_id": true
-    },
-    {
-      "id": "11a96b1c",
-      "symbol": "EURAUD=X",
-      "type": "CALL",
-      "entry_price": 1.60139000415802,
-      "entry_time": "2026-11-04T17:00:00+00:00",
+      "entry_price": 193.8459930419922,
+      "entry_time": "2026-11-04T18:00:00+00:00",
       "msg_id": true
     }
   ],
@@ -116,10 +89,54 @@
       "exit_time": "2026-11-04T18:00:00+00:00",
       "win": true,
       "pips": 8.1
+    },
+    {
+      "id": "fadf06bf",
+      "symbol": "EURUSD=X",
+      "type": "CALL",
+      "entry_price": 1.123974323272705,
+      "exit_price": 1.1220825910568237,
+      "entry_time": "2026-11-04T17:00:00+00:00",
+      "exit_time": "2026-11-04T19:00:00+00:00",
+      "win": false,
+      "pips": 18.92
+    },
+    {
+      "id": "fd9e6895",
+      "symbol": "GBPUSD=X",
+      "type": "CALL",
+      "entry_price": 1.3472731113433838,
+      "exit_price": 1.3462755680084229,
+      "entry_time": "2026-11-04T17:00:00+00:00",
+      "exit_time": "2026-11-04T19:00:00+00:00",
+      "win": false,
+      "pips": 9.98
+    },
+    {
+      "id": "f1b2378d",
+      "symbol": "USDCAD=X",
+      "type": "PUT",
+      "entry_price": 1.3963199853897095,
+      "exit_price": 1.3972599506378174,
+      "entry_time": "2026-11-04T17:00:00+00:00",
+      "exit_time": "2026-11-04T19:00:00+00:00",
+      "win": false,
+      "pips": 9.4
+    },
+    {
+      "id": "11a96b1c",
+      "symbol": "EURAUD=X",
+      "type": "CALL",
+      "entry_price": 1.60139000415802,
+      "exit_price": 1.6009600162506104,
+      "entry_time": "2026-11-04T17:00:00+00:00",
+      "exit_time": "2026-11-04T19:00:00+00:00",
+      "win": false,
+      "pips": 4.3
     }
   ],
   "daily_counter_date": "2026-11-04",
-  "daily_signal_count": 11,
+  "daily_signal_count": 12,
   "last_daily_report": "2026-11-03",
   "last_weekly_report": "",
   "last_monthly_report": ""
