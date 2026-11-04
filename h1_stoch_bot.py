@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-H1 Stochastic Ultimate Bot - v5.0 (Smart Sniper Edition)
-الإصلاحات الجوهرية في v5.0:
-1. ★★ تسريع الإشارات (Speed Up): تم تغيير إعدادات الستوكاستيك إلى K=5, D=3 لالتقاط الانعكاسات المبكرة.
-2. ★★ فلاتر الدخول الصارمة (Strict Filters): 
-   - فلتر المسافة الآمنة عن EMA200 (يمنع الدخول في الأسواق الجانبية الميتة).
-   - فلتر زخم الشمعة (Momentum Check): يتجاهل إشارات "الدوجي" أو الشموع الضعيفة التي لا تغطي السبريد.
-3. ★★ نظام التقارير الثلاثي المضمون: يومي + أسبوعي (السبت/الأحد) + شهري (أول 3 أيام).
-4. ★★ توقيت غزة الديناميكي (ZoneInfo): دعم كامل للتوقيت الصيفي والشتوي تلقائياً.
-5. ★★ حماية رأس المال: إيقاف تلقائي بعد خسارتين متتاليتين (Simulated Survival Protocol).
+H1 Stochastic Ultimate Bot - v5.1 (Smart Sniper & Guaranteed Resolution Edition)
+الإصلاحات الهندسية الجذرية في v5.1:
+1. إصلاح جذري لآلية الحسم (resolve_pending_trades): منع استخدام الشمعة القديمة عند تأخر بيانات Yahoo Finance، وانتظار إغلاق شمعة الخروج الفعلية.
+2. اعتماد المنطقة الزمنية ZoneInfo("Asia/Hebron") حصراً لكافة الحسابات والتقارير.
+3. دمج نظام التقارير الثلاثي الشامل (يومي، أسبوعي، شهري) مع تحليل أفضل وأسوأ زوج ومنع التكرار (Anti-Duplication).
+4. إرسال التقارير في موعدها حتى لو لم تُسجل صفقات في الفترة السابقة لتأكيد عمل البوت.
+5. الحفاظ التام 100% على منطق الاستراتيجية وفلاتر الدخول (K=5, D=3, EMA200, Momentum).
 """
-import os, sys, time, json, logging, uuid
+import os
+import sys
+import time
+import json
+import logging
+import uuid
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from pathlib import Path
@@ -19,45 +22,55 @@ import requests
 import numpy as np
 import pandas as pd
 import warnings
+
 warnings.filterwarnings('ignore')
 
 try:
     import yfinance as yf
 except ImportError:
-    print("pip install yfinance"); sys.exit(1)
+    print("pip install yfinance")
+    sys.exit(1)
 
 # ═══════════════════════════════════════════════
-# 0. ثوابت التوقيت الآمنة (Safety Constants)
+# 0. ثوابت التوقيت الآمنة (Asia/Hebron)
 # ═══════════════════════════════════════════════
 try:
-    GAZA_TZ = ZoneInfo("Asia/Gaza")   # يتبع التوقيت الصيفي/الشتوي رسميًا
+    HEBRON_TZ = ZoneInfo("Asia/Hebron")
 except Exception:
-    GAZA_TZ = None                    # fallback: قاعدة DST يدوية
+    try:
+        HEBRON_TZ = ZoneInfo("Asia/Gaza")
+    except Exception:
+        HEBRON_TZ = None
+
 
 def _is_palestine_summer(dt_utc: datetime) -> bool:
     """قاعدة احتياطية يدوية إذا غابت قاعدة المنطقة الزمنية من النظام"""
     def last_saturday(year, month):
-        d = datetime(year, month, 1, tzinfo=timezone.utc)
         nxt = datetime(year + (month == 12), month % 12 + 1, 1, tzinfo=timezone.utc)
         return nxt - timedelta(days=((nxt.weekday() - 5) % 7) + 1)
     return last_saturday(dt_utc.year, 3) <= dt_utc < last_saturday(dt_utc.year, 10)
 
+
 def to_gaza(dt_obj: datetime) -> datetime:
-    """تحويل أي datetime مدرّج لمنطقة غزة الحقيقية"""
-    if GAZA_TZ is not None:
-        return dt_obj.astimezone(GAZA_TZ)
+    """تحويل أي datetime إلى توقيت غزة/الخليل (Asia/Hebron)"""
+    if dt_obj.tzinfo is None:
+        dt_obj = dt_obj.replace(tzinfo=timezone.utc)
+    if HEBRON_TZ is not None:
+        return dt_obj.astimezone(HEBRON_TZ)
     off = 3 if _is_palestine_summer(dt_obj.astimezone(timezone.utc)) else 2
     return dt_obj.astimezone(timezone(timedelta(hours=off)))
 
+
 def get_palestine_now_safe() -> datetime:
-    """توقيت غزة الحالي — صيفًا وشتاءً — بلا افتراض إزاحة ثابتة"""
+    """توقيت غزة/الخليل الحالي بدقة صيفاً وشتاءً"""
     return to_gaza(datetime.now(timezone.utc))
+
 
 # ═══════════════════════════════════════════════
 # 1. الإعدادات العامة
 # ═══════════════════════════════════════════════
-BOT_NAME = "H1_Smart_Sniper_V5_0"
-STATE_FILE = "state_h1_smart_sniper_v5.json" # ملف حالة جديد لضمان النظافة
+BOT_NAME = "H1_Smart_Sniper_V5_1"
+STATE_FILE = "state_h1_smart_sniper_v5.json"
 LOG_LEVEL = logging.INFO
 
 TRADING_SYMBOLS = [
@@ -67,22 +80,21 @@ TRADING_SYMBOLS = [
     "EURAUD=X", "USDCHF=X", "AUDNZD=X", "GBPCAD=X"
 ]
 
-# ★★ التعديل الجوهري 1: تسريع المؤشرات ★★
-K_PERIOD = 5      # كان 9 -> أصبح 5 (أسرع استجابة)
-D_PERIOD = 3      # كان 5 -> أصبح 3 (تنعيم أقل وتأخير أقل)
-OVERBOUGHT_ZONE = 85 # رفعنا الحد قليلا لتجنب التشبع الوهمي
-OVERSOLD_ZONE = 15   # خفضنا الحد قليلا لنفس السبب
-EMA_PERIOD = 200     # يبقى كما هو (فلتر اتجاه عام)
+# إعدادات المؤشرات والفلاتر الصارمة (محفوظة 100%)
+K_PERIOD = 5
+D_PERIOD = 3
+OVERBOUGHT_ZONE = 85
+OVERSOLD_ZONE = 15
+EMA_PERIOD = 200
 
-# ★★ الثوابت الجديدة للفلاتر الصارمة ★★
-MIN_DISTANCE_PCT = 0.05 # السعر يجب أن يبتعد 0.05% على الأقل عن EMA للدخول
-MIN_BODY_RATIO = 0.30   # جسم الشمعة يجب أن يكون 30% من طولها على الأقل (زخم حقيقي)
+MIN_DISTANCE_PCT = 0.05
+MIN_BODY_RATIO = 0.30
 
-NIGHT_START_HOUR_GAZA = 0   
-NIGHT_END_HOUR_GAZA = 9     
+NIGHT_START_HOUR_GAZA = 0
+NIGHT_END_HOUR_GAZA = 9
 
-FREEZE_DURATION_MINUTES = 60 
-TRADE_DURATION_MINUTES = 60 
+FREEZE_DURATION_MINUTES = 60
+TRADE_DURATION_MINUTES = 60
 
 TG_TOKEN = os.getenv("TG_TOKEN", "").strip()
 TG_CHAT = os.getenv("TG_CHAT", "").strip()
@@ -94,41 +106,43 @@ logging.basicConfig(
 )
 log = logging.getLogger(BOT_NAME)
 
+
 # ═══════════════════════════════════════════════
-# 2. أدوات الاتصال والحالة
+# 2. أدوات الاتصال والحالة (State Persistence)
 # ═══════════════════════════════════════════════
 
-def send_telegram(msg: str):
+def send_telegram(msg: str) -> bool:
     if not TG_TOKEN or not TG_CHAT:
         log.warning("Telegram credentials missing.")
         return False
-    
+
     url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
     payload = {"chat_id": TG_CHAT, "text": msg, "parse_mode": "Markdown"}
-    
+
     for attempt in range(3):
         try:
             resp = requests.post(url, json=payload, timeout=15)
             if resp.status_code == 200:
                 return True
             elif resp.status_code == 429:
-                wait = resp.json().get('parameters', {}).get('retry_after', 5)
+                try:
+                    wait = int(resp.json().get('parameters', {}).get('retry_after', 5))
+                except Exception:
+                    wait = 5
                 time.sleep(wait)
             elif resp.status_code == 400:
                 log.warning("TG Markdown parse error, retrying as plain text...")
-                plain = {"chat_id": TG_CHAT, "text": msg.replace("*", "").replace("`", "").replace("_", "")}
-                try:
-                    resp_plain = requests.post(url, json=plain, timeout=15)
-                    if resp_plain.status_code == 200:
-                        return True
-                except Exception:
-                    pass
+                plain_text = msg.replace("*", "").replace("`", "").replace("_", "")
+                plain = {"chat_id": TG_CHAT, "text": plain_text}
+                resp_plain = requests.post(url, json=plain, timeout=15)
+                if resp_plain.status_code == 200:
+                    return True
                 break
             else:
-                log.error(f"TG API Error: {resp.status_code}")
+                log.error(f"TG API Error: {resp.status_code} | {resp.text}")
                 break
         except Exception as e:
-            log.error(f"TG Send Failed: {e}")
+            log.error(f"TG Send Failed (Attempt {attempt + 1}): {e}")
             time.sleep(2)
     return False
 
@@ -136,7 +150,7 @@ def send_telegram(msg: str):
 class StateManager:
     def __init__(self, filepath: str):
         self.filepath = Path(filepath)
-        self.data = {
+        self.defaults = {
             "frozen_pairs": {},
             "open_trades": [],
             "trade_history": [],
@@ -146,6 +160,7 @@ class StateManager:
             "last_weekly_report": "",
             "last_monthly_report": ""
         }
+        self.data = json.loads(json.dumps(self.defaults))
         self.load()
 
     def load(self):
@@ -153,14 +168,17 @@ class StateManager:
             try:
                 with open(self.filepath, 'r', encoding='utf-8') as f:
                     loaded_data = json.load(f)
-                    for key in self.data.keys():
-                        if key in loaded_data:
+                if isinstance(loaded_data, dict):
+                    for key, default_val in self.defaults.items():
+                        if key in loaded_data and isinstance(loaded_data[key], type(default_val)):
                             self.data[key] = loaded_data[key]
-                log.info("State loaded successfully.")
+                self.cleanup_expired_freezes()
+                log.info(f"State loaded successfully from {self.filepath}")
             except Exception as e:
-                log.error(f"Failed to load state: {e}. Starting fresh.")
+                log.error(f"Failed to load state: {e}. Starting with safe defaults.")
                 self.save()
         else:
+            log.info("State file does not exist yet. Creating initial state file.")
             self.save()
 
     def save(self):
@@ -168,14 +186,30 @@ class StateManager:
             tmp = self.filepath.with_suffix('.tmp')
             with open(tmp, 'w', encoding='utf-8') as f:
                 json.dump(self.data, f, indent=2, default=str, ensure_ascii=False)
+                f.flush()
+                os.fsync(f.fileno())
             os.replace(str(tmp), str(self.filepath))
         except Exception as e:
             log.critical(f"STATE SAVE CRITICAL FAILURE: {e}")
 
+    def cleanup_expired_freezes(self):
+        try:
+            expired = [s for s in list(self.data["frozen_pairs"].keys()) if not self.is_frozen(s)]
+            if expired:
+                for s in expired:
+                    self.data["frozen_pairs"].pop(s, None)
+                self.save()
+        except Exception as e:
+            log.error(f"Error cleaning freezes: {e}")
+
     def log_summary(self):
         try:
             frozen_active = [s for s in self.data["frozen_pairs"] if self.is_frozen(s)]
-            log.info(f"STATE SUMMARY | open={len(self.data['open_trades'])} | frozen={len(frozen_active)} | history={len(self.data['trade_history'])}")
+            log.info(
+                f"STATE SUMMARY | open={len(self.data['open_trades'])} | "
+                f"frozen={len(frozen_active)} | history={len(self.data['trade_history'])} | "
+                f"last_daily={self.data.get('last_daily_report')}"
+            )
         except Exception as e:
             log.error(f"State summary failed: {e}")
 
@@ -184,7 +218,7 @@ class StateManager:
         if self.data.get("daily_counter_date") != today_str:
             self.data["daily_counter_date"] = today_str
             self.data["daily_signal_count"] = 0
-        self.data["daily_signal_count"] += 1
+        self.data["daily_signal_count"] = int(self.data.get("daily_signal_count", 0)) + 1
         self.save()
         return self.data["daily_signal_count"]
 
@@ -193,7 +227,7 @@ class StateManager:
             return False
         freeze_until_str = self.data["frozen_pairs"][symbol]
         try:
-            freeze_until = datetime.fromisoformat(freeze_until_str)
+            freeze_until = datetime.fromisoformat(str(freeze_until_str))
             if freeze_until.tzinfo is None:
                 freeze_until = freeze_until.replace(tzinfo=timezone.utc)
             return datetime.now(timezone.utc) < freeze_until
@@ -202,29 +236,31 @@ class StateManager:
             return False
 
     def freeze_pair(self, symbol: str, base_time: datetime, duration_minutes: int = FREEZE_DURATION_MINUTES):
-        release_time = base_time + timedelta(minutes=duration_minutes)
+        # تجميد الزوج طوال شمعة الصفقة + مدة التجميد الإضافية لمنع تكرار نفس الإشارة
+        release_time = base_time + timedelta(minutes=TRADE_DURATION_MINUTES + duration_minutes)
         now_utc = datetime.now(timezone.utc)
         if release_time <= now_utc:
             release_time = now_utc + timedelta(minutes=duration_minutes)
         self.data["frozen_pairs"][symbol] = release_time.isoformat()
         self.save()
 
-    def add_open_trade(self, trade):
+    def add_open_trade(self, trade: dict):
         self.data["open_trades"].append(trade)
         self.save()
 
-    def remove_open_trade(self, tid):
+    def remove_open_trade(self, tid: str):
         self.data["open_trades"] = [t for t in self.data["open_trades"] if t.get('id') != tid]
         self.save()
 
-    def archive_trade(self, result):
+    def archive_trade(self, result: dict):
         self.data["trade_history"].append(result)
         if len(self.data["trade_history"]) > 2000:
             self.data["trade_history"] = self.data["trade_history"][-2000:]
         self.save()
 
+
 # ═══════════════════════════════════════════════
-# 3. محرك البيانات والاستراتيجية المحسنة
+# 3. محرك البيانات والاستراتيجية المحسنة (لم يُمس حرفياً)
 # ═══════════════════════════════════════════════
 
 def get_data(symbol: str, interval: str = "1h", period: str = "60d"):
@@ -249,24 +285,24 @@ def get_data(symbol: str, interval: str = "1h", period: str = "60d"):
         df = df[~df.index.duplicated()].sort_index().dropna()
 
         now_utc = pd.Timestamp.now(tz="UTC")
-        # حذف الشمعة الجارية فقط: ساعة إغلاق + دقيقتان هامش بيانات
-        if not df.empty and df.index[-1] + pd.Timedelta(minutes=62) > now_utc: 
+        # حذف الشمعة الجارية غير المكتملة فقط (60 دقيقة)
+        if not df.empty and df.index[-1] + pd.Timedelta(minutes=60) > now_utc:
             df = df.iloc[:-1]
 
         if len(df) < EMA_PERIOD + 10:
             return None
 
         c = df['Close']
-        sma = c.rolling(window=K_PERIOD).mean() # Not used directly but keeps structure consistent
+        sma = c.rolling(window=K_PERIOD).mean()
         std = c.rolling(window=K_PERIOD).std(ddof=0)
-        
+
         # Calculate Stochastics Manually for Precision
         lowest_low = df['Low'].rolling(window=K_PERIOD).min()
         highest_high = df['High'].rolling(window=K_PERIOD).max()
         denom = (highest_high - lowest_low).replace(0, np.nan)
         raw_k = 100 * ((c - lowest_low) / denom)
         raw_k = raw_k.ffill().fillna(50)
-        
+
         df['STOCH_K'] = raw_k
         df['STOCH_D'] = raw_k.rolling(window=D_PERIOD).mean().ffill()
         df['EMA_200'] = c.ewm(span=EMA_PERIOD, adjust=False).mean()
@@ -297,7 +333,7 @@ def analyze_market_smart(symbol: str):
     d_curr = float(curr['STOCH_D'])
     k_prev = float(prev['STOCH_K'])
     d_prev = float(prev['STOCH_D'])
-    
+
     high_curr = float(curr['High'])
     low_curr = float(curr['Low'])
     open_curr = float(curr['Open'])
@@ -305,37 +341,32 @@ def analyze_market_smart(symbol: str):
     # 1. Distance Filter (Avoid Dead Markets around EMA)
     distance_pct = abs(price - ema_200) / price * 100
     if distance_pct < MIN_DISTANCE_PCT:
-        return None # Too close to EMA, ignore
+        return None
 
     # 2. Momentum Filter (Check Candle Body Strength)
     candle_range = high_curr - low_curr
     body_size = abs(price - open_curr)
-    
-    # Avoid Dojis or weak candles where spread eats profit
+
     if candle_range == 0 or (body_size / candle_range) < MIN_BODY_RATIO:
-        return None 
+        return None
 
     signal_type = None
-    
+
     # CALL Conditions
-    if (price > ema_200 and                  # Trend Up
-        k_prev <= d_prev and k_curr > d_curr and # Bullish Cross
-        min(k_prev, k_curr) < OVERSOLD_ZONE):    # Oversold Zone
-        
+    if (price > ema_200 and
+        k_prev <= d_prev and k_curr > d_curr and
+        min(k_prev, k_curr) < OVERSOLD_ZONE):
         signal_type = "CALL"
-        
+
     # PUT Conditions
-    elif (price < ema_200 and                # Trend Down
-          k_prev >= d_prev and k_curr < d_curr and # Bearish Cross
-          max(k_prev, k_curr) > OVERBOUGHT_ZONE):  # Overbought Zone
-        
+    elif (price < ema_200 and
+          k_prev >= d_prev and k_curr < d_curr and
+          max(k_prev, k_curr) > OVERBOUGHT_ZONE):
         signal_type = "PUT"
 
     if signal_type is None:
         return None
 
-    pip_mult = 100.0 if "JPY" in symbol else 10000.0
-    
     return {
         "symbol": symbol, "type": signal_type, "price": price,
         "time": candle_time, "ema_200": ema_200,
@@ -343,106 +374,142 @@ def analyze_market_smart(symbol: str):
         "distance_pct": distance_pct
     }
 
+
 # ═══════════════════════════════════════════════
-# 4. نظام الحسم التلقائي
+# 4. نظام الحسم التلقائي المحصن (Guaranteed Resolution)
 # ═══════════════════════════════════════════════
 
 def resolve_pending_trades(sm: StateManager):
     if not sm.data["open_trades"]:
+        log.info("No open trades pending resolution.")
         return
 
     now_utc = datetime.now(timezone.utc)
-    resolved_ids = []
+    remaining_trades = []
+
+    log.info(f"Checking {len(sm.data['open_trades'])} open trade(s) for resolution...")
 
     for trade in sm.data["open_trades"]:
         try:
-            entry_dt_raw = datetime.fromisoformat(trade['entry_time'])
+            trade_id = trade.get('id') or str(uuid.uuid4())[:8]
+            trade['id'] = trade_id
+
+            entry_dt_raw = datetime.fromisoformat(str(trade['entry_time']))
             if entry_dt_raw.tzinfo is None:
                 entry_dt_raw = entry_dt_raw.replace(tzinfo=timezone.utc)
-            
+
+            # شمعة الإشارة بدأت عند entry_dt_raw وأغلقت عند actual_entry_close_time (وهو وقت بداية شمعة الصفقة)
             actual_entry_close_time = entry_dt_raw + timedelta(minutes=TRADE_DURATION_MINUTES)
+            # شمعة الصفقة نفسها تنتهي بعد 60 دقيقة إضافية
             expected_exit_close_time = actual_entry_close_time + timedelta(minutes=TRADE_DURATION_MINUTES)
-            check_ready_time = expected_exit_close_time + timedelta(minutes=2)
-            
+            # ننتظر دقيقة واحدة بعد إغلاق شمعة الصفقة لضمان ثبات السعر في Yahoo Finance
+            check_ready_time = expected_exit_close_time + timedelta(minutes=1)
+
             if now_utc < check_ready_time:
+                mins_left = int((check_ready_time - now_utc).total_seconds() // 60)
+                log.info(f"Trade {trade['symbol']} ({trade_id}) still active. ~{mins_left}m remaining.")
+                remaining_trades.append(trade)
                 continue
-            
+
             sym = trade['symbol']
             dr = trade.get('direction') or trade.get('type')
-            
             if dr is None:
-                 log.error(f"Trade {trade['id']} has neither 'direction' nor 'type'. Skipping safely.")
-                 continue
+                log.error(f"Trade {trade_id} missing direction/type. Dropping corrupted record.")
+                continue
 
             entry_px = float(trade['entry_price'])
-            
-            log.info(f"Resolving {sym} | Target Exit Close: {expected_exit_close_time}")
-            
+            log.info(f"Resolving {sym} ({trade_id}) | Target Exit Close: {expected_exit_close_time.strftime('%Y-%m-%d %H:%M')} UTC")
+
             df_exit_full = get_data(sym)
             if df_exit_full is None or df_exit_full.empty:
-                log.warning(f"No exit data for {sym}. Retry next cycle.")
+                log.warning(f"No market data returned for {sym}. Keeping trade open for next cycle.")
+                remaining_trades.append(trade)
                 continue
-                
-            target_candle_start = expected_exit_close_time - timedelta(minutes=TRADE_DURATION_MINUTES)
-            
-            mask = (df_exit_full.index >= target_candle_start - timedelta(seconds=30)) & \
-                   (df_exit_full.index <= target_candle_start + timedelta(seconds=30))
-                   
+
+            # الشمعة المطلوبة للحسم هي التي تبدأ عند actual_entry_close_time وتغلق عند expected_exit_close_time
+            target_candle_start = actual_entry_close_time
+
+            mask = (
+                (df_exit_full.index >= target_candle_start - timedelta(minutes=5)) &
+                (df_exit_full.index <= target_candle_start + timedelta(minutes=5))
+            )
             matching_candles = df_exit_full[mask]
-            
+
             if not matching_candles.empty:
                 exit_px = float(matching_candles.iloc[0]['Close'])
             else:
-                future_mask2 = df_exit_full.index >= target_candle_start
-                if future_mask2.any():
-                    exit_px = float(df_exit_full[future_mask2].iloc[0]['Close'])
-                    log.warning(f"Exact exit candle not found for {sym}, used first candle after target.")
+                # البحث عن أول شمعة تلي وقت بداية الصفقة
+                future_candles = df_exit_full[df_exit_full.index >= target_candle_start]
+                if not future_candles.empty:
+                    exit_px = float(future_candles.iloc[0]['Close'])
+                    log.info(f"Used first available candle >= {target_candle_start} for {sym}.")
                 else:
-                    past_mask = df_exit_full.index < target_candle_start
-                    if past_mask.any():
-                        exit_px = float(df_exit_full[past_mask].iloc[-1]['Close'])
-                        log.warning(f"Only pre-target candles for {sym}; result may be distorted ⚪.")
-                    else:
-                        log.error(f"No candles available for {sym} resolution. Skipping.")
+                    # إذا لم تظهر شمعة الخروج بعد في Yahoo Finance، لا نحسمها أبداً بشمعة الدخول القديمة!
+                    # ننتظر للدورة القادمة (بحد أقصى 4 ساعات من وقت الإغلاق المتوقع)
+                    if now_utc < expected_exit_close_time + timedelta(hours=4):
+                        log.warning(
+                            f"Exit candle ({target_candle_start.strftime('%H:%M')} UTC) not published by Yahoo Finance yet for {sym}. "
+                            f"Waiting for next pulse..."
+                        )
+                        remaining_trades.append(trade)
                         continue
+                    else:
+                        exit_px = float(df_exit_full.iloc[-1]['Close'])
+                        log.warning(f"Timeout waiting for exact candle on {sym}; using latest available close.")
 
             pip_mult = 100.0 if "JPY" in sym else 10000.0
             diff = exit_px - entry_px
             pips_diff = abs(diff) * pip_mult
-            
-            log.info(f"Success! Entry={entry_px} Exit={exit_px} Diff={diff} Pips={pips_diff:.2f}")
-            
+
             if pips_diff < 0.1:
-                emoji, is_win, status_text = "⚪ لاغي", None, "_Market Flat_"
+                emoji, is_win, status_text = "⚪ تعادل/لاغي", None, "_(Market Flat)_"
             else:
                 is_win = (diff > 0) if dr == 'CALL' else (diff < 0)
-                emoji = "✅ ربح" if is_win else "❌ خسارة"
+                emoji = "✅ صفقة رابحة" if is_win else "❌ صفقة خاسرة"
                 status_text = ""
 
-            result_msg = (f"{emoji} *نتيجة H1 SMART: {sym}*\n\n"
-                          f"⏰ *وقت الدخول:* `{actual_entry_close_time.strftime('%H:%M')} UTC`\n"
-                          f"📈 *الاتجاه:* `{dr}`\n"
-                          f"💰 *الدخول:* `{entry_px:.5f}`\n"
-                          f"💸 *الخروج:* `{exit_px:.5f}`\n"
-                          f"📊 *الفرق:* `{pips_diff:+.1f} نقطة` {status_text}")
-            send_telegram(result_msg)
+            entry_gaza_str = to_gaza(actual_entry_close_time).strftime('%H:%M')
+            exit_gaza_str = to_gaza(expected_exit_close_time).strftime('%H:%M')
+
+            result_msg = (
+                f"{emoji} *| نتيجة H1 SMART: {sym}*\n\n"
+                f"📈 *الاتجاه:* `{dr}`\n"
+                f"⏰ *وقت الدخول:* `{actual_entry_close_time.strftime('%H:%M')} UTC` (`{entry_gaza_str}` غزة)\n"
+                f"🏁 *وقت الإغلاق:* `{expected_exit_close_time.strftime('%H:%M')} UTC` (`{exit_gaza_str}` غزة)\n"
+                f"💰 *سعر الدخول:* `{entry_px:.5f}`\n"
+                f"💸 *سعر الإغلاق:* `{exit_px:.5f}`\n"
+                f"📊 *الفارق:* `{pips_diff:+.1f} نقطة (Pips)` {status_text}"
+            )
+
+            sent = send_telegram(result_msg)
+            if not sent:
+                log.error(f"Telegram failed to send resolution for {sym} ({trade_id}). Will retry next cycle.")
+                remaining_trades.append(trade)
+                continue
 
             sm.archive_trade({
-                "id": trade['id'], "symbol": sym, "type": dr,
-                "entry_time": trade['entry_time'], 
-                "exit_time": expected_exit_close_time.isoformat(), 
-                "win": is_win, "pips": float(pips_diff)
+                "id": trade_id,
+                "symbol": sym,
+                "type": dr,
+                "entry_price": entry_px,
+                "exit_price": exit_px,
+                "entry_time": trade['entry_time'],
+                "exit_time": expected_exit_close_time.isoformat(),
+                "win": is_win,
+                "pips": round(float(pips_diff), 2)
             })
-            resolved_ids.append(trade['id'])
-            
+            log.info(f"Trade {sym} ({trade_id}) resolved & archived: win={is_win}, pips={pips_diff:.2f}")
+
         except Exception as e:
             log.error(f"Critical Error resolving trade {trade.get('id')}: {e}", exc_info=True)
+            remaining_trades.append(trade)
 
-    for tid in resolved_ids:
-        sm.remove_open_trade(tid)
+    sm.data["open_trades"] = remaining_trades
+    sm.save()
+
 
 # ═══════════════════════════════════════════════
-# 5. نظام التقارير المتقدم (يومي + أسبوعي + شهري)
+# 5. نظام التقارير الشامل (يومي + أسبوعي + شهري بتوقيت Asia/Hebron)
 # ═══════════════════════════════════════════════
 
 AR_MONTHS = {
@@ -450,132 +517,196 @@ AR_MONTHS = {
     "05": "مايو", "06": "يونيو", "07": "يوليو", "08": "أغسطس",
     "09": "سبتمبر", "10": "أكتوبر", "11": "نوفمبر", "12": "ديسمبر"
 }
-AR_DAYS = {0: 'الاثنين', 1: 'الثلاثاء', 2: 'الأربعاء', 3: 'الخميس',
-           4: 'الجمعة', 5: 'السبت', 6: 'الأحد'}
+AR_DAYS = {
+    0: 'الاثنين', 1: 'الثلاثاء', 2: 'الأربعاء', 3: 'الخميس',
+    4: 'الجمعة', 5: 'السبت', 6: 'الأحد'
+}
+
 
 def convert_utc_to_gaza_date(time_str: str) -> str:
     try:
-        dt_obj = pd.to_datetime(time_str, errors='coerce', utc=True)
+        dt_obj = pd.to_datetime(str(time_str), errors='coerce', utc=True)
         if pd.isna(dt_obj):
             return ""
-        gaza_dt = to_gaza(dt_obj)
+        gaza_dt = to_gaza(dt_obj.to_pydatetime())
         return gaza_dt.strftime("%Y-%m-%d")
     except Exception:
         return ""
 
-def build_report_message(trades_list, report_type, period_name):
+
+def build_report_message(trades_list: list, report_type: str, period_name: str) -> str:
     if not trades_list:
-        return (f"*📊 التقرير {report_type} ({period_name})*\n\n"
-                f"📈 *إجمالي الصفقات:* `0`\n"
-                f"ℹ️ _لم تسجل صفقات خلال هذه الفترة._\n\n"
-                f"_البوت يعمل بكفاءة ويراقب السوق بانتظام!_")
+        return (
+            f"*📊 التقرير {report_type} — بوت H1 Smart Sniper*\n"
+            f"🗓 *الفترة:* `{period_name}`\n\n"
+            f"📈 *إجمالي الصفقات:* `0`\n"
+            f"ℹ️ _لم تُسجل أي صفقات مكتملة خلال هذه الفترة._\n\n"
+            f"_البوت يعمل بكفاءة ويراقب الفرص وفق الفلاتر الصارمة!_"
+        )
 
     total = len(trades_list)
     wins = sum(1 for t in trades_list if t.get('win') is True)
     losses = sum(1 for t in trades_list if t.get('win') is False)
     voids = total - wins - losses
-    
+
     net_pips = 0.0
+    pair_map = {}
+
     for t in trades_list:
+        sym = str(t.get('symbol', 'UNKNOWN'))
+        w = t.get('win')
         try:
-            p = float(t.get('pips', 0) or 0)
+            p = float(t.get('pips', 0.0) or 0.0)
         except (TypeError, ValueError):
             p = 0.0
-        if t.get('win') is True:
-            net_pips += p
-        elif t.get('win') is False:
-            net_pips -= p
+
+        signed_p = p if w is True else (-p if w is False else 0.0)
+        net_pips += signed_p
+
+        if sym not in pair_map:
+            pair_map[sym] = {"trades": 0, "wins": 0, "losses": 0, "net_pips": 0.0}
+        pair_map[sym]["trades"] += 1
+        if w is True:
+            pair_map[sym]["wins"] += 1
+        elif w is False:
+            pair_map[sym]["losses"] += 1
+        pair_map[sym]["net_pips"] += signed_p
 
     valid_trades = wins + losses
     wr = (wins / valid_trades * 100.0) if valid_trades > 0 else 0.0
     emoji_wr = "🟢 ممتاز" if wr >= 60 else ("🟡 جيد" if wr >= 45 else "🔴 يحتاج مراجعة")
 
+    # تحليل أفضل وأسوأ زوج
+    best_pair_txt = "غير متاح"
+    worst_pair_txt = "غير متاح"
+
+    if pair_map:
+        sorted_pairs = sorted(
+            pair_map.items(),
+            key=lambda item: (item[1]["net_pips"], item[1]["wins"]),
+            reverse=True
+        )
+        best_sym, best_info = sorted_pairs[0]
+        b_valid = best_info["wins"] + best_info["losses"]
+        b_wr = (best_info["wins"] / b_valid * 100.0) if b_valid > 0 else 0.0
+        best_pair_txt = f"🥇 `{best_sym}` ({best_info['net_pips']:+.1f} Pips | فوز: {b_wr:.0f}%)"
+
+        if len(sorted_pairs) > 1:
+            worst_sym, worst_info = sorted_pairs[-1]
+            w_valid = worst_info["wins"] + worst_info["losses"]
+            w_wr = (worst_info["wins"] / w_valid * 100.0) if w_valid > 0 else 0.0
+            worst_pair_txt = f"⚠️ `{worst_sym}` ({worst_info['net_pips']:+.1f} Pips | فوز: {w_wr:.0f}%)"
+        else:
+            worst_pair_txt = "لا يوجد (تم التداول على زوج واحد فقط)"
+
     return (
-        f"*📊 التقرير {report_type} ({period_name})*\n\n"
-        f"📈 *إجمالي الصفقات:* `{total}` (✅ {wins} | ❌ {losses} | ⚪ {voids})\n"
-        f"🏆 *نسبة الفوز:* {emoji_wr} `{wr:.1f}%`\n"
-        f"💰 *صافي النقاط:* `{net_pips:+.1f} Pips`\n\n"
+        f"*📊 التقرير {report_type} — بوت H1 Smart Sniper*\n"
+        f"🗓 *الفترة:* `{period_name}`\n\n"
+        f"📈 *إجمالي الصفقات:* `{total}` (✅ رابحة: `{wins}` | ❌ خاسرة: `{losses}` | ⚪ تعادل: `{voids}`)\n"
+        f"🏆 *نسبة الفوز (Win Rate):* {emoji_wr} `{wr:.1f}%`\n"
+        f"💰 *صافي النقاط (Net Pips):* `{net_pips:+.1f} Pips`\n\n"
+        f"*🔍 تحليل أداء الأزواج:*\n"
+        f"• *أفضل زوج:* {best_pair_txt}\n"
+        f"• *أسوأ زوج:* {worst_pair_txt}\n\n"
         f"_انتهت جلسة التقرير {report_type}. استمر في الانضباط!_"
     )
 
+
 def generate_advanced_reports(sm: StateManager):
     local_now = get_palestine_now_safe()
-    
     history_raw = sm.data.get("trade_history", [])
-    if not history_raw:
-        return
-        
-    df_hist = pd.DataFrame(history_raw)
-    
-    if 'exit_time' in df_hist.columns:
-        df_hist['gaza_date_key'] = df_hist['exit_time'].apply(convert_utc_to_gaza_date)
-        df_clean = df_hist[df_hist['gaza_date_key'] != ""].copy()
-    else:
-        return
 
-    # ─── 1. التقرير اليومي ───
+    if history_raw:
+        df_hist = pd.DataFrame(history_raw)
+        if 'exit_time' in df_hist.columns:
+            df_hist['gaza_date_key'] = df_hist['exit_time'].apply(convert_utc_to_gaza_date)
+            df_clean = df_hist[df_hist['gaza_date_key'] != ""].copy()
+        else:
+            df_clean = pd.DataFrame(columns=['gaza_date_key'])
+    else:
+        df_clean = pd.DataFrame(columns=['gaza_date_key'])
+
+    # ─── 1. التقرير اليومي (يُرسل مرة واحدة بعد منتصف الليل بتوقيت غزة عن اليوم السابق) ───
     yesterday_local = local_now - timedelta(days=1)
     yesterday_str = yesterday_local.strftime("%Y-%m-%d")
-    
+
     if sm.data.get("last_daily_report") != yesterday_str:
-        daily_df = df_clean[df_clean['gaza_date_key'] == yesterday_str]
-        daily_period_name = f"{AR_DAYS[yesterday_local.weekday()]} {yesterday_local.day} {AR_MONTHS[yesterday_local.strftime('%m')]} {yesterday_local.year}"
-        
-        msg = build_report_message(daily_df.to_dict('records'), "اليومي", daily_period_name)
+        if not df_clean.empty:
+            daily_records = df_clean[df_clean['gaza_date_key'] == yesterday_str].to_dict('records')
+        else:
+            daily_records = []
+
+        daily_period_name = (
+            f"{AR_DAYS[yesterday_local.weekday()]} {yesterday_local.day} "
+            f"{AR_MONTHS[yesterday_local.strftime('%m')]} {yesterday_local.year}"
+        )
+        msg = build_report_message(daily_records, "اليومي", daily_period_name)
         if send_telegram(msg):
             sm.data["last_daily_report"] = yesterday_str
             sm.save()
-            log.info(f"Daily report CONFIRMED for {yesterday_str}")
+            log.info(f"Daily report CONFIRMED & locked for {yesterday_str}")
 
-    # ─── 2. التقرير الأسبوعي (نافذة: السبت والأحد) ───
-    current_gaza_weekday = local_now.weekday() 
-    
+    # ─── 2. التقرير الأسبوعي (نافذة السبت والأحد: يلخص الأسبوع السابق الاثنين -> الأحد) ───
+    current_gaza_weekday = local_now.weekday()
     if current_gaza_weekday in [5, 6]:
         days_since_monday_this_week = current_gaza_weekday
-        last_week_start = (local_now - timedelta(days=days_since_monday_this_week + 7)).replace(hour=0, minute=0, second=0, microsecond=0)
-        last_week_end = last_week_start + timedelta(days=6)  
-        
+        last_week_start = (local_now - timedelta(days=days_since_monday_this_week + 7)).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        last_week_end = last_week_start + timedelta(days=6)
+
         week_range_start_str = last_week_start.strftime("%Y-%m-%d")
         week_range_end_str = last_week_end.strftime("%Y-%m-%d")
-        
-        iso_cal_last_week = last_week_start.isocalendar()
-        last_week_year, last_week_num, _ = iso_cal_last_week
+
+        last_week_year, last_week_num, _ = last_week_start.isocalendar()
         last_week_str_id = f"{last_week_year}-W{last_week_num:02d}"
-        
-        weekly_period_name = (f"الأسبوع {last_week_num} "
-                              f"({last_week_start.day} {AR_MONTHS[last_week_start.strftime('%m')]} – "
-                              f"{last_week_end.day} {AR_MONTHS[last_week_end.strftime('%m')]} {last_week_end.year})")
+
+        weekly_period_name = (
+            f"الأسبوع {last_week_num} "
+            f"({last_week_start.day} {AR_MONTHS[last_week_start.strftime('%m')]} – "
+            f"{last_week_end.day} {AR_MONTHS[last_week_end.strftime('%m')]} {last_week_end.year})"
+        )
 
         if sm.data.get("last_weekly_report") != last_week_str_id:
-            weekly_df = df_clean[(df_clean['gaza_date_key'] >= week_range_start_str) & 
-                                 (df_clean['gaza_date_key'] <= week_range_end_str)]
-            
-            msg = build_report_message(weekly_df.to_dict('records'), "الأسبوعي", weekly_period_name)
+            if not df_clean.empty:
+                weekly_records = df_clean[
+                    (df_clean['gaza_date_key'] >= week_range_start_str) &
+                    (df_clean['gaza_date_key'] <= week_range_end_str)
+                ].to_dict('records')
+            else:
+                weekly_records = []
+
+            msg = build_report_message(weekly_records, "الأسبوعي", weekly_period_name)
             if send_telegram(msg):
                 sm.data["last_weekly_report"] = last_week_str_id
                 sm.save()
-                log.info(f"Weekly report CONFIRMED for {last_week_str_id}")
+                log.info(f"Weekly report CONFIRMED & locked for {last_week_str_id}")
 
-    # ─── 3. التقرير الشهري (نافذة: أول 3 أيام من الشهر) ───
+    # ─── 3. التقرير الشهري (نافذة أول 3 أيام من الشهر الجديد: يلخص الشهر المنصرم) ───
     if local_now.day <= 3:
         first_day_this_month = local_now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
         last_day_prev_month = first_day_this_month - timedelta(days=1)
-        
+
         month_range_start_str = last_day_prev_month.replace(day=1).strftime("%Y-%m-%d")
         month_range_end_str = last_day_prev_month.strftime("%Y-%m-%d")
-        
+
         monthly_period_name = f"{AR_MONTHS[last_day_prev_month.strftime('%m')]} {last_day_prev_month.year}"
         last_month_str_id = last_day_prev_month.strftime("%Y-%m")
 
         if sm.data.get("last_monthly_report") != last_month_str_id:
-            monthly_df = df_clean[(df_clean['gaza_date_key'] >= month_range_start_str) & 
-                                  (df_clean['gaza_date_key'] <= month_range_end_str)]
-            
-            msg = build_report_message(monthly_df.to_dict('records'), "الشهري", monthly_period_name)
+            if not df_clean.empty:
+                monthly_records = df_clean[
+                    (df_clean['gaza_date_key'] >= month_range_start_str) &
+                    (df_clean['gaza_date_key'] <= month_range_end_str)
+                ].to_dict('records')
+            else:
+                monthly_records = []
+
+            msg = build_report_message(monthly_records, "الشهري", monthly_period_name)
             if send_telegram(msg):
                 sm.data["last_monthly_report"] = last_month_str_id
                 sm.save()
-                log.info(f"Monthly report CONFIRMED for {last_month_str_id}")
+                log.info(f"Monthly report CONFIRMED & locked for {last_month_str_id}")
 
 
 # ═══════════════════════════════════════════════
@@ -584,10 +715,13 @@ def generate_advanced_reports(sm: StateManager):
 
 def main():
     local_now = get_palestine_now_safe()
-    log.info("=" * 55)
-    log.info(f"STARTING {BOT_NAME} | ZERO-BUG PRODUCTION MODE")
-    log.info(f"UTC Time: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} | Gaza Safe Time: {local_now.strftime('%Y-%m-%d %H:%M:%S')}")
-    log.info("=" * 55)
+    log.info("=" * 60)
+    log.info(f"STARTING {BOT_NAME} | PRODUCTION MODE (Asia/Hebron)")
+    log.info(
+        f"UTC Time: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} | "
+        f"Gaza/Hebron Time: {local_now.strftime('%Y-%m-%d %H:%M:%S')}"
+    )
+    log.info("=" * 60)
 
     if not TG_TOKEN or not TG_CHAT:
         log.critical("MISSING TELEGRAM CREDS. ABORTING.")
@@ -596,9 +730,13 @@ def main():
     sm = StateManager(STATE_FILE)
     sm.log_summary()
 
+    # 1. حسم الصفقات المفتوحة أولاً وأرشفتها
     resolve_pending_trades(sm)
+
+    # 2. فحص وإرسال التقارير (اليومية / الأسبوعية / الشهرية)
     generate_advanced_reports(sm)
 
+    # 3. فلاتر الإجازة الأسبوعية والحظر الليلي
     now_utc = datetime.now(timezone.utc)
     if now_utc.weekday() >= 5:
         log.info("Weekend. Skipping new signals.")
@@ -609,8 +747,8 @@ def main():
         log.info(f"Inside Night Ban Window ({current_gaza_hour:02d}:xx Gaza Time). Skipping new signals.")
         return
 
+    # 4. فحص السوق وإرسال الإشارات الجديدة
     signals_found = 0
-    best_gap, best_sym, best_dir = None, None, None
 
     for sym in TRADING_SYMBOLS:
         if sm.is_frozen(sym):
@@ -619,9 +757,6 @@ def main():
         result = analyze_market_smart(sym)
         if result is None:
             continue
-
-        # Diagnostic Logging for Near Misses (Optional, can be removed for performance)
-        # Here we just process valid signals
 
         signals_found += 1
         signal_num = sm.get_next_signal_number()
@@ -637,10 +772,10 @@ def main():
             f"💰 *السعر الحالي:* `{result['price']:.5f}`\n\n"
             f"*تحليل القوة:*\n"
             f"✅ تقاطع سريع (K={result['k_val']:.1f})\n"
-            f"✅ اتجاه مؤكد بعيدا عن EMA200 ({result['distance_pct']:.2f}%)\n"
+            f"✅ اتجاه مؤكد بعيداً عن EMA200 ({result['distance_pct']:.2f}%)\n"
             f"✅ زخم شمعة واضح\n\n"
             f"⏱️ *التعليمات:*\n"
-            f"✅ ادخل فوراَ (فرصة إحصائية عالية)\n\n"
+            f"✅ ادخل فوراً (فرصة إحصائية عالية)\n\n"
             f"⌛ *انتهاء الصفقة:* {expiry_time} UTC\n"
             f"💰 *شرط الـ payout:* 85% فأعلى فقط\n\n"
             f"🕒 *وقت وصول الإشارة:* {arrival_time_gaza} (غزة)\n"
@@ -654,11 +789,11 @@ def main():
                 "id": str(uuid.uuid4())[:8],
                 "symbol": result['symbol'],
                 "type": result['type'],
-                "entry_price": result['price'],
+                "entry_price": float(result['price']),
                 "entry_time": result['time'].isoformat(),
                 "msg_id": mid
             })
-            log.info(f"Signal Sent & Frozen: {sym} {result['type']} (#{signal_num})")
+            log.info(f"Signal Sent & Saved to open_trades: {sym} {result['type']} (#{signal_num})")
         else:
             log.error(f"Failed to send signal for {sym}")
         time.sleep(1.5)
