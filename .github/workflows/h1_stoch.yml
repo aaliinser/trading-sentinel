@@ -1,25 +1,30 @@
-name: H1 Stochastic Bot (State Persistent v5.0 - Smart Sniper)
+name: H1 Stochastic Bot (State Persistent v5.1 - Smart Sniper)
 
 on:
-  # التشغيل عبر النبضات الخارجية من cron-job.org
   repository_dispatch:
     types: [trigger-h1-bot]
-  
-  # خيار احتياطي للتشغيل اليدوي إذا لزم الأمر
   workflow_dispatch:
+  schedule:
+    - cron: '2 * * * *'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: h1-smart-sniper-state-group
+  cancel-in-progress: false
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
-    
-    permissions:
-      contents: write # ★★ هام جداً: منح صلاحية الكتابة لحفظ ملف الحالة ★★
-      
+    timeout-minutes: 10
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          token: ${{ secrets.GITHUB_TOKEN }} # يستخدم توكن الوصول الافتراضي للمستودع
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
@@ -32,31 +37,34 @@ jobs:
           python -m pip install --upgrade pip
           pip install pandas numpy yfinance requests tzdata
 
-      - name: Run H1 Bot Script
+      - name: Clean Hidden Chars & Run H1 Bot Script
         env:
+          PYTHONUNBUFFERED: "1"
+          TZ: "Asia/Hebron"
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
           TG_CHAT: ${{ secrets.TG_CHAT }}
         run: |
-          echo "Starting H1 Smart Sniper Execution..."
+          python -c "p='h1_stoch_bot.py'; s=open(p,encoding='utf-8').read().replace('\u00a0',' ').replace('\u200b',''); open(p,'w',encoding='utf-8').write(s)"
           python h1_stoch_bot.py
-          echo "Execution Finished."
 
-      # ★★ الخطوة الحاسمة: حفظ حالة البوت ومنع التكرار ★★
-      - name: Persist bot state (commit & push)
-        if: always() # تنفذ هذه الخطوة حتى لو فشل السكربت السابق قليلاََ
+      - name: Persist bot state (Safe Pull, Commit & Push)
+        if: always()
         run: |
-          git config user.name github-actions
-          git config user.email github-actions@github.com
-          
-          # إضافة ملف الحالة الجديد فقط
-          git add state_h1_smart_sniper_v5.json || true
-          
-          # محاولة الالتزام (Commit). إذا لم يتغير شيء، لن يفعل شيئاً.
-          git commit -m "chore: auto-persist H1 bot state [skip ci]" || echo "No changes to commit"
-          
-          # الدفع للمستودع مع إعادة المحاولة عند التعارض
-          git push || {
-            echo "Push failed, trying pull-rebase-push..."
-            git pull --rebase origin main
-            git push
-          }
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          if [ -f "state_h1_smart_sniper_v5.json" ]; then
+            git add state_h1_smart_sniper_v5.json
+          fi
+
+          if git diff --cached --quiet; then
+            echo ">>> State unchanged. No commit needed."
+          else
+            git commit -m "chore: auto-persist H1 bot state [skip ci]"
+            for i in 1 2 3; do
+              git pull --rebase --autostash origin ${{ github.ref_name }} && git push origin HEAD:${{ github.ref_name }} && break
+              echo ">>> Push retry $i..."
+              sleep 3
+            done
+            echo ">>> State persisted successfully."
+          fi
