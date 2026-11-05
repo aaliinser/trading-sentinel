@@ -1,26 +1,6 @@
 {
-  "frozen_pairs": {
-    "GBPJPY=X": "2026-11-05T14:00:00+00:00",
-    "GBPCAD=X": "2026-11-05T14:00:00+00:00"
-  },
-  "open_trades": [
-    {
-      "id": "5acf5075",
-      "symbol": "GBPJPY=X",
-      "type": "CALL",
-      "entry_price": 213.3179931640625,
-      "entry_time": "2026-11-05T12:00:00+00:00",
-      "msg_id": true
-    },
-    {
-      "id": "9eecb327",
-      "symbol": "GBPCAD=X",
-      "type": "CALL",
-      "entry_price": 1.8812400102615356,
-      "entry_time": "2026-11-05T12:00:00+00:00",
-      "msg_id": true
-    }
-  ],
+  "frozen_pairs": {},
+  "open_trades": [],
   "trade_history": [
     {
       "id": "52b0c74f",
@@ -252,6 +232,28 @@
       "exit_time": "2026-11-05T13:00:00+00:00",
       "win": true,
       "pips": 3.5
+    },
+    {
+      "id": "5acf5075",
+      "symbol": "GBPJPY=X",
+      "type": "CALL",
+      "entry_price": 213.3179931640625,
+      "exit_price": 213.24600219726562,
+      "entry_time": "2026-11-05T12:00:00+00:00",
+      "exit_time": "2026-11-05T14:00:00+00:00",
+      "win": false,
+      "pips": 7.2
+    },
+    {
+      "id": "9eecb327",
+      "symbol": "GBPCAD=X",
+      "type": "CALL",
+      "entry_price": 1.8812400102615356,
+      "exit_price": 1.8818600177764893,
+      "entry_time": "2026-11-05T12:00:00+00:00",
+      "exit_time": "2026-11-05T14:00:00+00:00",
+      "win": true,
+      "pips": 6.2
     }
   ],
   "daily_counter_date": "2026-11-05",
