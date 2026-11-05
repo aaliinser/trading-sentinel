@@ -1,6 +1,26 @@
 {
-  "frozen_pairs": {},
-  "open_trades": [],
+  "frozen_pairs": {
+    "AUDUSD=X": "2026-11-05T08:00:00+00:00",
+    "AUDJPY=X": "2026-11-05T08:00:00+00:00"
+  },
+  "open_trades": [
+    {
+      "id": "2c6b7987",
+      "symbol": "AUDUSD=X",
+      "type": "CALL",
+      "entry_price": 0.7022964954376221,
+      "entry_time": "2026-11-05T06:00:00+00:00",
+      "msg_id": true
+    },
+    {
+      "id": "39ac2830",
+      "symbol": "AUDJPY=X",
+      "type": "CALL",
+      "entry_price": 110.83699798583984,
+      "entry_time": "2026-11-05T06:00:00+00:00",
+      "msg_id": true
+    }
+  ],
   "trade_history": [
     {
       "id": "52b0c74f",
@@ -157,8 +177,8 @@
       "pips": 3.2
     }
   ],
-  "daily_counter_date": "2026-11-04",
-  "daily_signal_count": 14,
+  "daily_counter_date": "2026-11-05",
+  "daily_signal_count": 2,
   "last_daily_report": "2026-11-04",
   "last_weekly_report": "",
   "last_monthly_report": ""
