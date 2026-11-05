@@ -1,6 +1,26 @@
 {
-  "frozen_pairs": {},
-  "open_trades": [],
+  "frozen_pairs": {
+    "GBPJPY=X": "2026-11-05T21:00:00+00:00",
+    "CHFJPY=X": "2026-11-05T21:00:00+00:00"
+  },
+  "open_trades": [
+    {
+      "id": "58b5f5a4",
+      "symbol": "GBPJPY=X",
+      "type": "CALL",
+      "entry_price": 212.42799377441406,
+      "entry_time": "2026-11-05T19:00:00+00:00",
+      "msg_id": true
+    },
+    {
+      "id": "af20e962",
+      "symbol": "CHFJPY=X",
+      "type": "CALL",
+      "entry_price": 193.30599975585938,
+      "entry_time": "2026-11-05T19:00:00+00:00",
+      "msg_id": true
+    }
+  ],
   "trade_history": [
     {
       "id": "52b0c74f",
@@ -268,7 +288,7 @@
     }
   ],
   "daily_counter_date": "2026-11-05",
-  "daily_signal_count": 10,
+  "daily_signal_count": 12,
   "last_daily_report": "2026-11-04",
   "last_weekly_report": "",
   "last_monthly_report": ""
