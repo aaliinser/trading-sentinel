@@ -1,8 +1,5 @@
 {
-  "frozen_pairs": {
-    "EURGBP=X": "2026-11-06T08:00:00+00:00",
-    "GBPJPY=X": "2026-11-06T08:00:00+00:00"
-  },
+  "frozen_pairs": {},
   "open_trades": [
     {
       "id": "240cd5ce",
