@@ -1,6 +1,26 @@
 {
-  "frozen_pairs": {},
-  "open_trades": [],
+  "frozen_pairs": {
+    "EURGBP=X": "2026-11-06T08:00:00+00:00",
+    "GBPJPY=X": "2026-11-06T08:00:00+00:00"
+  },
+  "open_trades": [
+    {
+      "id": "240cd5ce",
+      "symbol": "EURGBP=X",
+      "type": "PUT",
+      "entry_price": 0.8335199952125549,
+      "entry_time": "2026-11-06T06:00:00+00:00",
+      "msg_id": true
+    },
+    {
+      "id": "559300a0",
+      "symbol": "GBPJPY=X",
+      "type": "CALL",
+      "entry_price": 212.13499450683594,
+      "entry_time": "2026-11-06T06:00:00+00:00",
+      "msg_id": true
+    }
+  ],
   "trade_history": [
     {
       "id": "52b0c74f",
@@ -289,8 +309,8 @@
       "pips": 18.6
     }
   ],
-  "daily_counter_date": "2026-11-05",
-  "daily_signal_count": 12,
+  "daily_counter_date": "2026-11-06",
+  "daily_signal_count": 2,
   "last_daily_report": "2026-11-05",
   "last_weekly_report": "",
   "last_monthly_report": ""
