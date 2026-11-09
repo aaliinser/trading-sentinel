@@ -1,6 +1,26 @@
 {
-  "frozen_pairs": {},
-  "open_trades": [],
+  "frozen_pairs": {
+    "USDJPY=X": "2026-11-09T10:00:00+00:00",
+    "GBPJPY=X": "2026-11-09T10:00:00+00:00"
+  },
+  "open_trades": [
+    {
+      "id": "dc3553df",
+      "symbol": "USDJPY=X",
+      "type": "CALL",
+      "entry_price": 158.08399963378906,
+      "entry_time": "2026-11-09T08:00:00+00:00",
+      "msg_id": true
+    },
+    {
+      "id": "49f21a91",
+      "symbol": "GBPJPY=X",
+      "type": "CALL",
+      "entry_price": 211.98199462890625,
+      "entry_time": "2026-11-09T08:00:00+00:00",
+      "msg_id": true
+    }
+  ],
   "trade_history": [
     {
       "id": "52b0c74f",
@@ -389,7 +409,7 @@
     }
   ],
   "daily_counter_date": "2026-11-09",
-  "daily_signal_count": 3,
+  "daily_signal_count": 5,
   "last_daily_report": "2026-11-08",
   "last_weekly_report": "2026-W44",
   "last_monthly_report": ""
