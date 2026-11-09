@@ -4,14 +4,6 @@
   },
   "open_trades": [
     {
-      "id": "4d7cd168",
-      "symbol": "EURCHF=X",
-      "type": "PUT",
-      "entry_price": 0.9168499708175659,
-      "entry_time": "2026-11-09T13:00:00+00:00",
-      "msg_id": true
-    },
-    {
       "id": "a4701584",
       "symbol": "NZDUSD=X",
       "type": "PUT",
@@ -460,6 +452,17 @@
       "exit_time": "2026-11-09T12:00:00+00:00",
       "win": true,
       "pips": 6.0
+    },
+    {
+      "id": "4d7cd168",
+      "symbol": "EURCHF=X",
+      "type": "PUT",
+      "entry_price": 0.9168499708175659,
+      "exit_price": 0.9198399782180786,
+      "entry_time": "2026-11-09T13:00:00+00:00",
+      "exit_time": "2026-11-09T15:00:00+00:00",
+      "win": false,
+      "pips": 29.9
     }
   ],
   "daily_counter_date": "2026-11-09",
