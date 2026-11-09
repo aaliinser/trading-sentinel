@@ -1,6 +1,35 @@
 {
-  "frozen_pairs": {},
-  "open_trades": [],
+  "frozen_pairs": {
+    "EURUSD=X": "2026-11-09T08:00:00+00:00",
+    "GBPUSD=X": "2026-11-09T08:00:00+00:00",
+    "NZDUSD=X": "2026-11-09T08:00:00+00:00"
+  },
+  "open_trades": [
+    {
+      "id": "755ae718",
+      "symbol": "EURUSD=X",
+      "type": "PUT",
+      "entry_price": 1.1168192625045776,
+      "entry_time": "2026-11-09T06:00:00+00:00",
+      "msg_id": true
+    },
+    {
+      "id": "7fd0f00e",
+      "symbol": "GBPUSD=X",
+      "type": "PUT",
+      "entry_price": 1.3385984897613525,
+      "entry_time": "2026-11-09T06:00:00+00:00",
+      "msg_id": true
+    },
+    {
+      "id": "04807009",
+      "symbol": "NZDUSD=X",
+      "type": "PUT",
+      "entry_price": 0.5596910715103149,
+      "entry_time": "2026-11-09T06:00:00+00:00",
+      "msg_id": true
+    }
+  ],
   "trade_history": [
     {
       "id": "52b0c74f",
@@ -355,8 +384,8 @@
       "pips": 1.0
     }
   ],
-  "daily_counter_date": "2026-11-06",
-  "daily_signal_count": 6,
+  "daily_counter_date": "2026-11-09",
+  "daily_signal_count": 3,
   "last_daily_report": "2026-11-08",
   "last_weekly_report": "2026-W44",
   "last_monthly_report": ""
