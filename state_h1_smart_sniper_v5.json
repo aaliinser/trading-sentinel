@@ -1,15 +1,6 @@
 {
   "frozen_pairs": {},
-  "open_trades": [
-    {
-      "id": "f0a4653b",
-      "symbol": "AUDJPY=X",
-      "type": "PUT",
-      "entry_price": 109.23799896240234,
-      "entry_time": "2026-11-09T18:00:00+00:00",
-      "msg_id": true
-    }
-  ],
+  "open_trades": [],
   "trade_history": [
     {
       "id": "52b0c74f",
@@ -505,6 +496,17 @@
       "exit_time": "2026-11-09T19:00:00+00:00",
       "win": true,
       "pips": 2.39
+    },
+    {
+      "id": "f0a4653b",
+      "symbol": "AUDJPY=X",
+      "type": "PUT",
+      "entry_price": 109.23799896240234,
+      "exit_price": 109.2249984741211,
+      "entry_time": "2026-11-09T18:00:00+00:00",
+      "exit_time": "2026-11-09T20:00:00+00:00",
+      "win": true,
+      "pips": 1.3
     }
   ],
   "daily_counter_date": "2026-11-09",
