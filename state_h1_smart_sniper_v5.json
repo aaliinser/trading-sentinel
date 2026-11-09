@@ -1,6 +1,6 @@
 {
   "frozen_pairs": {
-    "EURCHF=X": "2026-11-09T15:00:00+00:00"
+    "NZDUSD=X": "2026-11-09T16:00:00+00:00"
   },
   "open_trades": [
     {
@@ -9,6 +9,14 @@
       "type": "PUT",
       "entry_price": 0.9168499708175659,
       "entry_time": "2026-11-09T13:00:00+00:00",
+      "msg_id": true
+    },
+    {
+      "id": "a4701584",
+      "symbol": "NZDUSD=X",
+      "type": "PUT",
+      "entry_price": 0.5611042380332947,
+      "entry_time": "2026-11-09T14:00:00+00:00",
       "msg_id": true
     }
   ],
@@ -455,7 +463,7 @@
     }
   ],
   "daily_counter_date": "2026-11-09",
-  "daily_signal_count": 9,
+  "daily_signal_count": 10,
   "last_daily_report": "2026-11-08",
   "last_weekly_report": "2026-W44",
   "last_monthly_report": ""
