@@ -1,7 +1,5 @@
 {
-  "frozen_pairs": {
-    "GBPCAD=X": "2026-11-10T20:00:00+00:00"
-  },
+  "frozen_pairs": {},
   "open_trades": [
     {
       "id": "2c6325f5",
