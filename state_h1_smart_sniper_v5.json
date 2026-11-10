@@ -4,14 +4,6 @@
   },
   "open_trades": [
     {
-      "id": "53e03597",
-      "symbol": "GBPJPY=X",
-      "type": "CALL",
-      "entry_price": 212.343994140625,
-      "entry_time": "2026-11-10T10:00:00+00:00",
-      "msg_id": true
-    },
-    {
       "id": "1bbde1bb",
       "symbol": "NZDUSD=X",
       "type": "CALL",
@@ -559,6 +551,17 @@
       "exit_time": "2026-11-10T11:00:00+00:00",
       "win": true,
       "pips": 2.39
+    },
+    {
+      "id": "53e03597",
+      "symbol": "GBPJPY=X",
+      "type": "CALL",
+      "entry_price": 212.343994140625,
+      "exit_price": 212.3699951171875,
+      "entry_time": "2026-11-10T10:00:00+00:00",
+      "exit_time": "2026-11-10T12:00:00+00:00",
+      "win": true,
+      "pips": 2.6
     }
   ],
   "daily_counter_date": "2026-11-10",
