@@ -1,6 +1,6 @@
 {
   "frozen_pairs": {
-    "NZDUSD=X": "2026-11-10T13:00:00+00:00"
+    "CADJPY=X": "2026-11-10T14:00:00+00:00"
   },
   "open_trades": [
     {
@@ -9,6 +9,14 @@
       "type": "CALL",
       "entry_price": 0.5632850527763367,
       "entry_time": "2026-11-10T11:00:00+00:00",
+      "msg_id": true
+    },
+    {
+      "id": "df79d933",
+      "symbol": "CADJPY=X",
+      "type": "PUT",
+      "entry_price": 111.90299987792969,
+      "entry_time": "2026-11-10T12:00:00+00:00",
       "msg_id": true
     }
   ],
@@ -565,7 +573,7 @@
     }
   ],
   "daily_counter_date": "2026-11-10",
-  "daily_signal_count": 5,
+  "daily_signal_count": 6,
   "last_daily_report": "2026-11-09",
   "last_weekly_report": "2026-W44",
   "last_monthly_report": ""
