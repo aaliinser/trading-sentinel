@@ -1,6 +1,6 @@
 {
   "frozen_pairs": {
-    "AUDUSD=X": "2026-11-10T11:00:00+00:00"
+    "GBPJPY=X": "2026-11-10T12:00:00+00:00"
   },
   "open_trades": [
     {
@@ -9,6 +9,14 @@
       "type": "PUT",
       "entry_price": 0.6916107535362244,
       "entry_time": "2026-11-10T09:00:00+00:00",
+      "msg_id": true
+    },
+    {
+      "id": "53e03597",
+      "symbol": "GBPJPY=X",
+      "type": "CALL",
+      "entry_price": 212.343994140625,
+      "entry_time": "2026-11-10T10:00:00+00:00",
       "msg_id": true
     }
   ],
@@ -543,7 +551,7 @@
     }
   ],
   "daily_counter_date": "2026-11-10",
-  "daily_signal_count": 3,
+  "daily_signal_count": 4,
   "last_daily_report": "2026-11-09",
   "last_weekly_report": "2026-W44",
   "last_monthly_report": ""
