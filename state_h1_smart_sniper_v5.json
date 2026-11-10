@@ -1,8 +1,5 @@
 {
-  "frozen_pairs": {
-    "AUDUSD=X": "2026-11-10T08:00:00+00:00",
-    "AUDJPY=X": "2026-11-10T08:00:00+00:00"
-  },
+  "frozen_pairs": {},
   "open_trades": [
     {
       "id": "2e584f9b",
