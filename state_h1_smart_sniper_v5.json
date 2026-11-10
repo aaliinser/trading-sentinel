@@ -1,15 +1,6 @@
 {
   "frozen_pairs": {},
-  "open_trades": [
-    {
-      "id": "df79d933",
-      "symbol": "CADJPY=X",
-      "type": "PUT",
-      "entry_price": 111.90299987792969,
-      "entry_time": "2026-11-10T12:00:00+00:00",
-      "msg_id": true
-    }
-  ],
+  "open_trades": [],
   "trade_history": [
     {
       "id": "52b0c74f",
@@ -571,6 +562,17 @@
       "exit_time": "2026-11-10T13:00:00+00:00",
       "win": false,
       "pips": 2.22
+    },
+    {
+      "id": "df79d933",
+      "symbol": "CADJPY=X",
+      "type": "PUT",
+      "entry_price": 111.90299987792969,
+      "exit_price": 111.84600067138672,
+      "entry_time": "2026-11-10T12:00:00+00:00",
+      "exit_time": "2026-11-10T14:00:00+00:00",
+      "win": true,
+      "pips": 5.7
     }
   ],
   "daily_counter_date": "2026-11-10",
