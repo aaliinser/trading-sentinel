@@ -1,19 +1,20 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-H1 Stochastic Ultimate Bot - v6.0 (Smart Sniper · Full Analytics Edition)
-التطويرات المطلوبة في v6.0:
+H1 Stochastic Ultimate Bot - v6.1 (Smart Sniper · Full Analytics · Audited)
+التطويرات المطلوبة:
 1. عرض الزوج بصيغة قابلة للنسخ (GBP/JPY) في كل رسائل تيليجرام — دون تغيير الرموز الداخلية.
 2. تقارير ثلاثية كاملة: يومي + أسبوعي + شهري بتوقيت Asia/Hebron مع منع التكرار.
 3. تحليل أفضل/أسوأ زوج + تحليل أفضل/أسوأ ساعة تداول (توقيت غزة).
-4. استراتيجية "الصفقة الأولى يومياً": محاكاة شهرية لصفقة واحدة كل يوم مع سجل الأيام
+4. استراتيجية "الصفقة الأولى يومياً": محاكاة لصفقة واحدة كل يوم مع سجل الأيام
    وأطول سلاسل الربح/الخسارة ومحاكاة رأس المال.
-الإصلاحات الهندسية المرافقة (دون لمس الاستراتيجية):
-أ. قاعدة DST الاحتياطية: حساب "آخر سبت" صحيح رياضياً لكل السنوات.
-ب. بوابة نهاية الأسبوع بتوقيت غزة بدل UTC.
-ج. تقسيم الرسائل الطويلة تلقائياً لتجاوز حد تيليجرام (4096 حرفاً).
-د. تحصين قراءة الحالة ضد السجلات التالفة، ورفع سقف الأرشيف إلى 5000 صفقة.
-هـ. حذف الشموع الجارية بحلقة while بدل شرط واحد (ضمان إغلاق مؤكد).
+الإصلاحات الهندسية في v6.1 (نتيجة الفحص المنهجي — دون لمس الاستراتيجية):
+أ. _split_message: تقسيم مضمون حتى لو كان سطر واحد أطول من الحد (يمنع رفض تيليجرام 400).
+ب. حرّاس نوع الحالة: قبول الأرقام العشرية/النصية ورفض bool بدل تصفير البيانات.
+ج. سقف الأرشيف 20000 صفقة ليغطي الشهر كاملاً بأسوأ سيناريو (16 زوج × 15 ساعة × 22 يوم).
+د. قاعدة DST الاحتياطية: حساب "آخر سبت" صحيح رياضياً لكل السنوات.
+هـ. بوابة نهاية الأسبوع بتوقيت غزة بدل UTC.
+و. حذف الشموع الجارية بحلقة while لضمان إغلاق مؤكد.
 """
 import os
 import sys
@@ -86,7 +87,7 @@ def format_pair(symbol: str) -> str:
 # ═══════════════════════════════════════════════
 # 1. الإعدادات العامة
 # ═══════════════════════════════════════════════
-BOT_NAME = "H1_Smart_Sniper_V6_0"
+BOT_NAME = "H1_Smart_Sniper_V6_1"
 STATE_FILE = "state_h1_smart_sniper_v5.json"
 LOG_LEVEL = logging.INFO
 
@@ -118,6 +119,7 @@ RISK_PER_TRADE_USD = 10.0
 PAYOUT_RATE = 0.85
 
 TG_MAX_LEN = 3800
+HISTORY_CAP = 20000
 
 TG_TOKEN = os.getenv("TG_TOKEN", "").strip()
 TG_CHAT = os.getenv("TG_CHAT", "").strip()
@@ -135,12 +137,21 @@ log = logging.getLogger(BOT_NAME)
 # ═══════════════════════════════════════════════
 
 def _split_message(msg: str, limit: int = TG_MAX_LEN) -> list:
-    """تقسيم الرسالة الطويلة على أسطر لتجاوز حد تيليجرام دون كسر تنسيق Markdown."""
+    """
+    تقسيم الرسالة الطويلة مع ضمان ألا يتجاوز أي جزء الحد إطلاقاً،
+    حتى لو كان سطر واحد بمفرده أطول من الحد (الإصلاح أ).
+    """
     if len(msg) <= limit:
         return [msg]
     parts = []
     cur = ""
     for line in msg.split("\n"):
+        while len(line) > limit:
+            if cur:
+                parts.append(cur)
+                cur = ""
+            parts.append(line[:limit])
+            line = line[limit:]
         if len(cur) + len(line) + 1 > limit:
             if cur:
                 parts.append(cur)
@@ -216,10 +227,21 @@ class StateManager:
             try:
                 with open(self.filepath, 'r', encoding='utf-8') as f:
                     loaded_data = json.load(f)
+                # ★ الإصلاح (ب): حرّاس نوع متسامح مع الأرقام العشرية/النصية ويرفض bool
                 if isinstance(loaded_data, dict):
                     for key, default_val in self.defaults.items():
-                        if key in loaded_data and isinstance(loaded_data[key], type(default_val)):
-                            self.data[key] = loaded_data[key]
+                        if key not in loaded_data:
+                            continue
+                        val = loaded_data[key]
+                        if isinstance(default_val, int) and not isinstance(default_val, bool):
+                            if isinstance(val, bool):
+                                continue
+                            try:
+                                self.data[key] = int(float(val))
+                            except (TypeError, ValueError):
+                                pass
+                        elif isinstance(val, type(default_val)):
+                            self.data[key] = val
                 self.cleanup_expired_freezes()
                 log.info(f"State loaded successfully from {self.filepath}")
             except Exception as e:
@@ -306,8 +328,9 @@ class StateManager:
 
     def archive_trade(self, result: dict):
         self.data["trade_history"].append(result)
-        if len(self.data["trade_history"]) > 5000:
-            self.data["trade_history"] = self.data["trade_history"][-5000:]
+        # ★ الإصلاح (ج): سقف يغطي الشهر كاملاً بأسوأ سيناريو
+        if len(self.data["trade_history"]) > HISTORY_CAP:
+            self.data["trade_history"] = self.data["trade_history"][-HISTORY_CAP:]
         self.save()
 
 
@@ -566,7 +589,7 @@ AR_DAYS = {
 }
 
 
-def _to_utc_dt(value) -> datetime:
+def _to_utc_dt(value):
     try:
         d = pd.to_datetime(str(value), errors='coerce', utc=True)
         if pd.isna(d):
