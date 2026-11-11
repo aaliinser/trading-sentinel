@@ -5,22 +5,6 @@
   },
   "open_trades": [
     {
-      "id": "c6679e32",
-      "symbol": "EURGBP=X",
-      "type": "CALL",
-      "entry_price": 0.8362900018692017,
-      "entry_time": "2026-11-11T10:00:00+00:00",
-      "msg_id": true
-    },
-    {
-      "id": "acbe2fb9",
-      "symbol": "AUDNZD=X",
-      "type": "PUT",
-      "entry_price": 1.2286200523376465,
-      "entry_time": "2026-11-11T10:00:00+00:00",
-      "msg_id": true
-    },
-    {
       "id": "f432058e",
       "symbol": "AUDJPY=X",
       "type": "PUT",
@@ -631,6 +615,28 @@
       "exit_time": "2026-11-10T20:00:00+00:00",
       "win": true,
       "pips": 3.3
+    },
+    {
+      "id": "c6679e32",
+      "symbol": "EURGBP=X",
+      "type": "CALL",
+      "entry_price": 0.8362900018692017,
+      "exit_price": 0.8366400003433228,
+      "entry_time": "2026-11-11T10:00:00+00:00",
+      "exit_time": "2026-11-11T12:00:00+00:00",
+      "win": true,
+      "pips": 3.5
+    },
+    {
+      "id": "acbe2fb9",
+      "symbol": "AUDNZD=X",
+      "type": "PUT",
+      "entry_price": 1.2286200523376465,
+      "exit_price": 1.2281399965286255,
+      "entry_time": "2026-11-11T10:00:00+00:00",
+      "exit_time": "2026-11-11T12:00:00+00:00",
+      "win": true,
+      "pips": 4.8
     }
   ],
   "daily_counter_date": "2026-11-11",
