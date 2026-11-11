@@ -1,6 +1,26 @@
 {
-  "frozen_pairs": {},
-  "open_trades": [],
+  "frozen_pairs": {
+    "EURGBP=X": "2026-11-11T12:00:00+00:00",
+    "AUDNZD=X": "2026-11-11T12:00:00+00:00"
+  },
+  "open_trades": [
+    {
+      "id": "c6679e32",
+      "symbol": "EURGBP=X",
+      "type": "CALL",
+      "entry_price": 0.8362900018692017,
+      "entry_time": "2026-11-11T10:00:00+00:00",
+      "msg_id": true
+    },
+    {
+      "id": "acbe2fb9",
+      "symbol": "AUDNZD=X",
+      "type": "PUT",
+      "entry_price": 1.2286200523376465,
+      "entry_time": "2026-11-11T10:00:00+00:00",
+      "msg_id": true
+    }
+  ],
   "trade_history": [
     {
       "id": "52b0c74f",
@@ -597,8 +617,8 @@
       "pips": 3.3
     }
   ],
-  "daily_counter_date": "2026-11-10",
-  "daily_signal_count": 8,
+  "daily_counter_date": "2026-11-11",
+  "daily_signal_count": 2,
   "last_daily_report": "2026-11-10",
   "last_weekly_report": "2026-W44",
   "last_monthly_report": ""
