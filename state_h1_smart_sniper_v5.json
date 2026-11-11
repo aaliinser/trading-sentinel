@@ -1,6 +1,26 @@
 {
-  "frozen_pairs": {},
-  "open_trades": [],
+  "frozen_pairs": {
+    "AUDJPY=X": "2026-11-11T17:00:00+00:00",
+    "GBPCAD=X": "2026-11-11T17:00:00+00:00"
+  },
+  "open_trades": [
+    {
+      "id": "ea55a653",
+      "symbol": "AUDJPY=X",
+      "type": "PUT",
+      "entry_price": 109.51200103759766,
+      "entry_time": "2026-11-11T15:00:00+00:00",
+      "signal_sent": true
+    },
+    {
+      "id": "fb3a5352",
+      "symbol": "GBPCAD=X",
+      "type": "CALL",
+      "entry_price": 1.891129970550537,
+      "entry_time": "2026-11-11T15:00:00+00:00",
+      "signal_sent": true
+    }
+  ],
   "trade_history": [
     {
       "id": "52b0c74f",
@@ -642,7 +662,7 @@
     }
   ],
   "daily_counter_date": "2026-11-11",
-  "daily_signal_count": 4,
+  "daily_signal_count": 6,
   "last_daily_report": "2026-11-10",
   "last_weekly_report": "2026-W44",
   "last_monthly_report": ""
