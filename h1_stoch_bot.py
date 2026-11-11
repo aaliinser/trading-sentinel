@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-H1 Stochastic Ultimate Bot - v6.1 (Smart Sniper · Full Analytics · Audited)
+H1 Stochastic Ultimate Bot - v6.2 (Smart Sniper · Live Price & Drift Edition)
 التطويرات المطلوبة:
 1. عرض الزوج بصيغة قابلة للنسخ (GBP/JPY) في كل رسائل تيليجرام — دون تغيير الرموز الداخلية.
 2. تقارير ثلاثية كاملة: يومي + أسبوعي + شهري بتوقيت Asia/Hebron مع منع التكرار.
 3. تحليل أفضل/أسوأ زوج + تحليل أفضل/أسوأ ساعة تداول (توقيت غزة).
 4. استراتيجية "الصفقة الأولى يومياً": محاكاة لصفقة واحدة كل يوم مع سجل الأيام
    وأطول سلاسل الربح/الخسارة ومحاكاة رأس المال.
-الإصلاحات الهندسية في v6.1 (نتيجة الفحص المنهجي — دون لمس الاستراتيجية):
-أ. _split_message: تقسيم مضمون حتى لو كان سطر واحد أطول من الحد (يمنع رفض تيليجرام 400).
+5. ★ جديد في v6.2: عرض السعر اللحظي والانجراف بالنقاط داخل رسالة الإشارة،
+   مع تحذير بصري إذا ابتعد السعر ضد اتجاه الصفقة (للعرض فقط — لا يمس الدخول ولا الحسم).
+الإصلاحات الهندسية المرافقة (دون لمس الاستراتيجية):
+أ. _split_message: تقسيم مضمون حتى لو كان سطر واحد أطول من الحد.
 ب. حرّاس نوع الحالة: قبول الأرقام العشرية/النصية ورفض bool بدل تصفير البيانات.
-ج. سقف الأرشيف 20000 صفقة ليغطي الشهر كاملاً بأسوأ سيناريو (16 زوج × 15 ساعة × 22 يوم).
+ج. سقف الأرشيف 20000 صفقة ليغطي الشهر كاملاً بأسوأ سيناريو.
 د. قاعدة DST الاحتياطية: حساب "آخر سبت" صحيح رياضياً لكل السنوات.
 هـ. بوابة نهاية الأسبوع بتوقيت غزة بدل UTC.
 و. حذف الشموع الجارية بحلقة while لضمان إغلاق مؤكد.
@@ -84,10 +86,50 @@ def format_pair(symbol: str) -> str:
         return str(symbol)
 
 
+def get_live_price(symbol: str):
+    """
+    ★ جديد: جلب السعر اللحظي من آخر شمعة دقيقة — للعرض فقط.
+    يُرجع None بأمان عند أي فشل (شبكة / بيانات فارغة / قيمة غير صالحة).
+    """
+    try:
+        df = yf.Ticker(symbol).history(period="1d", interval="1m",
+                                       auto_adjust=False, actions=False)
+        if df is None or df.empty:
+            return None
+        val = float(df['Close'].iloc[-1])
+        if not np.isfinite(val) or val <= 0:
+            return None
+        return val
+    except Exception:
+        return None
+
+
+def build_drift_text(live_px, signal_px: float, symbol: str, signal_type: str):
+    """
+    ★ جديد: حساب الانجراف بالنقاط بين سعر الإشارة والسعر الحالي.
+    موجب = السعر تحرك لصالح اتجاه الصفقة | سالب = ابتعد ضد الاتجاه.
+    يُرجع (نص العرض، قيمة الانجراف أو None).
+    """
+    if live_px is None:
+        return "_غير متاح_", None
+    try:
+        pip_mult = 100.0 if "JPY" in symbol else 10000.0
+        raw = (float(live_px) - float(signal_px)) * pip_mult
+        drift = raw if signal_type == "CALL" else -raw
+        txt = f"`{live_px:.5f}` (انجراف: `{drift:+.1f}` نقطة)"
+        if drift < -DRIFT_WARN_PIPS:
+            txt += " ⚠️ _السعر ابتعد ضد الاتجاه — يُفضّل التجاهل_"
+        elif drift > DRIFT_WARN_PIPS:
+            txt += " ℹ️ _السعر تحرك لصالح الاتجاه مسبقاً_"
+        return txt, round(drift, 1)
+    except Exception:
+        return "_غير متاح_", None
+
+
 # ═══════════════════════════════════════════════
 # 1. الإعدادات العامة
 # ═══════════════════════════════════════════════
-BOT_NAME = "H1_Smart_Sniper_V6_1"
+BOT_NAME = "H1_Smart_Sniper_V6_2"
 STATE_FILE = "state_h1_smart_sniper_v5.json"
 LOG_LEVEL = logging.INFO
 
@@ -118,6 +160,9 @@ TRADE_DURATION_MINUTES = 60
 RISK_PER_TRADE_USD = 10.0
 PAYOUT_RATE = 0.85
 
+# ★ جديد: حد التحذير البصري للانجراف (بالنقاط) — تحذير فقط ولا يمنع الإرسال
+DRIFT_WARN_PIPS = 8.0
+
 TG_MAX_LEN = 3800
 HISTORY_CAP = 20000
 
@@ -139,7 +184,7 @@ log = logging.getLogger(BOT_NAME)
 def _split_message(msg: str, limit: int = TG_MAX_LEN) -> list:
     """
     تقسيم الرسالة الطويلة مع ضمان ألا يتجاوز أي جزء الحد إطلاقاً،
-    حتى لو كان سطر واحد بمفرده أطول من الحد (الإصلاح أ).
+    حتى لو كان سطر واحد بمفرده أطول من الحد.
     """
     if len(msg) <= limit:
         return [msg]
@@ -227,7 +272,6 @@ class StateManager:
             try:
                 with open(self.filepath, 'r', encoding='utf-8') as f:
                     loaded_data = json.load(f)
-                # ★ الإصلاح (ب): حرّاس نوع متسامح مع الأرقام العشرية/النصية ويرفض bool
                 if isinstance(loaded_data, dict):
                     for key, default_val in self.defaults.items():
                         if key not in loaded_data:
@@ -328,7 +372,6 @@ class StateManager:
 
     def archive_trade(self, result: dict):
         self.data["trade_history"].append(result)
-        # ★ الإصلاح (ج): سقف يغطي الشهر كاملاً بأسوأ سيناريو
         if len(self.data["trade_history"]) > HISTORY_CAP:
             self.data["trade_history"] = self.data["trade_history"][-HISTORY_CAP:]
         self.save()
@@ -944,11 +987,20 @@ def main():
         arrow = "🟢 CALL (صعود)" if result['type'] == "CALL" else "🔴 PUT (هبوط)"
         expiry_time = (result['time'] + timedelta(minutes=TRADE_DURATION_MINUTES * 2)).strftime("%H:%M")
 
+        # ★ جديد: جلب السعر اللحظي وحساب الانجراف (للعرض فقط)
+        live_px = get_live_price(sym)
+        drift_txt, drift_val = build_drift_text(live_px, result['price'], sym, result['type'])
+        if drift_val is not None:
+            log.info(f"{sym} {result['type']} | signal={result['price']:.5f} live={live_px:.5f} drift={drift_val:+.1f} pips")
+        else:
+            log.info(f"{sym} {result['type']} | live price unavailable (display only)")
+
         msg = (
             f"*⚡ إشارة H1 SMART SNIPER #{signal_num}*\n\n"
             f"📊 *الزوج:* `{format_pair(result['symbol'])}`\n"
             f"📈 *الاتجاه:* {arrow}\n"
-            f"💰 *السعر الحالي:* `{result['price']:.5f}`\n\n"
+            f"💰 *سعر الإشارة (إغلاق الشمعة):* `{result['price']:.5f}`\n"
+            f"⚡ *السعر الآن:* {drift_txt}\n\n"
             f"*تحليل القوة:*\n"
             f"✅ تقاطع سريع (K={result['k_val']:.1f})\n"
             f"✅ اتجاه مؤكد بعيداً عن EMA200 ({result['distance_pct']:.2f}%)\n"
