@@ -4,8 +4,6 @@ on:
   repository_dispatch:
     types: [trigger-h1-bot]
   workflow_dispatch:
-  schedule:
-    - cron: '2 * * * *'
 
 permissions:
   contents: write
