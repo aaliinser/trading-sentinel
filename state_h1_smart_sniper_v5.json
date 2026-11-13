@@ -1,26 +1,6 @@
 {
-  "frozen_pairs": {
-    "AUDJPY=X": "2026-11-13T14:00:00+00:00",
-    "EURAUD=X": "2026-11-13T14:00:00+00:00"
-  },
-  "open_trades": [
-    {
-      "id": "f39fabb4",
-      "symbol": "AUDJPY=X",
-      "type": "PUT",
-      "entry_price": 108.56900024414062,
-      "entry_time": "2026-11-13T12:00:00+00:00",
-      "signal_sent": true
-    },
-    {
-      "id": "0c9c41e7",
-      "symbol": "EURAUD=X",
-      "type": "CALL",
-      "entry_price": 1.628559947013855,
-      "entry_time": "2026-11-13T12:00:00+00:00",
-      "signal_sent": true
-    }
-  ],
+  "frozen_pairs": {},
+  "open_trades": [],
   "trade_history": [
     {
       "id": "52b0c74f",
@@ -736,6 +716,28 @@
       "exit_time": "2026-11-13T09:00:00+00:00",
       "win": true,
       "pips": 10.6
+    },
+    {
+      "id": "f39fabb4",
+      "symbol": "AUDJPY=X",
+      "type": "PUT",
+      "entry_price": 108.56900024414062,
+      "exit_price": 108.61100006103516,
+      "entry_time": "2026-11-13T12:00:00+00:00",
+      "exit_time": "2026-11-13T14:00:00+00:00",
+      "win": false,
+      "pips": 4.2
+    },
+    {
+      "id": "0c9c41e7",
+      "symbol": "EURAUD=X",
+      "type": "CALL",
+      "entry_price": 1.628559947013855,
+      "exit_price": 1.6268399953842163,
+      "entry_time": "2026-11-13T12:00:00+00:00",
+      "exit_time": "2026-11-13T14:00:00+00:00",
+      "win": false,
+      "pips": 17.2
     }
   ],
   "daily_counter_date": "2026-11-13",
