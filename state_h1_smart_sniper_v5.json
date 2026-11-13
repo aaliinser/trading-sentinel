@@ -1,6 +1,44 @@
 {
-  "frozen_pairs": {},
-  "open_trades": [],
+  "frozen_pairs": {
+    "GBPUSD=X": "2026-11-13T17:00:00+00:00",
+    "USDCAD=X": "2026-11-13T17:00:00+00:00",
+    "NZDUSD=X": "2026-11-13T17:00:00+00:00",
+    "CADJPY=X": "2026-11-13T17:00:00+00:00"
+  },
+  "open_trades": [
+    {
+      "id": "cc41c361",
+      "symbol": "GBPUSD=X",
+      "type": "PUT",
+      "entry_price": 1.3221392631530762,
+      "entry_time": "2026-11-13T15:00:00+00:00",
+      "signal_sent": true
+    },
+    {
+      "id": "0275ab1e",
+      "symbol": "USDCAD=X",
+      "type": "CALL",
+      "entry_price": 1.4249399900436401,
+      "entry_time": "2026-11-13T15:00:00+00:00",
+      "signal_sent": true
+    },
+    {
+      "id": "48f16e03",
+      "symbol": "NZDUSD=X",
+      "type": "PUT",
+      "entry_price": 0.5531279444694519,
+      "entry_time": "2026-11-13T15:00:00+00:00",
+      "signal_sent": true
+    },
+    {
+      "id": "06290d8e",
+      "symbol": "CADJPY=X",
+      "type": "PUT",
+      "entry_price": 112.19100189208984,
+      "entry_time": "2026-11-13T15:00:00+00:00",
+      "signal_sent": true
+    }
+  ],
   "trade_history": [
     {
       "id": "52b0c74f",
@@ -741,7 +779,7 @@
     }
   ],
   "daily_counter_date": "2026-11-13",
-  "daily_signal_count": 4,
+  "daily_signal_count": 8,
   "last_daily_report": "2026-11-12",
   "last_weekly_report": "2026-W44",
   "last_monthly_report": ""
