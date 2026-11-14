@@ -1,4 +1,4 @@
-name: H1 Stochastic Bot (State Persistent v5.1 - Smart Sniper)
+name: H1 Stochastic Bot (State Persistent v6.3 - Smart Sniper)
 
 on:
   repository_dispatch:
