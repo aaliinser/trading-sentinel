@@ -1,22 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-H1 Stochastic Ultimate Bot - v6.2 (Smart Sniper · Live Price & Drift Edition)
-التطويرات المطلوبة:
-1. عرض الزوج بصيغة قابلة للنسخ (GBP/JPY) في كل رسائل تيليجرام — دون تغيير الرموز الداخلية.
-2. تقارير ثلاثية كاملة: يومي + أسبوعي + شهري بتوقيت Asia/Hebron مع منع التكرار.
-3. تحليل أفضل/أسوأ زوج + تحليل أفضل/أسوأ ساعة تداول (توقيت غزة).
-4. استراتيجية "الصفقة الأولى يومياً": محاكاة لصفقة واحدة كل يوم مع سجل الأيام
-   وأطول سلاسل الربح/الخسارة ومحاكاة رأس المال.
-5. ★ جديد في v6.2: عرض السعر اللحظي والانجراف بالنقاط داخل رسالة الإشارة،
-   مع تحذير بصري إذا ابتعد السعر ضد اتجاه الصفقة (للعرض فقط — لا يمس الدخول ولا الحسم).
-الإصلاحات الهندسية المرافقة (دون لمس الاستراتيجية):
-أ. _split_message: تقسيم مضمون حتى لو كان سطر واحد أطول من الحد.
-ب. حرّاس نوع الحالة: قبول الأرقام العشرية/النصية ورفض bool بدل تصفير البيانات.
-ج. سقف الأرشيف 20000 صفقة ليغطي الشهر كاملاً بأسوأ سيناريو.
-د. قاعدة DST الاحتياطية: حساب "آخر سبت" صحيح رياضياً لكل السنوات.
-هـ. بوابة نهاية الأسبوع بتوقيت غزة بدل UTC.
-و. حذف الشموع الجارية بحلقة while لضمان إغلاق مؤكد.
+H1 Stochastic Ultimate Bot - v6.3 (Smart Sniper · Report Catch-Up Edition)
+الإصلاح الوحيد في v6.3: محرك استدراك التقارير (يومي / أسبوعي / شهري).
+لم يُمسّ: الاستراتيجية، المؤشرات، شروط الدخول، منطق الحسم، بناء الرسائل.
 """
 import os
 import sys
@@ -53,7 +40,6 @@ except Exception:
 
 
 def _is_palestine_summer(dt_utc: datetime) -> bool:
-    """قاعدة احتياطية يدوية إذا غابت قاعدة المنطقة الزمنية من النظام"""
     def last_saturday(year, month):
         nxt = datetime(year + (month == 12), month % 12 + 1, 1, tzinfo=timezone.utc)
         last_day = nxt - timedelta(days=1)
@@ -62,7 +48,6 @@ def _is_palestine_summer(dt_utc: datetime) -> bool:
 
 
 def to_gaza(dt_obj: datetime) -> datetime:
-    """تحويل أي datetime إلى توقيت غزة/الخليل (Asia/Hebron)"""
     if dt_obj.tzinfo is None:
         dt_obj = dt_obj.replace(tzinfo=timezone.utc)
     if HEBRON_TZ is not None:
@@ -75,8 +60,12 @@ def get_palestine_now_safe() -> datetime:
     return to_gaza(datetime.now(timezone.utc))
 
 
+def _strip_tz(d: datetime) -> datetime:
+    """تجريد المنطقة الزمنية للمقارنات التقويمية الآمنة."""
+    return d.replace(tzinfo=None) if d.tzinfo is not None else d
+
+
 def format_pair(symbol: str) -> str:
-    """عرض الزوج بصيغة قابلة للنسخ مثل GBP/JPY — للعرض فقط دون المساس بالرمز الداخلي."""
     try:
         s = str(symbol).replace("=X", "").replace("/", "").strip().upper()
         if len(s) == 6:
@@ -87,10 +76,6 @@ def format_pair(symbol: str) -> str:
 
 
 def get_live_price(symbol: str):
-    """
-    ★ جديد: جلب السعر اللحظي من آخر شمعة دقيقة — للعرض فقط.
-    يُرجع None بأمان عند أي فشل (شبكة / بيانات فارغة / قيمة غير صالحة).
-    """
     try:
         df = yf.Ticker(symbol).history(period="1d", interval="1m",
                                        auto_adjust=False, actions=False)
@@ -105,11 +90,6 @@ def get_live_price(symbol: str):
 
 
 def build_drift_text(live_px, signal_px: float, symbol: str, signal_type: str):
-    """
-    ★ جديد: حساب الانجراف بالنقاط بين سعر الإشارة والسعر الحالي.
-    موجب = السعر تحرك لصالح اتجاه الصفقة | سالب = ابتعد ضد الاتجاه.
-    يُرجع (نص العرض، قيمة الانجراف أو None).
-    """
     if live_px is None:
         return "_غير متاح_", None
     try:
@@ -129,7 +109,7 @@ def build_drift_text(live_px, signal_px: float, symbol: str, signal_type: str):
 # ═══════════════════════════════════════════════
 # 1. الإعدادات العامة
 # ═══════════════════════════════════════════════
-BOT_NAME = "H1_Smart_Sniper_V6_2"
+BOT_NAME = "H1_Smart_Sniper_V6_3"
 STATE_FILE = "state_h1_smart_sniper_v5.json"
 LOG_LEVEL = logging.INFO
 
@@ -140,7 +120,6 @@ TRADING_SYMBOLS = [
     "EURAUD=X", "USDCHF=X", "AUDNZD=X", "GBPCAD=X"
 ]
 
-# إعدادات المؤشرات والفلاتر الصارمة (محفوظة 100%)
 K_PERIOD = 5
 D_PERIOD = 3
 OVERBOUGHT_ZONE = 85
@@ -156,15 +135,17 @@ NIGHT_END_HOUR_GAZA = 9
 FREEZE_DURATION_MINUTES = 60
 TRADE_DURATION_MINUTES = 60
 
-# إعدادات محاكاة رأس المال لتقرير "الصفقة الأولى يومياً"
 RISK_PER_TRADE_USD = 10.0
 PAYOUT_RATE = 0.85
-
-# ★ جديد: حد التحذير البصري للانجراف (بالنقاط) — تحذير فقط ولا يمنع الإرسال
 DRIFT_WARN_PIPS = 8.0
 
 TG_MAX_LEN = 3800
 HISTORY_CAP = 20000
+
+MAX_DAILY_CATCHUP = 31
+MAX_WEEKLY_CATCHUP = 8
+MAX_MONTHLY_CATCHUP = 6
+MAX_REPORTS_PER_RUN = 3
 
 TG_TOKEN = os.getenv("TG_TOKEN", "").strip()
 TG_CHAT = os.getenv("TG_CHAT", "").strip()
@@ -178,14 +159,10 @@ log = logging.getLogger(BOT_NAME)
 
 
 # ═══════════════════════════════════════════════
-# 2. أدوات الاتصال والحالة (State Persistence)
+# 2. أدوات الاتصال والحالة
 # ═══════════════════════════════════════════════
 
 def _split_message(msg: str, limit: int = TG_MAX_LEN) -> list:
-    """
-    تقسيم الرسالة الطويلة مع ضمان ألا يتجاوز أي جزء الحد إطلاقاً،
-    حتى لو كان سطر واحد بمفرده أطول من الحد.
-    """
     if len(msg) <= limit:
         return [msg]
     parts = []
@@ -322,7 +299,9 @@ class StateManager:
             log.info(
                 f"STATE SUMMARY | open={len(self.data['open_trades'])} | "
                 f"frozen={len(frozen_active)} | history={len(self.data['trade_history'])} | "
-                f"last_daily={self.data.get('last_daily_report')}"
+                f"daily={self.data.get('last_daily_report')} | "
+                f"weekly={self.data.get('last_weekly_report')} | "
+                f"monthly={self.data.get('last_monthly_report')}"
             )
         except Exception as e:
             log.error(f"State summary failed: {e}")
@@ -354,7 +333,6 @@ class StateManager:
             return False
 
     def freeze_pair(self, symbol: str, base_time: datetime, duration_minutes: int = FREEZE_DURATION_MINUTES):
-        # تجميد الزوج طوال شمعة الصفقة + مدة التجميد الإضافية لمنع تكرار نفس الإشارة
         release_time = base_time + timedelta(minutes=TRADE_DURATION_MINUTES + duration_minutes)
         now_utc = datetime.now(timezone.utc)
         if release_time <= now_utc:
@@ -378,7 +356,7 @@ class StateManager:
 
 
 # ═══════════════════════════════════════════════
-# 3. محرك البيانات والاستراتيجية (لم يُمس منطق الدخول)
+# 3. محرك البيانات والاستراتيجية (لم يُمس)
 # ═══════════════════════════════════════════════
 
 def get_data(symbol: str, interval: str = "1h", period: str = "60d"):
@@ -403,7 +381,6 @@ def get_data(symbol: str, interval: str = "1h", period: str = "60d"):
         df = df[~df.index.duplicated()].sort_index().dropna()
 
         now_utc = pd.Timestamp.now(tz="UTC")
-        # حذف أي شمعة جارية غير مكتملة (60 دقيقة) لضمان قراءة إغلاق مؤكد فقط
         while not df.empty and (df.index[-1] + pd.Timedelta(minutes=TRADE_DURATION_MINUTES)) > now_utc:
             df = df.iloc[:-1]
 
@@ -412,7 +389,6 @@ def get_data(symbol: str, interval: str = "1h", period: str = "60d"):
 
         c = df['Close']
 
-        # Calculate Stochastics Manually for Precision
         lowest_low = df['Low'].rolling(window=K_PERIOD).min()
         highest_high = df['High'].rolling(window=K_PERIOD).max()
         denom = (highest_high - lowest_low).replace(0, np.nan)
@@ -431,10 +407,6 @@ def get_data(symbol: str, interval: str = "1h", period: str = "60d"):
 
 
 def analyze_market_smart(symbol: str):
-    """
-    Smart Logic Analyzer — الشروط الأصلية محفوظة حرفياً.
-    Returns signal dict or None. Applies Strict Filters.
-    """
     df = get_data(symbol)
     if df is None or len(df) < 2:
         return None
@@ -454,12 +426,10 @@ def analyze_market_smart(symbol: str):
     low_curr = float(curr['Low'])
     open_curr = float(curr['Open'])
 
-    # 1. Distance Filter (Avoid Dead Markets around EMA)
     distance_pct = abs(price - ema_200) / price * 100 if price else 0.0
     if distance_pct < MIN_DISTANCE_PCT:
         return None
 
-    # 2. Momentum Filter (Check Candle Body Strength)
     candle_range = high_curr - low_curr
     body_size = abs(price - open_curr)
 
@@ -468,13 +438,11 @@ def analyze_market_smart(symbol: str):
 
     signal_type = None
 
-    # CALL Conditions
     if (price > ema_200 and
         k_prev <= d_prev and k_curr > d_curr and
         min(k_prev, k_curr) < OVERSOLD_ZONE):
         signal_type = "CALL"
 
-    # PUT Conditions
     elif (price < ema_200 and
           k_prev >= d_prev and k_curr < d_curr and
           max(k_prev, k_curr) > OVERBOUGHT_ZONE):
@@ -492,7 +460,7 @@ def analyze_market_smart(symbol: str):
 
 
 # ═══════════════════════════════════════════════
-# 4. نظام الحسم التلقائي المحصن (Guaranteed Resolution)
+# 4. نظام الحسم التلقائي (لم يُمس)
 # ═══════════════════════════════════════════════
 
 def resolve_pending_trades(sm: StateManager):
@@ -716,7 +684,6 @@ def _hour_analysis(trades: list) -> dict:
 
 
 def _first_trade_per_day(trades: list) -> list:
-    """أول صفقة في كل يوم حسب توقيت غزة (اعتماد وقت الدخول لا الخروج)."""
     by_day = {}
     for t in trades:
         src = t.get('entry_time') or t.get('exit_time')
@@ -803,7 +770,6 @@ def build_report_message(trades_list: list, report_type: str, period_name: str,
         f"💰 *صافي النقاط (Net Pips):* `{s['net']:+.1f} Pips`\n\n"
     )
 
-    # ── تحليل الأزواج ──
     pm = _pair_analysis(trades_list)
     best_txt = worst_txt = "غير متاح"
     if pm:
@@ -822,7 +788,6 @@ def build_report_message(trades_list: list, report_type: str, period_name: str,
     body += f"• *أفضل زوج:* {best_txt}\n"
     body += f"• *أسوأ زوج:* {worst_txt}\n\n"
 
-    # ── تحليل ساعات التداول ──
     hm = _hour_analysis(trades_list)
     bh_txt = wh_txt = "غير متاح"
     if hm:
@@ -841,7 +806,6 @@ def build_report_message(trades_list: list, report_type: str, period_name: str,
     body += f"• *أفضل ساعة:* {bh_txt}\n"
     body += f"• *أسوأ ساعة:* {wh_txt}\n\n"
 
-    # ── استراتيجية الصفقة الأولى يومياً ──
     if include_first:
         body += build_first_trade_section(trades_list, show_details)
 
@@ -849,7 +813,91 @@ def build_report_message(trades_list: list, report_type: str, period_name: str,
     return header + body
 
 
+def _pending_days(last_daily: str, today_local: datetime, max_back: int = MAX_DAILY_CATCHUP) -> list:
+    """كل يوم من (آخر تقرير مُرسل + 1) حتى الأمس — بترتيب زمني تصاعدي."""
+    today_local = _strip_tz(today_local)
+    yesterday = (today_local - timedelta(days=1)).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    start = None
+    if last_daily:
+        try:
+            start = datetime.strptime(str(last_daily), "%Y-%m-%d") + timedelta(days=1)
+        except Exception:
+            start = None
+    if start is None:
+        start = yesterday
+    if start > yesterday:
+        return []
+    if (yesterday - start).days + 1 > max_back:
+        start = yesterday - timedelta(days=max_back - 1)
+    out = []
+    cur = start
+    while cur <= yesterday:
+        out.append(cur.strftime("%Y-%m-%d"))
+        cur += timedelta(days=1)
+    return out
+
+
+def _pending_weeks(last_weekly: str, today_local: datetime, max_back: int = MAX_WEEKLY_CATCHUP) -> list:
+    """كل أسبوع مكتمل (الاثنين→الأحد) لم يُرسل تقريره — يعمل في أي يوم."""
+    today_local = _strip_tz(today_local)
+    this_monday = (today_local - timedelta(days=today_local.weekday())).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    cur = this_monday - timedelta(days=7)
+
+    def pack(d):
+        yy, wn, _ = d.isocalendar()
+        return (f"{yy}-W{wn:02d}",
+                d.strftime("%Y-%m-%d"),
+                (d + timedelta(days=6)).strftime("%Y-%m-%d"))
+
+    if not last_weekly:
+        return [pack(cur)]
+
+    out = []
+    for _ in range(max_back):
+        wid, a, b = pack(cur)
+        if wid <= str(last_weekly):
+            break
+        out.append((wid, a, b))
+        cur -= timedelta(days=7)
+    return list(reversed(out))
+
+
+def _pending_months(last_monthly: str, today_local: datetime, max_back: int = MAX_MONTHLY_CATCHUP) -> list:
+    """كل شهر منصرم لم يُرسل تقريره — يعمل في أي يوم من الشهر."""
+    today_local = _strip_tz(today_local)
+    first_this = today_local.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    cur = first_this - timedelta(days=1)
+
+    def pack(d):
+        return (d.strftime("%Y-%m"),
+                d.replace(day=1).strftime("%Y-%m-%d"),
+                d.strftime("%Y-%m-%d"))
+
+    if not last_monthly:
+        return [pack(cur)]
+
+    out = []
+    for _ in range(max_back):
+        mid, a, b = pack(cur)
+        if mid <= str(last_monthly):
+            break
+        out.append((mid, a, b))
+        cur = cur.replace(day=1) - timedelta(days=1)
+    return list(reversed(out))
+
+
 def generate_advanced_reports(sm: StateManager):
+    """
+    محرك تقارير باستدراك ذاتي:
+    • اليومي: كل يوم فائت حتى الأمس.
+    • الأسبوعي: أي يوم من الأسبوع.
+    • الشهري: أي يوم من الشهر.
+    • القفل يتقدّم فقط بعد نجاح الإرسال، والمتبقي يُستدرَك في النبضة التالية.
+    """
     local_now = get_palestine_now_safe()
     history_raw = sm.data.get("trade_history", [])
 
@@ -866,70 +914,82 @@ def generate_advanced_reports(sm: StateManager):
             r["_day"] = key
             records.append(r)
 
-    # ─── 1. التقرير اليومي ───
-    yesterday_local = local_now - timedelta(days=1)
-    yesterday_str = yesterday_local.strftime("%Y-%m-%d")
+    sent_count = 0
 
-    if sm.data.get("last_daily_report") != yesterday_str:
-        daily_records = [r for r in records if r["_day"] == yesterday_str]
-        daily_period_name = (
-            f"{AR_DAYS[yesterday_local.weekday()]} {yesterday_local.day} "
-            f"{AR_MONTHS[yesterday_local.strftime('%m')]} {yesterday_local.year}"
-        )
-        msg = build_report_message(daily_records, "اليومي", daily_period_name,
-                                   include_first=True, show_details=False)
-        if send_telegram(msg):
-            sm.data["last_daily_report"] = yesterday_str
-            sm.save()
-            log.info(f"Daily report CONFIRMED & locked for {yesterday_str}")
+    # ─── 1. التقارير اليومية الفائتة ───
+    for day_str in _pending_days(sm.data.get("last_daily_report", ""), local_now):
+        if sent_count >= MAX_REPORTS_PER_RUN:
+            log.info("Report budget reached; remaining daily reports next pulse.")
+            break
+        try:
+            d = datetime.strptime(day_str, "%Y-%m-%d")
+            recs = [r for r in records if r["_day"] == day_str]
+            name = f"{AR_DAYS[d.weekday()]} {d.day} {AR_MONTHS[d.strftime('%m')]} {d.year}"
+            msg = build_report_message(recs, "اليومي", name,
+                                       include_first=True, show_details=False)
+            if send_telegram(msg):
+                sm.data["last_daily_report"] = day_str
+                sm.save()
+                sent_count += 1
+                log.info(f"Daily report CONFIRMED & locked for {day_str} ({len(recs)} trades)")
+            else:
+                log.error(f"Daily report send FAILED for {day_str}; will retry next pulse.")
+                break
+        except Exception as e:
+            log.error(f"Daily report error for {day_str}: {e}", exc_info=True)
+            break
 
-    # ─── 2. التقرير الأسبوعي (السبت/الأحد ← الأسبوع السابق الاثنين→الأحد) ───
-    current_gaza_weekday = local_now.weekday()
-    if current_gaza_weekday in (5, 6):
-        last_week_start = (local_now - timedelta(days=current_gaza_weekday + 7)).replace(
-            hour=0, minute=0, second=0, microsecond=0
-        )
-        last_week_end = last_week_start + timedelta(days=6)
-
-        a = last_week_start.strftime("%Y-%m-%d")
-        b = last_week_end.strftime("%Y-%m-%d")
-
-        yy, wn, _ = last_week_start.isocalendar()
-        wid = f"{yy}-W{wn:02d}"
-
-        weekly_period_name = (
-            f"الأسبوع {wn} ({last_week_start.day} {AR_MONTHS[last_week_start.strftime('%m')]} – "
-            f"{last_week_end.day} {AR_MONTHS[last_week_end.strftime('%m')]} {last_week_end.year})"
-        )
-
-        if sm.data.get("last_weekly_report") != wid:
-            weekly_records = [r for r in records if a <= r["_day"] <= b]
-            msg = build_report_message(weekly_records, "الأسبوعي", weekly_period_name,
+    # ─── 2. التقارير الأسبوعية الفائتة ───
+    for wid, a, b in _pending_weeks(sm.data.get("last_weekly_report", ""), local_now):
+        if sent_count >= MAX_REPORTS_PER_RUN:
+            log.info("Report budget reached; remaining weekly reports next pulse.")
+            break
+        try:
+            ds = datetime.strptime(a, "%Y-%m-%d")
+            de = datetime.strptime(b, "%Y-%m-%d")
+            wn = int(wid.split("-W")[1])
+            recs = [r for r in records if a <= r["_day"] <= b]
+            name = (f"الأسبوع {wn} ({ds.day} {AR_MONTHS[ds.strftime('%m')]} – "
+                    f"{de.day} {AR_MONTHS[de.strftime('%m')]} {de.year})")
+            msg = build_report_message(recs, "الأسبوعي", name,
                                        include_first=True, show_details=True)
             if send_telegram(msg):
                 sm.data["last_weekly_report"] = wid
                 sm.save()
-                log.info(f"Weekly report CONFIRMED & locked for {wid}")
+                sent_count += 1
+                log.info(f"Weekly report CONFIRMED & locked for {wid} ({len(recs)} trades)")
+            else:
+                log.error(f"Weekly report send FAILED for {wid}; will retry next pulse.")
+                break
+        except Exception as e:
+            log.error(f"Weekly report error for {wid}: {e}", exc_info=True)
+            break
 
-    # ─── 3. التقرير الشهري (أول 3 أيام ← الشهر المنصرم) ───
-    if local_now.day <= 3:
-        first_day_this_month = local_now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-        last_day_prev_month = first_day_this_month - timedelta(days=1)
-
-        a = last_day_prev_month.replace(day=1).strftime("%Y-%m-%d")
-        b = last_day_prev_month.strftime("%Y-%m-%d")
-        mid = last_day_prev_month.strftime("%Y-%m")
-
-        monthly_period_name = f"{AR_MONTHS[last_day_prev_month.strftime('%m')]} {last_day_prev_month.year}"
-
-        if sm.data.get("last_monthly_report") != mid:
-            monthly_records = [r for r in records if a <= r["_day"] <= b]
-            msg = build_report_message(monthly_records, "الشهري", monthly_period_name,
+    # ─── 3. التقارير الشهرية الفائتة ───
+    for mid, a, b in _pending_months(sm.data.get("last_monthly_report", ""), local_now):
+        if sent_count >= MAX_REPORTS_PER_RUN:
+            log.info("Report budget reached; remaining monthly reports next pulse.")
+            break
+        try:
+            de = datetime.strptime(b, "%Y-%m-%d")
+            recs = [r for r in records if a <= r["_day"] <= b]
+            name = f"{AR_MONTHS[de.strftime('%m')]} {de.year}"
+            msg = build_report_message(recs, "الشهري", name,
                                        include_first=True, show_details=True)
             if send_telegram(msg):
                 sm.data["last_monthly_report"] = mid
                 sm.save()
-                log.info(f"Monthly report CONFIRMED & locked for {mid}")
+                sent_count += 1
+                log.info(f"Monthly report CONFIRMED & locked for {mid} ({len(recs)} trades)")
+            else:
+                log.error(f"Monthly report send FAILED for {mid}; will retry next pulse.")
+                break
+        except Exception as e:
+            log.error(f"Monthly report error for {mid}: {e}", exc_info=True)
+            break
+
+    if sent_count == 0:
+        log.info("Reports up to date. Nothing pending.")
 
 
 # ═══════════════════════════════════════════════
@@ -953,13 +1013,9 @@ def main():
     sm = StateManager(STATE_FILE)
     sm.log_summary()
 
-    # 1. حسم الصفقات المفتوحة أولاً وأرشفتها
     resolve_pending_trades(sm)
-
-    # 2. فحص وإرسال التقارير (اليومية / الأسبوعية / الشهرية)
     generate_advanced_reports(sm)
 
-    # 3. فلاتر الإجازة الأسبوعية والحظر الليلي (بتوقيت غزة)
     if local_now.weekday() >= 5:
         log.info("Weekend. Skipping new signals.")
         return
@@ -969,7 +1025,6 @@ def main():
         log.info(f"Inside Night Ban Window ({current_gaza_hour:02d}:xx Gaza Time). Skipping new signals.")
         return
 
-    # 4. فحص السوق وإرسال الإشارات الجديدة
     signals_found = 0
 
     for sym in TRADING_SYMBOLS:
@@ -987,7 +1042,6 @@ def main():
         arrow = "🟢 CALL (صعود)" if result['type'] == "CALL" else "🔴 PUT (هبوط)"
         expiry_time = (result['time'] + timedelta(minutes=TRADE_DURATION_MINUTES * 2)).strftime("%H:%M")
 
-        # ★ جديد: جلب السعر اللحظي وحساب الانجراف (للعرض فقط)
         live_px = get_live_price(sym)
         drift_txt, drift_val = build_drift_text(live_px, result['price'], sym, result['type'])
         if drift_val is not None:
