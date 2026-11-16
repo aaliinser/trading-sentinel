@@ -1,26 +1,6 @@
 {
-  "frozen_pairs": {
-    "EURUSD=X": "2026-11-16T11:00:00+00:00",
-    "GBPUSD=X": "2026-11-16T11:00:00+00:00"
-  },
-  "open_trades": [
-    {
-      "id": "e6f5e08b",
-      "symbol": "EURUSD=X",
-      "type": "PUT",
-      "entry_price": 1.1013215780258179,
-      "entry_time": "2026-11-16T09:00:00+00:00",
-      "signal_sent": true
-    },
-    {
-      "id": "0cb4c22a",
-      "symbol": "GBPUSD=X",
-      "type": "PUT",
-      "entry_price": 1.319000244140625,
-      "entry_time": "2026-11-16T09:00:00+00:00",
-      "signal_sent": true
-    }
-  ],
+  "frozen_pairs": {},
+  "open_trades": [],
   "trade_history": [
     {
       "id": "52b0c74f",
@@ -802,6 +782,28 @@
       "exit_time": "2026-11-13T17:00:00+00:00",
       "win": true,
       "pips": 0.7
+    },
+    {
+      "id": "e6f5e08b",
+      "symbol": "EURUSD=X",
+      "type": "PUT",
+      "entry_price": 1.1013215780258179,
+      "exit_price": 1.1007153987884521,
+      "entry_time": "2026-11-16T09:00:00+00:00",
+      "exit_time": "2026-11-16T11:00:00+00:00",
+      "win": true,
+      "pips": 6.06
+    },
+    {
+      "id": "0cb4c22a",
+      "symbol": "GBPUSD=X",
+      "type": "PUT",
+      "entry_price": 1.319000244140625,
+      "exit_price": 1.318617582321167,
+      "entry_time": "2026-11-16T09:00:00+00:00",
+      "exit_time": "2026-11-16T11:00:00+00:00",
+      "win": true,
+      "pips": 3.83
     }
   ],
   "daily_counter_date": "2026-11-16",
