@@ -1,6 +1,53 @@
 {
-  "frozen_pairs": {},
-  "open_trades": [],
+  "frozen_pairs": {
+    "EURUSD=X": "2026-11-17T08:00:00+00:00",
+    "GBPUSD=X": "2026-11-17T08:00:00+00:00",
+    "USDJPY=X": "2026-11-17T08:00:00+00:00",
+    "NZDUSD=X": "2026-11-17T08:00:00+00:00",
+    "USDCHF=X": "2026-11-17T08:00:00+00:00"
+  },
+  "open_trades": [
+    {
+      "id": "7c853483",
+      "symbol": "EURUSD=X",
+      "type": "PUT",
+      "entry_price": 1.1009578704833984,
+      "entry_time": "2026-11-17T06:00:00+00:00",
+      "signal_sent": true
+    },
+    {
+      "id": "41308efc",
+      "symbol": "GBPUSD=X",
+      "type": "PUT",
+      "entry_price": 1.3192437887191772,
+      "entry_time": "2026-11-17T06:00:00+00:00",
+      "signal_sent": true
+    },
+    {
+      "id": "80a27b3d",
+      "symbol": "USDJPY=X",
+      "type": "CALL",
+      "entry_price": 159.28700256347656,
+      "entry_time": "2026-11-17T06:00:00+00:00",
+      "signal_sent": true
+    },
+    {
+      "id": "e6b6f93b",
+      "symbol": "NZDUSD=X",
+      "type": "PUT",
+      "entry_price": 0.5496015548706055,
+      "entry_time": "2026-11-17T06:00:00+00:00",
+      "signal_sent": true
+    },
+    {
+      "id": "b5e919c0",
+      "symbol": "USDCHF=X",
+      "type": "CALL",
+      "entry_price": 0.8393099904060364,
+      "entry_time": "2026-11-17T06:00:00+00:00",
+      "signal_sent": true
+    }
+  ],
   "trade_history": [
     {
       "id": "52b0c74f",
@@ -817,8 +864,8 @@
       "pips": 7.3
     }
   ],
-  "daily_counter_date": "2026-11-16",
-  "daily_signal_count": 3,
+  "daily_counter_date": "2026-11-17",
+  "daily_signal_count": 5,
   "last_daily_report": "2026-11-16",
   "last_weekly_report": "2026-W46",
   "last_monthly_report": "2026-10"
