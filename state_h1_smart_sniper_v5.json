@@ -1,6 +1,17 @@
 {
-  "frozen_pairs": {},
-  "open_trades": [],
+  "frozen_pairs": {
+    "EURGBP=X": "2026-11-18T11:00:00+00:00"
+  },
+  "open_trades": [
+    {
+      "id": "5dc7dd57",
+      "symbol": "EURGBP=X",
+      "type": "PUT",
+      "entry_price": 0.8332700133323669,
+      "entry_time": "2026-11-18T09:00:00+00:00",
+      "signal_sent": true
+    }
+  ],
   "trade_history": [
     {
       "id": "52b0c74f",
@@ -1004,8 +1015,8 @@
       "pips": 7.2
     }
   ],
-  "daily_counter_date": "2026-11-17",
-  "daily_signal_count": 17,
+  "daily_counter_date": "2026-11-18",
+  "daily_signal_count": 1,
   "last_daily_report": "2026-11-17",
   "last_weekly_report": "2026-W46",
   "last_monthly_report": "2026-10"
