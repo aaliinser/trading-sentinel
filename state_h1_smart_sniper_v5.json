@@ -1,6 +1,62 @@
 {
-  "frozen_pairs": {},
-  "open_trades": [],
+  "frozen_pairs": {
+    "EURUSD=X": "2026-11-19T13:00:00+00:00",
+    "GBPUSD=X": "2026-11-19T13:00:00+00:00",
+    "AUDUSD=X": "2026-11-19T13:00:00+00:00",
+    "GBPJPY=X": "2026-11-19T13:00:00+00:00",
+    "AUDJPY=X": "2026-11-19T13:00:00+00:00",
+    "CHFJPY=X": "2026-11-19T13:00:00+00:00"
+  },
+  "open_trades": [
+    {
+      "id": "4c650a96",
+      "symbol": "EURUSD=X",
+      "type": "PUT",
+      "entry_price": 1.0995051860809326,
+      "entry_time": "2026-11-19T11:00:00+00:00",
+      "signal_sent": true
+    },
+    {
+      "id": "2da507be",
+      "symbol": "GBPUSD=X",
+      "type": "PUT",
+      "entry_price": 1.3155471086502075,
+      "entry_time": "2026-11-19T11:00:00+00:00",
+      "signal_sent": true
+    },
+    {
+      "id": "3d3d3d22",
+      "symbol": "AUDUSD=X",
+      "type": "PUT",
+      "entry_price": 0.6711409091949463,
+      "entry_time": "2026-11-19T11:00:00+00:00",
+      "signal_sent": true
+    },
+    {
+      "id": "f54ca567",
+      "symbol": "GBPJPY=X",
+      "type": "PUT",
+      "entry_price": 210.3419952392578,
+      "entry_time": "2026-11-19T11:00:00+00:00",
+      "signal_sent": true
+    },
+    {
+      "id": "0e08a1fd",
+      "symbol": "AUDJPY=X",
+      "type": "PUT",
+      "entry_price": 107.2760009765625,
+      "entry_time": "2026-11-19T11:00:00+00:00",
+      "signal_sent": true
+    },
+    {
+      "id": "71e1a89b",
+      "symbol": "CHFJPY=X",
+      "type": "PUT",
+      "entry_price": 189.76800537109375,
+      "entry_time": "2026-11-19T11:00:00+00:00",
+      "signal_sent": true
+    }
+  ],
   "trade_history": [
     {
       "id": "52b0c74f",
@@ -1148,7 +1204,7 @@
     }
   ],
   "daily_counter_date": "2026-11-19",
-  "daily_signal_count": 7,
+  "daily_signal_count": 13,
   "last_daily_report": "2026-11-18",
   "last_weekly_report": "2026-W46",
   "last_monthly_report": "2026-10"
