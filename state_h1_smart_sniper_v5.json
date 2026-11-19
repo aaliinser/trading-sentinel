@@ -1,26 +1,6 @@
 {
-  "frozen_pairs": {
-    "GBPUSD=X": "2026-11-19T11:00:00+00:00",
-    "USDCAD=X": "2026-11-19T11:00:00+00:00"
-  },
-  "open_trades": [
-    {
-      "id": "582a4a1e",
-      "symbol": "GBPUSD=X",
-      "type": "PUT",
-      "entry_price": 1.314509630203247,
-      "entry_time": "2026-11-19T09:00:00+00:00",
-      "signal_sent": true
-    },
-    {
-      "id": "938f9fd6",
-      "symbol": "USDCAD=X",
-      "type": "CALL",
-      "entry_price": 1.43094003200531,
-      "entry_time": "2026-11-19T09:00:00+00:00",
-      "signal_sent": true
-    }
-  ],
+  "frozen_pairs": {},
+  "open_trades": [],
   "trade_history": [
     {
       "id": "52b0c74f",
@@ -1143,6 +1123,28 @@
       "exit_time": "2026-11-19T10:00:00+00:00",
       "win": true,
       "pips": 7.3
+    },
+    {
+      "id": "582a4a1e",
+      "symbol": "GBPUSD=X",
+      "type": "PUT",
+      "entry_price": 1.314509630203247,
+      "exit_price": 1.3169677257537842,
+      "entry_time": "2026-11-19T09:00:00+00:00",
+      "exit_time": "2026-11-19T11:00:00+00:00",
+      "win": false,
+      "pips": 24.58
+    },
+    {
+      "id": "938f9fd6",
+      "symbol": "USDCAD=X",
+      "type": "CALL",
+      "entry_price": 1.43094003200531,
+      "exit_price": 1.4303100109100342,
+      "entry_time": "2026-11-19T09:00:00+00:00",
+      "exit_time": "2026-11-19T11:00:00+00:00",
+      "win": false,
+      "pips": 6.3
     }
   ],
   "daily_counter_date": "2026-11-19",
