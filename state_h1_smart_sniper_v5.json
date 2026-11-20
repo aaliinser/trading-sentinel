@@ -1,17 +1,6 @@
 {
-  "frozen_pairs": {
-    "USDCHF=X": "2026-11-20T12:00:00+00:00"
-  },
-  "open_trades": [
-    {
-      "id": "c8e6e7d1",
-      "symbol": "USDCHF=X",
-      "type": "CALL",
-      "entry_price": 0.8419700264930725,
-      "entry_time": "2026-11-20T10:00:00+00:00",
-      "signal_sent": true
-    }
-  ],
+  "frozen_pairs": {},
+  "open_trades": [],
   "trade_history": [
     {
       "id": "52b0c74f",
@@ -1277,6 +1266,17 @@
       "exit_time": "2026-11-20T09:00:00+00:00",
       "win": true,
       "pips": 7.7
+    },
+    {
+      "id": "c8e6e7d1",
+      "symbol": "USDCHF=X",
+      "type": "CALL",
+      "entry_price": 0.8419700264930725,
+      "exit_price": 0.8422200083732605,
+      "entry_time": "2026-11-20T10:00:00+00:00",
+      "exit_time": "2026-11-20T12:00:00+00:00",
+      "win": true,
+      "pips": 2.5
     }
   ],
   "daily_counter_date": "2026-11-20",
