@@ -1,35 +1,6 @@
 {
-  "frozen_pairs": {
-    "AUDUSD=X": "2026-11-20T17:00:00+00:00",
-    "AUDJPY=X": "2026-11-20T17:00:00+00:00",
-    "AUDNZD=X": "2026-11-20T17:00:00+00:00"
-  },
-  "open_trades": [
-    {
-      "id": "01ca3b7a",
-      "symbol": "AUDUSD=X",
-      "type": "PUT",
-      "entry_price": 0.6647610068321228,
-      "entry_time": "2026-11-20T15:00:00+00:00",
-      "signal_sent": true
-    },
-    {
-      "id": "9c877078",
-      "symbol": "AUDJPY=X",
-      "type": "PUT",
-      "entry_price": 105.4749984741211,
-      "entry_time": "2026-11-20T15:00:00+00:00",
-      "signal_sent": true
-    },
-    {
-      "id": "fe921f03",
-      "symbol": "AUDNZD=X",
-      "type": "PUT",
-      "entry_price": 1.2105200290679932,
-      "entry_time": "2026-11-20T15:00:00+00:00",
-      "signal_sent": true
-    }
-  ],
+  "frozen_pairs": {},
+  "open_trades": [],
   "trade_history": [
     {
       "id": "52b0c74f",
@@ -1317,6 +1288,39 @@
       "exit_time": "2026-11-20T16:00:00+00:00",
       "win": null,
       "pips": 0.0
+    },
+    {
+      "id": "01ca3b7a",
+      "symbol": "AUDUSD=X",
+      "type": "PUT",
+      "entry_price": 0.6647610068321228,
+      "exit_price": 0.6639665365219116,
+      "entry_time": "2026-11-20T15:00:00+00:00",
+      "exit_time": "2026-11-20T17:00:00+00:00",
+      "win": true,
+      "pips": 7.94
+    },
+    {
+      "id": "9c877078",
+      "symbol": "AUDJPY=X",
+      "type": "PUT",
+      "entry_price": 105.4749984741211,
+      "exit_price": 105.38800048828125,
+      "entry_time": "2026-11-20T15:00:00+00:00",
+      "exit_time": "2026-11-20T17:00:00+00:00",
+      "win": true,
+      "pips": 8.7
+    },
+    {
+      "id": "fe921f03",
+      "symbol": "AUDNZD=X",
+      "type": "PUT",
+      "entry_price": 1.2105200290679932,
+      "exit_price": 1.2101800441741943,
+      "entry_time": "2026-11-20T15:00:00+00:00",
+      "exit_time": "2026-11-20T17:00:00+00:00",
+      "win": true,
+      "pips": 3.4
     }
   ],
   "daily_counter_date": "2026-11-20",
