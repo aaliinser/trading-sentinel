@@ -1,23 +1,14 @@
 {
   "frozen_pairs": {
-    "AUDUSD=X": "2026-11-20T08:00:00+00:00",
-    "NZDUSD=X": "2026-11-20T08:00:00+00:00"
+    "USDCAD=X": "2026-11-20T09:00:00+00:00"
   },
   "open_trades": [
     {
-      "id": "7158d233",
-      "symbol": "AUDUSD=X",
-      "type": "PUT",
-      "entry_price": 0.6682258248329163,
-      "entry_time": "2026-11-20T06:00:00+00:00",
-      "signal_sent": true
-    },
-    {
-      "id": "02ed8b74",
-      "symbol": "NZDUSD=X",
-      "type": "PUT",
-      "entry_price": 0.5511159896850586,
-      "entry_time": "2026-11-20T06:00:00+00:00",
+      "id": "dad93601",
+      "symbol": "USDCAD=X",
+      "type": "CALL",
+      "entry_price": 1.431980013847351,
+      "entry_time": "2026-11-20T07:00:00+00:00",
       "signal_sent": true
     }
   ],
@@ -1253,10 +1244,32 @@
       "exit_time": "2026-11-19T17:00:00+00:00",
       "win": true,
       "pips": 2.9
+    },
+    {
+      "id": "7158d233",
+      "symbol": "AUDUSD=X",
+      "type": "PUT",
+      "entry_price": 0.6682258248329163,
+      "exit_price": 0.6679134368896484,
+      "entry_time": "2026-11-20T06:00:00+00:00",
+      "exit_time": "2026-11-20T08:00:00+00:00",
+      "win": true,
+      "pips": 3.12
+    },
+    {
+      "id": "02ed8b74",
+      "symbol": "NZDUSD=X",
+      "type": "PUT",
+      "entry_price": 0.5511159896850586,
+      "exit_price": 0.5506001710891724,
+      "entry_time": "2026-11-20T06:00:00+00:00",
+      "exit_time": "2026-11-20T08:00:00+00:00",
+      "win": true,
+      "pips": 5.16
     }
   ],
   "daily_counter_date": "2026-11-20",
-  "daily_signal_count": 2,
+  "daily_signal_count": 3,
   "last_daily_report": "2026-11-19",
   "last_weekly_report": "2026-W46",
   "last_monthly_report": "2026-10"
