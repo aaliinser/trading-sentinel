@@ -11,15 +11,15 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# استبعاد أزواج الين (JPY) والإبقاء على 11 زوجاً مناسباً للارتداد
 PAIRS = [
-    "EURUSD=X", "GBPUSD=X", "USDJPY=X", "AUDUSD=X",
-    "USDCAD=X", "NZDUSD=X", "EURGBP=X", "EURCHF=X",
-    "GBPJPY=X", "AUDJPY=X", "CADJPY=X", "CHFJPY=X",
-    "EURAUD=X", "USDCHF=X", "AUDNZD=X", "GBPCAD=X",
+    "EURUSD=X", "GBPUSD=X", "AUDUSD=X", "USDCAD=X",
+    "NZDUSD=X", "EURGBP=X", "EURCHF=X", "EURAUD=X",
+    "USDCHF=X", "AUDNZD=X", "GBPCAD=X",
 ]
 
-INTERVAL = "1h"
-PERIOD = "730d"
+INTERVAL = "15m"
+PERIOD = "60d"
 PAYOUT = 0.85
 STAKE = 10.0
 
@@ -27,11 +27,11 @@ STAKE = 10.0
 def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
 
-    # 1. Bollinger Bands (20, 2.0)
+    # 1. Bollinger Bands مشددة (20, 2.5)
     sma20 = df["close"].rolling(window=20, min_periods=20).mean()
     std20 = df["close"].rolling(window=20, min_periods=20).std()
-    df["bb_upper"] = sma20 + (2.0 * std20)
-    df["bb_lower"] = sma20 - (2.0 * std20)
+    df["bb_upper"] = sma20 + (2.5 * std20)
+    df["bb_lower"] = sma20 - (2.5 * std20)
 
     # 2. RSI (14) بطريقة Wilder القياسية
     delta = df["close"].diff()
@@ -42,7 +42,7 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     rs = avg_gain / avg_loss.replace(0, np.nan)
     df["rsi"] = 100 - (100 / (1 + rs))
 
-    # 3. ADX (14) لتجنب الدخول عكس ترند قوي
+    # 3. ADX (14) لتجنب الدخول عكس ترند عنيف
     high_low = df["high"] - df["low"]
     high_close = (df["high"] - df["close"].shift(1)).abs()
     low_close = (df["low"] - df["close"].shift(1)).abs()
@@ -62,27 +62,27 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def generate_signals_mean_reversion(df: pd.DataFrame) -> pd.Series:
+def generate_signals_strict_mr(df: pd.DataFrame) -> pd.Series:
     """
-    Strategy 3 - Mean Reversion (Bollinger Bands + RSI + ADX < 25)
-    مصممة لانتهاء شمعة واحدة (1-Candle Expiry) على الفوركس الحقيقي
+    Strategy 3 (v2 - M15) - Strict Mean Reversion
+    BB(20, 2.5) + RSI(25/75) + ADX < 25 | 1-Candle Expiry (15m)
     """
     calm_market = df["adx"] < 25
 
-    # شراء ارتدادي (CALL): هبوط مبالغ فيه خارج البولنجر السفلي + تشبع بيعي RSI < 30
+    # شراء ارتدادي (CALL): شمعة هابطة تغلق تحت البولنجر 2.5 + RSI تحت 25
     call_cond = (
         calm_market
         & (df["close"] < df["open"])
         & (df["close"] < df["bb_lower"])
-        & (df["rsi"] < 30)
+        & (df["rsi"] < 25)
     )
 
-    # بيع ارتدادي (PUT): صعود مبالغ فيه خارج البولنجر العلوي + تشبع شرائي RSI > 70
+    # بيع ارتدادي (PUT): شمعة صاعدة تغلق فوق البولنجر 2.5 + RSI فوق 75
     put_cond = (
         calm_market
         & (df["close"] > df["open"])
         & (df["close"] > df["bb_upper"])
-        & (df["rsi"] > 70)
+        & (df["rsi"] > 75)
     )
 
     signals = pd.Series("WAIT", index=df.index)
@@ -102,9 +102,9 @@ def backtest_pair(symbol: str):
     df = df[["open", "high", "low", "close"]].dropna()
 
     df = add_indicators(df)
-    df["signal"] = generate_signals_mean_reversion(df)
+    df["signal"] = generate_signals_strict_mr(df)
 
-    # التنفيذ الصارم للخيارات الثنائية: دخول على افتتاح الشمعة i+1 وانتهاء عند إغلاقها
+    # التنفيذ الصارم للخيارات الثنائية: دخول على افتتاح الشمعة i+1 وانتهاء عند إغلاقها (15 دقيقة)
     df["next_open"] = df["open"].shift(-1)
     df["next_close"] = df["close"].shift(-1)
     df["entry_time"] = df.index.to_series().shift(-1)
@@ -185,7 +185,7 @@ def max_streaks(results):
 
 def main():
     logger.info("=" * 64)
-    logger.info("BACKTEST | Strategy 3 - Mean Reversion (BB + RSI + ADX<25)")
+    logger.info("BACKTEST | Strategy 3 (M15) - Strict Mean Reversion (No JPY)")
     logger.info(f"Interval={INTERVAL} | Period={PERIOD} | Payout={PAYOUT}")
     logger.info("=" * 64)
 
@@ -231,7 +231,7 @@ def main():
     verdict = "رابحة إحصائياً ✅" if edge > 0 else "خاسرة إحصائياً عند هذا العائد ❌"
 
     print("\n" + "=" * 64)
-    print("النتيجة الإجمالية (Strategy 3 - Mean Reversion)")
+    print("النتيجة الإجمالية (Strategy 3 - M15 Strict Mean Reversion)")
     print("=" * 64)
     print(f"إجمالي الصفقات   : {total_trades}")
     print(f"رابحة / خاسرة    : {wins} / {losses}  (تعادل {ties})")
@@ -256,7 +256,9 @@ def main():
     print(f"الحكم: {verdict}\n")
 
     result_payload = {
-        "strategy": "Strategy 3 - Mean Reversion (BB + RSI + ADX<25)",
+        "strategy": "Strategy 3 (M15) - Strict Mean Reversion (No JPY)",
+        "interval": INTERVAL,
+        "period": PERIOD,
         "total_trades": total_trades,
         "wins": wins,
         "losses": losses,
