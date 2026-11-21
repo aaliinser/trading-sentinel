@@ -20,12 +20,10 @@ PAIRS = [
     "CADCHF=X", "NZDCAD=X", "NZDCHF=X",
 ]
 
-INTERVAL = "15m"
+INTERVAL = "5m"
 PERIOD = "60d"
 PAYOUT = 0.85
 STAKE = 10.0
-EXPIRY_CANDLES = 2  # 30 دقيقة على فريم 15m
-EXPIRY_MINUTES = 30
 CALM_HOURS_GAZA = {22, 23, 0, 1, 2, 3, 4, 5, 6, 7, 8}
 
 
@@ -72,7 +70,7 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def extract_candidate_trades(df: pd.DataFrame, symbol: str) -> list:
+def extract_candidate_trades(df: pd.DataFrame, symbol: str, expiry_candles: int) -> list:
     calm = df["adx"] < 25
     call_cond = calm & (df["close"] < df["open"]) & (df["close"] < df["bb_lower"]) & (df["rsi7"] < 20)
     put_cond = calm & (df["close"] > df["open"]) & (df["close"] > df["bb_upper"]) & (df["rsi7"] > 80)
@@ -82,10 +80,11 @@ def extract_candidate_trades(df: pd.DataFrame, symbol: str) -> list:
     sig[put_cond] = "PUT"
 
     entry_open = df["open"].shift(-1)
-    exit_close = df["close"].shift(-EXPIRY_CANDLES)
+    exit_close = df["close"].shift(-expiry_candles)
     entry_time = df.index.to_series().shift(-1)
 
     mask = sig.isin(["CALL", "PUT"]) & entry_open.notna() & exit_close.notna()
+    expiry_minutes = expiry_candles * 5
     candidates = []
 
     for idx in df.index[mask]:
@@ -109,7 +108,6 @@ def extract_candidate_trades(df: pd.DataFrame, symbol: str) -> list:
         else:
             res, pnl = "TIE", 0.0
 
-        # قوة الإشارة لترتيب الأولوية عند تزامن أكثر من زوج في نفس الشمعة
         rsi_val = float(df.loc[idx, "rsi7"])
         strength = abs(50.0 - rsi_val)
 
@@ -117,7 +115,7 @@ def extract_candidate_trades(df: pd.DataFrame, symbol: str) -> list:
             "pair": symbol,
             "currencies": get_currencies(symbol),
             "entry_ts": ts,
-            "exit_ts": ts + pd.Timedelta(minutes=EXPIRY_MINUTES),
+            "exit_ts": ts + pd.Timedelta(minutes=expiry_minutes),
             "entry_time": str(ts),
             "gaza_hour": gaza_dt.strftime("%H:00"),
             "signal": s,
@@ -130,24 +128,21 @@ def extract_candidate_trades(df: pd.DataFrame, symbol: str) -> list:
     return candidates
 
 
-def apply_concurrency_cap(candidates: list, max_open: int, block_shared_currency: bool) -> list:
-    # ترتيب زمني أولاً، ثم الأقوى تشبّعاً في نفس الشمعة
+def apply_cap_2_no_overlap(candidates: list) -> list:
     ordered = sorted(candidates, key=lambda x: (x["entry_ts"], -x["strength"]))
     active = []
     accepted = []
 
     for trade in ordered:
         now = trade["entry_ts"]
-        # إزالة الصفقات التي انتهى وقتها قبل دخول هذه الشمعة
         active = [a for a in active if a["exit_ts"] > now]
 
-        if len(active) >= max_open:
+        if len(active) >= 2:
             continue
 
-        if block_shared_currency:
-            overlap = any(bool(trade["currencies"] & a["currencies"]) for a in active)
-            if overlap:
-                continue
+        overlap = any(bool(trade["currencies"] & a["currencies"]) for a in active)
+        if overlap:
+            continue
 
         active.append(trade)
         accepted.append(trade)
@@ -193,6 +188,7 @@ def summarize(name: str, trades: list, split_ts: pd.Timestamp, breakeven: float)
     pnl = round(sum(t["pnl"] for t in trades), 2)
     ml = max_loss_streak(trades)
     mdd = max_drawdown_usd(trades)
+    daily_avg = round(total_n / 43.0, 1)  # ~43 يوم تداول في 60 يوماً تقويمياً
 
     train_wr, _ = calc_wr([t for t in trades if t["entry_ts"] < split_ts])
     test_wr, _ = calc_wr([t for t in trades if t["entry_ts"] >= split_ts])
@@ -203,6 +199,7 @@ def summarize(name: str, trades: list, split_ts: pd.Timestamp, breakeven: float)
     return {
         "mode": name,
         "trades": total_n,
+        "daily_avg": daily_avg,
         "wr": overall_wr,
         "train_40d_wr": train_wr,
         "test_20d_wr": test_wr,
@@ -215,11 +212,16 @@ def summarize(name: str, trades: list, split_ts: pd.Timestamp, breakeven: float)
 
 def main():
     breakeven = (1 / (1 + PAYOUT)) * 100
-    logger.info("=" * 78)
-    logger.info(f"RISK LAB | Concurrency Cap Test on E_CalmHours_30m | {len(PAIRS)} Pairs")
-    logger.info("=" * 78)
+    logger.info("=" * 80)
+    logger.info(f"M5 LAB | Cap_2_NoOverlap | {len(PAIRS)} Non-JPY Pairs | Interval=5m | Period=60d")
+    logger.info("=" * 80)
 
-    all_candidates = []
+    expiries = {
+        "M5_Exp_5m (1c)": 1,
+        "M5_Exp_10m (2c)": 2,
+        "M5_Exp_15m (3c)": 3,
+    }
+    raw_candidates = {k: [] for k in expiries}
     all_timestamps = []
 
     for pair in PAIRS:
@@ -237,45 +239,44 @@ def main():
         all_timestamps.append(df.index.max())
 
         df = add_indicators(df)
-        all_candidates.extend(extract_candidate_trades(df, pair))
+        for name, exp_c in expiries.items():
+            raw_candidates[name].extend(extract_candidate_trades(df, pair, exp_c))
+
+        logger.info(f"تم فحص {pair:<10} ({len(df)} شمعة)")
 
     split_ts = max(all_timestamps) - pd.Timedelta(days=20)
 
-    modes = {
-        "No_Cap (الأساسي)": all_candidates,
-        "Cap_1_Trade": apply_concurrency_cap(all_candidates, max_open=1, block_shared_currency=False),
-        "Cap_2_NoOverlap": apply_concurrency_cap(all_candidates, max_open=2, block_shared_currency=True),
-    }
+    capped_trades = {name: apply_cap_2_no_overlap(cands) for name, cands in raw_candidates.items()}
+    summaries = [summarize(name, trades, split_ts, breakeven) for name, trades in capped_trades.items()]
+    summaries_sorted = sorted(summaries, key=lambda x: x["wr"], reverse=True)
 
-    summaries = [summarize(m, t, split_ts, breakeven) for m, t in modes.items()]
-
-    print("\n" + "=" * 106)
-    print(f"مقارنة قفل التزامن (E_CalmHours_30m) | نقطة التعادل: {breakeven:.2f}% | مخاطرة 10$ ثابتة")
-    print("=" * 106)
+    print("\n" + "=" * 116)
+    print(f"نتائج فريم 5 دقائق (Cap_2_NoOverlap) | نقطة التعادل: {breakeven:.2f}% | مخاطرة 10$ ثابتة")
+    print("=" * 116)
     print(
-        f"{'الوضع':<18} | {'صفقات':>5} | {'إجمالي WR':>9} | {'أول 40 يوم':>10} | "
+        f"{'النسخة':<17} | {'صفقات':>5} | {'يومياً':>6} | {'إجمالي WR':>9} | {'أول 40 يوم':>10} | "
         f"{'آخر 20 يوم':>10} | {'الربح $':>8} | {'خسارة متتالية':>12} | {'أقصى تراجع':>10} | الثبات"
     )
-    print("-" * 106)
-    for s in summaries:
+    print("-" * 116)
+    for s in summaries_sorted:
         print(
-            f"{s['mode']:<18} | {s['trades']:>5} | {s['wr']:>8.2f}% | "
+            f"{s['mode']:<17} | {s['trades']:>5} | {s['daily_avg']:>6.1f} | {s['wr']:>8.2f}% | "
             f"{s['train_40d_wr']:>9.2f}% | {s['test_20d_wr']:>9.2f}% | "
             f"{s['pnl_usd']:>+7.1f}$ | {s['max_loss_streak']:>12} | "
             f"{s['max_dd_usd']:>9.1f}$ | {s['stability']}"
         )
-    print("=" * 106)
+    print("=" * 116)
 
+    best_name = summaries_sorted[0]["mode"]
     with open("backtest_trend_result.json", "w", encoding="utf-8") as f:
-        json.dump({"breakeven": round(breakeven, 2), "modes": summaries}, f, ensure_ascii=False, indent=2)
+        json.dump({"breakeven": round(breakeven, 2), "interval": INTERVAL, "modes": summaries_sorted}, f, ensure_ascii=False, indent=2)
 
-    # حفظ صفقات Cap_1_Trade في ملف CSV للمراجعة
-    cap1_trades = modes["Cap_1_Trade"]
-    if cap1_trades:
-        export_df = pd.DataFrame(cap1_trades).drop(columns=["entry_ts", "exit_ts", "currencies"])
+    best_trades = capped_trades[best_name]
+    if best_trades:
+        export_df = pd.DataFrame(best_trades).drop(columns=["entry_ts", "exit_ts", "currencies"])
         export_df.to_csv("backtest_trend_trades.csv", index=False)
 
-    print("\n✅ حُفظ: backtest_trend_result.json و backtest_trend_trades.csv")
+    print(f"\n✅ حُفظت نتائج الأفضل ({best_name}) في backtest_trend_result.json و backtest_trend_trades.csv")
 
 
 if __name__ == "__main__":
