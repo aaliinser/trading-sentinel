@@ -26,9 +26,7 @@ PAYOUT = 0.85
 STAKE = 10.0
 EXPIRY_CANDLES = 2   # 30 دقيقة
 EXPIRY_MINUTES = 30
-
 CALM_HOURS = {22, 23, 0, 1, 2, 3, 4, 5, 6, 7, 8}
-CALM_PLUS_DAY = CALM_HOURS | {13, 14}
 
 
 def get_currencies(symbol: str) -> set:
@@ -36,39 +34,28 @@ def get_currencies(symbol: str) -> set:
     return {clean[:3], clean[3:6]}
 
 
-def add_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
+def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     close = df["close"]
 
-    # --- مؤشرات Strategy 3 (Scalp Reversal): BB(15, 2.0, ddof=0) + Wilder RSI(14) ---
-    sma15 = close.rolling(window=15, min_periods=15).mean()
-    std15 = close.rolling(window=15, min_periods=15).std(ddof=0)
-    df["s3_bb_u"] = sma15 + (2.0 * std15)
-    df["s3_bb_l"] = sma15 - (2.0 * std15)
+    # Bollinger Bands (20) بانحراف 2.0 و 1.8
+    sma20 = close.rolling(window=20, min_periods=20).mean()
+    std20 = close.rolling(window=20, min_periods=20).std()
+    df["bb20_u"] = sma20 + (2.0 * std20)
+    df["bb20_l"] = sma20 - (2.0 * std20)
+    df["bb18_u"] = sma20 + (1.8 * std20)
+    df["bb18_l"] = sma20 - (1.8 * std20)
 
+    # RSI (7)
     delta = close.diff()
     gain = delta.clip(lower=0.0)
     loss = -delta.clip(upper=0.0)
-
-    avg_g14 = gain.ewm(alpha=1.0 / 14.0, min_periods=14, adjust=False).mean()
-    avg_l14 = loss.ewm(alpha=1.0 / 14.0, min_periods=14, adjust=False).mean()
-    rs14 = avg_g14 / avg_l14.replace(0.0, np.nan)
-    rsi14 = 100.0 - (100.0 / (1.0 + rs14))
-    rsi14 = rsi14.mask((avg_l14 == 0.0) & (avg_g14 > 0.0), 100.0)
-    df["rsi14"] = rsi14.mask((avg_l14 == 0.0) & (avg_g14 == 0.0), 50.0)
-
-    # --- مؤشرات البطلة السابقة (Champ): BB(20, 2.0) + RSI(7) ---
-    sma20 = close.rolling(window=20, min_periods=20).mean()
-    std20 = close.rolling(window=20, min_periods=20).std()
-    df["c_bb_u"] = sma20 + (2.0 * std20)
-    df["c_bb_l"] = sma20 - (2.0 * std20)
-
     avg_g7 = gain.ewm(alpha=1.0 / 7.0, min_periods=7, adjust=False).mean()
     avg_l7 = loss.ewm(alpha=1.0 / 7.0, min_periods=7, adjust=False).mean()
     rs7 = avg_g7 / avg_l7.replace(0.0, np.nan)
     df["rsi7"] = 100.0 - (100.0 / (1.0 + rs7))
 
-    # --- مؤشر ADX(14) المشترك ---
+    # ADX (14)
     high_low = df["high"] - df["low"]
     high_close = (df["high"] - close.shift(1)).abs()
     low_close = (df["low"] - close.shift(1)).abs()
@@ -88,7 +75,7 @@ def add_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def extract_trades(df: pd.DataFrame, symbol: str, sig: pd.Series, rsi_col: str, allowed_hours: set | None) -> list:
+def extract_trades(df: pd.DataFrame, symbol: str, sig: pd.Series, allowed_hours: set | None) -> list:
     entry_open = df["open"].shift(-1)
     exit_close = df["close"].shift(-EXPIRY_CANDLES)
     entry_time = df.index.to_series().shift(-1)
@@ -117,7 +104,7 @@ def extract_trades(df: pd.DataFrame, symbol: str, sig: pd.Series, rsi_col: str, 
         else:
             res, pnl = "TIE", 0.0
 
-        rsi_val = float(df.loc[idx, rsi_col])
+        rsi_val = float(df.loc[idx, "rsi7"])
         trades.append({
             "pair": symbol,
             "currencies": get_currencies(symbol),
@@ -219,14 +206,14 @@ def summarize(name: str, trades: list, split_ts: pd.Timestamp, breakeven: float)
 def main():
     breakeven = (1 / (1 + PAYOUT)) * 100
     logger.info("=" * 84)
-    logger.info("CHAMPIONSHIP LAB | Strategy 3 (Filtered) vs Previous Champ | M15 -> 30m | Cap_2")
+    logger.info("FREQUENCY LAB | Relaxing Champ_BB20_RSI7 for More Signals | M15 -> 30m | Cap_2")
     logger.info("=" * 84)
 
     buckets = {
-        "S3_AllHours": [],
-        "S3_CalmHours": [],
-        "S3_Calm_Plus_Day": [],
-        "Champ_BB20_RSI7": [],
+        "V1_Original": [],
+        "V2_Relax_RSI": [],
+        "V3_Relax_Heavy": [],
+        "V4_AllDay_Relax": [],
     }
     all_timestamps = []
 
@@ -244,35 +231,45 @@ def main():
             df.index = df.index.tz_localize("UTC")
         all_timestamps.append(df.index.max())
 
-        df = add_all_indicators(df)
-        calm_adx = df["adx"] < 25
+        df = add_indicators(df)
+        red = df["close"] < df["open"]
+        green = df["close"] > df["open"]
 
-        # إشارات Strategy 3 المفلترة بـ ADX < 25
-        s3_sig = pd.Series("WAIT", index=df.index)
-        s3_sig[calm_adx & (df["rsi14"] <= 28.0) & (df["close"] <= df["s3_bb_l"])] = "CALL"
-        s3_sig[calm_adx & (df["rsi14"] >= 72.0) & (df["close"] >= df["s3_bb_u"])] = "PUT"
+        # V1: الأصلية (BB 2.0 | RSI 20/80 | ADX < 25 | ساعات الهدوء)
+        s1 = pd.Series("WAIT", index=df.index)
+        s1[(df["adx"] < 25) & red & (df["close"] < df["bb20_l"]) & (df["rsi7"] < 20)] = "CALL"
+        s1[(df["adx"] < 25) & green & (df["close"] > df["bb20_u"]) & (df["rsi7"] > 80)] = "PUT"
 
-        # إشارات البطلة السابقة (Champ)
-        c_sig = pd.Series("WAIT", index=df.index)
-        c_sig[calm_adx & (df["close"] < df["open"]) & (df["close"] < df["c_bb_l"]) & (df["rsi7"] < 20.0)] = "CALL"
-        c_sig[calm_adx & (df["close"] > df["open"]) & (df["close"] > df["c_bb_u"]) & (df["rsi7"] > 80.0)] = "PUT"
+        # V2: تخفيف خفيف (BB 2.0 | RSI 25/75 | ADX < 28 | ساعات الهدوء)
+        s2 = pd.Series("WAIT", index=df.index)
+        s2[(df["adx"] < 28) & red & (df["close"] < df["bb20_l"]) & (df["rsi7"] < 25)] = "CALL"
+        s2[(df["adx"] < 28) & green & (df["close"] > df["bb20_u"]) & (df["rsi7"] > 75)] = "PUT"
 
-        buckets["S3_AllHours"].extend(extract_trades(df, pair, s3_sig, "rsi14", None))
-        buckets["S3_CalmHours"].extend(extract_trades(df, pair, s3_sig, "rsi14", CALM_HOURS))
-        buckets["S3_Calm_Plus_Day"].extend(extract_trades(df, pair, s3_sig, "rsi14", CALM_PLUS_DAY))
-        buckets["Champ_BB20_RSI7"].extend(extract_trades(df, pair, c_sig, "rsi7", CALM_HOURS))
+        # V3: تخفيف قوي (BB 1.8 | RSI 28/72 | ADX < 30 | ساعات الهدوء)
+        s3 = pd.Series("WAIT", index=df.index)
+        s3[(df["adx"] < 30) & red & (df["close"] < df["bb18_l"]) & (df["rsi7"] < 28)] = "CALL"
+        s3[(df["adx"] < 30) & green & (df["close"] > df["bb18_u"]) & (df["rsi7"] > 72)] = "PUT"
+
+        # V4: تخفيف خفيف على مدار 24 ساعة (BB 2.0 | RSI 25/75 | ADX < 25 | كل الساعات)
+        s4 = pd.Series("WAIT", index=df.index)
+        s4[(df["adx"] < 25) & red & (df["close"] < df["bb20_l"]) & (df["rsi7"] < 25)] = "CALL"
+        s4[(df["adx"] < 25) & green & (df["close"] > df["bb20_u"]) & (df["rsi7"] > 75)] = "PUT"
+
+        buckets["V1_Original"].extend(extract_trades(df, pair, s1, CALM_HOURS))
+        buckets["V2_Relax_RSI"].extend(extract_trades(df, pair, s2, CALM_HOURS))
+        buckets["V3_Relax_Heavy"].extend(extract_trades(df, pair, s3, CALM_HOURS))
+        buckets["V4_AllDay_Relax"].extend(extract_trades(df, pair, s4, None))
 
     split_ts = max(all_timestamps) - pd.Timedelta(days=20)
-
     capped = {k: apply_cap_2_no_overlap(v) for k, v in buckets.items()}
     summaries = [summarize(k, v, split_ts, breakeven) for k, v in capped.items()]
-    summaries_sorted = sorted(summaries, key=lambda x: x["wr"], reverse=True)
+    summaries_sorted = sorted(summaries, key=lambda x: x["pnl_usd"], reverse=True)
 
     print("\n" + "=" * 124)
-    print(f"مواجهة البطولة (Cap_2_NoOverlap | M15 -> 30m) | نقطة التعادل: {breakeven:.2f}% | مخاطرة 10$ ثابتة")
+    print(f"اختبار زيادة الإشارات (Cap_2_NoOverlap | M15 -> 30m) | نقطة التعادل: {breakeven:.2f}% | مخاطرة 10$ ثابتة")
     print("=" * 124)
     print(
-        f"{'الاستراتيجية':<18} | {'صفقات':>5} | {'يومياً':>6} | {'إجمالي WR':>9} | {'أول 40 يوم':>10} | "
+        f"{'النسخة':<18} | {'صفقات':>5} | {'يومياً':>6} | {'إجمالي WR':>9} | {'أول 40 يوم':>10} | "
         f"{'آخر 20 يوم':>10} | {'الربح $':>8} | {'خسارة متتالية':>12} | {'تراجع $':>8} | {'عائد/تراجع':>9} | الثبات"
     )
     print("-" * 124)
@@ -292,7 +289,7 @@ def main():
     if capped[winner]:
         pd.DataFrame(capped[winner]).drop(columns=["entry_ts", "exit_ts", "currencies"]).to_csv("backtest_trend_trades.csv", index=False)
 
-    print(f"\n🏆 الفائز في هذا الاختبار: {winner}")
+    print(f"\n🏆 الأعلى ربحاً: {winner}")
     print("✅ حُفظ: backtest_trend_result.json و backtest_trend_trades.csv")
 
 
