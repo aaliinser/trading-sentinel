@@ -11,7 +11,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# 21 زوج فوركس حقيقي (بدون أي زوج ين JPY)
+# 21 زوج فوركس حقيقي (بدون JPY)
 PAIRS = [
     "EURUSD=X", "GBPUSD=X", "AUDUSD=X", "USDCAD=X", "NZDUSD=X", "USDCHF=X",
     "EURGBP=X", "EURCHF=X", "EURAUD=X", "EURCAD=X", "EURNZD=X",
@@ -24,7 +24,14 @@ INTERVAL = "15m"
 PERIOD = "60d"
 PAYOUT = 0.85
 STAKE = 10.0
+EXPIRY_CANDLES = 2  # 30 دقيقة على فريم 15m
+EXPIRY_MINUTES = 30
 CALM_HOURS_GAZA = {22, 23, 0, 1, 2, 3, 4, 5, 6, 7, 8}
+
+
+def get_currencies(symbol: str) -> set:
+    clean = symbol.replace("=X", "")
+    return {clean[:3], clean[3:6]}
 
 
 def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
@@ -36,7 +43,7 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     df["bb_upper"] = sma20 + (2.0 * std20)
     df["bb_lower"] = sma20 - (2.0 * std20)
 
-    # 2. RSI (7) السريع لفريم 15 دقيقة
+    # 2. RSI (7)
     delta = df["close"].diff()
     gain = delta.clip(lower=0.0)
     loss = -delta.clip(upper=0.0)
@@ -45,7 +52,7 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     rs = avg_gain / avg_loss.replace(0, np.nan)
     df["rsi7"] = 100 - (100 / (1 + rs))
 
-    # 3. ADX (14) لفلترة السوق العنيف
+    # 3. ADX (14)
     high_low = df["high"] - df["low"]
     high_close = (df["high"] - df["close"].shift(1)).abs()
     low_close = (df["low"] - df["close"].shift(1)).abs()
@@ -65,7 +72,7 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def generate_base_signals(df: pd.DataFrame) -> pd.Series:
+def extract_candidate_trades(df: pd.DataFrame, symbol: str) -> list:
     calm = df["adx"] < 25
     call_cond = calm & (df["close"] < df["open"]) & (df["close"] < df["bb_lower"]) & (df["rsi7"] < 20)
     put_cond = calm & (df["close"] > df["open"]) & (df["close"] > df["bb_upper"]) & (df["rsi7"] > 80)
@@ -73,31 +80,27 @@ def generate_base_signals(df: pd.DataFrame) -> pd.Series:
     sig = pd.Series("WAIT", index=df.index)
     sig[call_cond] = "CALL"
     sig[put_cond] = "PUT"
-    return sig
 
-
-def evaluate_variant(df: pd.DataFrame, symbol: str, signals: pd.Series, expiry_candles: int, filter_hours: bool):
     entry_open = df["open"].shift(-1)
-    exit_close = df["close"].shift(-expiry_candles)
+    exit_close = df["close"].shift(-EXPIRY_CANDLES)
     entry_time = df.index.to_series().shift(-1)
 
-    mask = signals.isin(["CALL", "PUT"]) & entry_open.notna() & exit_close.notna()
-    idxs = df.index[mask]
+    mask = sig.isin(["CALL", "PUT"]) & entry_open.notna() & exit_close.notna()
+    candidates = []
 
-    trades = []
-    for idx in idxs:
+    for idx in df.index[mask]:
         ts = entry_time.loc[idx]
         if ts.tzinfo is None:
             ts = ts.tz_localize("UTC")
         gaza_dt = ts.tz_convert("Asia/Gaza")
 
-        if filter_hours and gaza_dt.hour not in CALM_HOURS_GAZA:
+        if gaza_dt.hour not in CALM_HOURS_GAZA:
             continue
 
-        sig = signals.loc[idx]
+        s = sig.loc[idx]
         op = float(entry_open.loc[idx])
         cl = float(exit_close.loc[idx])
-        diff = (cl - op) if sig == "CALL" else (op - cl)
+        diff = (cl - op) if s == "CALL" else (op - cl)
 
         if diff > 0:
             res, pnl = "WIN", STAKE * PAYOUT
@@ -106,16 +109,50 @@ def evaluate_variant(df: pd.DataFrame, symbol: str, signals: pd.Series, expiry_c
         else:
             res, pnl = "TIE", 0.0
 
-        trades.append({
+        # قوة الإشارة لترتيب الأولوية عند تزامن أكثر من زوج في نفس الشمعة
+        rsi_val = float(df.loc[idx, "rsi7"])
+        strength = abs(50.0 - rsi_val)
+
+        candidates.append({
             "pair": symbol,
+            "currencies": get_currencies(symbol),
             "entry_ts": ts,
+            "exit_ts": ts + pd.Timedelta(minutes=EXPIRY_MINUTES),
             "entry_time": str(ts),
             "gaza_hour": gaza_dt.strftime("%H:00"),
-            "signal": sig,
+            "signal": s,
+            "rsi7": round(rsi_val, 2),
+            "strength": round(strength, 2),
             "result": res,
             "pnl": round(pnl, 2),
         })
-    return trades
+
+    return candidates
+
+
+def apply_concurrency_cap(candidates: list, max_open: int, block_shared_currency: bool) -> list:
+    # ترتيب زمني أولاً، ثم الأقوى تشبّعاً في نفس الشمعة
+    ordered = sorted(candidates, key=lambda x: (x["entry_ts"], -x["strength"]))
+    active = []
+    accepted = []
+
+    for trade in ordered:
+        now = trade["entry_ts"]
+        # إزالة الصفقات التي انتهى وقتها قبل دخول هذه الشمعة
+        active = [a for a in active if a["exit_ts"] > now]
+
+        if len(active) >= max_open:
+            continue
+
+        if block_shared_currency:
+            overlap = any(bool(trade["currencies"] & a["currencies"]) for a in active)
+            if overlap:
+                continue
+
+        active.append(trade)
+        accepted.append(trade)
+
+    return accepted
 
 
 def calc_wr(trades_list) -> tuple:
@@ -127,7 +164,6 @@ def calc_wr(trades_list) -> tuple:
 
 
 def max_loss_streak(trades) -> int:
-    # ترتيب زمني لحساب سلسلة الخسائر الحقيقية
     sorted_t = sorted(trades, key=lambda x: x["entry_ts"])
     max_l = cur_l = 0
     for t in sorted_t:
@@ -139,69 +175,53 @@ def max_loss_streak(trades) -> int:
     return max_l
 
 
-def summarize_with_split(name: str, trades: list, split_ts: pd.Timestamp, breakeven: float) -> dict:
+def max_drawdown_usd(trades) -> float:
+    sorted_t = sorted(trades, key=lambda x: x["entry_ts"])
+    equity = peak = max_dd = 0.0
+    for t in sorted_t:
+        equity += t["pnl"]
+        if equity > peak:
+            peak = equity
+        dd = peak - equity
+        if dd > max_dd:
+            max_dd = dd
+    return round(max_dd, 2)
+
+
+def summarize(name: str, trades: list, split_ts: pd.Timestamp, breakeven: float) -> dict:
     overall_wr, total_n = calc_wr(trades)
-    edge = overall_wr - breakeven
-    pnl = sum(t["pnl"] for t in trades)
+    pnl = round(sum(t["pnl"] for t in trades), 2)
     ml = max_loss_streak(trades)
+    mdd = max_drawdown_usd(trades)
 
-    # تقسيم زمني: أول 40 يوم (Train) مقابل آخر 20 يوم (Test)
-    train_trades = [t for t in trades if t["entry_ts"] < split_ts]
-    test_trades = [t for t in trades if t["entry_ts"] >= split_ts]
-
-    train_wr, train_n = calc_wr(train_trades)
-    test_wr, test_n = calc_wr(test_trades)
+    train_wr, _ = calc_wr([t for t in trades if t["entry_ts"] < split_ts])
+    test_wr, _ = calc_wr([t for t in trades if t["entry_ts"] >= split_ts])
 
     is_stable = (train_wr > breakeven) and (test_wr > breakeven)
     stability = "ثابتة ✅" if is_stable else ("متذبذبة ⚠️" if overall_wr > breakeven else "خاسرة ❌")
 
-    # تحليل الأزواج (حد أدنى 15 صفقة)
-    pair_stats = []
-    if trades:
-        tdf = pd.DataFrame(trades)
-        for pair, grp in tdf.groupby("pair"):
-            w = int((grp["result"] == "WIN").sum())
-            l = int((grp["result"] == "LOSS").sum())
-            if (w + l) >= 15:
-                pair_stats.append({
-                    "pair": pair,
-                    "trades": int(len(grp)),
-                    "wr": round(w / (w + l) * 100, 1),
-                    "pnl": round(float(grp["pnl"].sum()), 1),
-                })
-        pair_stats = sorted(pair_stats, key=lambda x: x["wr"], reverse=True)
-
     return {
-        "variant": name,
+        "mode": name,
         "trades": total_n,
         "wr": overall_wr,
-        "edge": round(edge, 2),
-        "pnl_usd": round(pnl, 2),
-        "max_loss_streak": ml,
         "train_40d_wr": train_wr,
-        "train_40d_n": train_n,
         "test_20d_wr": test_wr,
-        "test_20d_n": test_n,
+        "pnl_usd": pnl,
+        "max_loss_streak": ml,
+        "max_dd_usd": mdd,
         "stability": stability,
-        "top_pairs": pair_stats[:5],
-        "worst_pairs": pair_stats[-5:] if len(pair_stats) >= 5 else [],
     }
 
 
 def main():
     breakeven = (1 / (1 + PAYOUT)) * 100
-    logger.info("=" * 76)
-    logger.info(f"VALIDATION LAB | Merge + Time Split (40d vs 20d) | {len(PAIRS)} Pairs | M15")
-    logger.info("=" * 76)
+    logger.info("=" * 78)
+    logger.info(f"RISK LAB | Concurrency Cap Test on E_CalmHours_30m | {len(PAIRS)} Pairs")
+    logger.info("=" * 78)
 
-    variant_configs = {
-        "E_CalmHours_30m": (2, True),   # الدمج الجديد: ساعات الهدوء + 30 دقيقة
-        "D_CalmHours_15m": (1, True),   # ساعات الهدوء + 15 دقيقة
-        "C_Fast_30m": (2, False),       # كل الساعات + 30 دقيقة
-    }
-    all_variant_trades = {k: [] for k in variant_configs}
-
+    all_candidates = []
     all_timestamps = []
+
     for pair in PAIRS:
         df = yf.download(pair, period=PERIOD, interval=INTERVAL, progress=False, auto_adjust=False)
         if df.empty:
@@ -214,65 +234,45 @@ def main():
 
         if df.index.tz is None:
             df.index = df.index.tz_localize("UTC")
-        all_timestamps.append(df.index.min())
         all_timestamps.append(df.index.max())
 
         df = add_indicators(df)
-        base_sig = generate_base_signals(df)
+        all_candidates.extend(extract_candidate_trades(df, pair))
 
-        for v_name, (exp_c, f_hours) in variant_configs.items():
-            v_trades = evaluate_variant(df, pair, base_sig, exp_c, f_hours)
-            all_variant_trades[v_name].extend(v_trades)
+    split_ts = max(all_timestamps) - pd.Timedelta(days=20)
 
-        logger.info(f"تم فحص {pair:<10} ({len(df)} شمعة)")
+    modes = {
+        "No_Cap (الأساسي)": all_candidates,
+        "Cap_1_Trade": apply_concurrency_cap(all_candidates, max_open=1, block_shared_currency=False),
+        "Cap_2_NoOverlap": apply_concurrency_cap(all_candidates, max_open=2, block_shared_currency=True),
+    }
 
-    # تحديد نقطة التقسيم: آخر 20 يوم كعينة اختبار (Out-of-Sample)
-    max_ts = max(all_timestamps)
-    split_ts = max_ts - pd.Timedelta(days=20)
+    summaries = [summarize(m, t, split_ts, breakeven) for m, t in modes.items()]
 
-    summaries = [
-        summarize_with_split(v_name, trades, split_ts, breakeven)
-        for v_name, trades in all_variant_trades.items()
-    ]
-    summaries_sorted = sorted(summaries, key=lambda x: x["wr"], reverse=True)
-    best = summaries_sorted[0]
-
-    print("\n" + "=" * 96)
-    print(f"اختبار الدمج والثبات الزمني | نقطة التعادل: {breakeven:.2f}% | تاريخ الفصل: {split_ts.strftime('%Y-%m-%d')}")
-    print("=" * 96)
+    print("\n" + "=" * 106)
+    print(f"مقارنة قفل التزامن (E_CalmHours_30m) | نقطة التعادل: {breakeven:.2f}% | مخاطرة 10$ ثابتة")
+    print("=" * 106)
     print(
-        f"{'النسخة':<17} | {'صفقات':>5} | {'إجمالي WR':>9} | {'أول 40 يوم':>10} | "
-        f"{'آخر 20 يوم':>10} | {'الربح $':>8} | {'أقصى خسارة':>10} | الثبات"
+        f"{'الوضع':<18} | {'صفقات':>5} | {'إجمالي WR':>9} | {'أول 40 يوم':>10} | "
+        f"{'آخر 20 يوم':>10} | {'الربح $':>8} | {'خسارة متتالية':>12} | {'أقصى تراجع':>10} | الثبات"
     )
-    print("-" * 96)
-    for s in summaries_sorted:
+    print("-" * 106)
+    for s in summaries:
         print(
-            f"{s['variant']:<17} | {s['trades']:>5} | {s['wr']:>8.2f}% | "
+            f"{s['mode']:<18} | {s['trades']:>5} | {s['wr']:>8.2f}% | "
             f"{s['train_40d_wr']:>9.2f}% | {s['test_20d_wr']:>9.2f}% | "
-            f"{s['pnl_usd']:>+7.1f}$ | {s['max_loss_streak']:>10} | {s['stability']}"
+            f"{s['pnl_usd']:>+7.1f}$ | {s['max_loss_streak']:>12} | "
+            f"{s['max_dd_usd']:>9.1f}$ | {s['stability']}"
         )
-    print("=" * 96)
-
-    print(f"\nأفضل 5 أزواج في النسخة الأعلى ({best['variant']}):")
-    for p in best["top_pairs"]:
-        print(f"  {p['pair']:<10} WR={p['wr']:>5.1f}%  n={p['trades']:<4}  PnL={p['pnl']:>+7.1f}$")
-
-    if best["worst_pairs"]:
-        print(f"\nأسوأ 5 أزواج في النسخة الأعلى ({best['variant']}):")
-        for p in best["worst_pairs"]:
-            print(f"  {p['pair']:<10} WR={p['wr']:>5.1f}%  n={p['trades']:<4}  PnL={p['pnl']:>+7.1f}$")
+    print("=" * 106)
 
     with open("backtest_trend_result.json", "w", encoding="utf-8") as f:
-        json.dump(
-            {"breakeven": round(breakeven, 2), "split_date": str(split_ts), "variants": summaries_sorted},
-            f,
-            ensure_ascii=False,
-            indent=2,
-        )
+        json.dump({"breakeven": round(breakeven, 2), "modes": summaries}, f, ensure_ascii=False, indent=2)
 
-    best_trades = all_variant_trades[best["variant"]]
-    if best_trades:
-        export_df = pd.DataFrame(best_trades).drop(columns=["entry_ts"])
+    # حفظ صفقات Cap_1_Trade في ملف CSV للمراجعة
+    cap1_trades = modes["Cap_1_Trade"]
+    if cap1_trades:
+        export_df = pd.DataFrame(cap1_trades).drop(columns=["entry_ts", "exit_ts", "currencies"])
         export_df.to_csv("backtest_trend_trades.csv", index=False)
 
     print("\n✅ حُفظ: backtest_trend_result.json و backtest_trend_trades.csv")
