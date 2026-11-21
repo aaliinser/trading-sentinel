@@ -11,38 +11,41 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# استبعاد أزواج الين (JPY) والإبقاء على 11 زوجاً مناسباً للارتداد
+# 21 زوج فوركس حقيقي (بدون أي زوج ين JPY)
 PAIRS = [
-    "EURUSD=X", "GBPUSD=X", "AUDUSD=X", "USDCAD=X",
-    "NZDUSD=X", "EURGBP=X", "EURCHF=X", "EURAUD=X",
-    "USDCHF=X", "AUDNZD=X", "GBPCAD=X",
+    "EURUSD=X", "GBPUSD=X", "AUDUSD=X", "USDCAD=X", "NZDUSD=X", "USDCHF=X",
+    "EURGBP=X", "EURCHF=X", "EURAUD=X", "EURCAD=X", "EURNZD=X",
+    "GBPAUD=X", "GBPCHF=X", "GBPCAD=X", "GBPNZD=X",
+    "AUDCAD=X", "AUDCHF=X", "AUDNZD=X",
+    "CADCHF=X", "NZDCAD=X", "NZDCHF=X",
 ]
 
 INTERVAL = "15m"
 PERIOD = "60d"
 PAYOUT = 0.85
 STAKE = 10.0
+CALM_HOURS_GAZA = {22, 23, 0, 1, 2, 3, 4, 5, 6, 7, 8}
 
 
 def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
 
-    # 1. Bollinger Bands مشددة (20, 2.5)
+    # 1. Bollinger Bands (20, 2.0)
     sma20 = df["close"].rolling(window=20, min_periods=20).mean()
     std20 = df["close"].rolling(window=20, min_periods=20).std()
-    df["bb_upper"] = sma20 + (2.5 * std20)
-    df["bb_lower"] = sma20 - (2.5 * std20)
+    df["bb_upper"] = sma20 + (2.0 * std20)
+    df["bb_lower"] = sma20 - (2.0 * std20)
 
-    # 2. RSI (14) بطريقة Wilder القياسية
+    # 2. RSI (7) السريع لفريم 15 دقيقة
     delta = df["close"].diff()
     gain = delta.clip(lower=0.0)
     loss = -delta.clip(upper=0.0)
-    avg_gain = gain.ewm(alpha=1 / 14, min_periods=14, adjust=False).mean()
-    avg_loss = loss.ewm(alpha=1 / 14, min_periods=14, adjust=False).mean()
+    avg_gain = gain.ewm(alpha=1 / 7, min_periods=7, adjust=False).mean()
+    avg_loss = loss.ewm(alpha=1 / 7, min_periods=7, adjust=False).mean()
     rs = avg_gain / avg_loss.replace(0, np.nan)
-    df["rsi"] = 100 - (100 / (1 + rs))
+    df["rsi7"] = 100 - (100 / (1 + rs))
 
-    # 3. ADX (14) لتجنب الدخول عكس ترند عنيف
+    # 3. ADX (14) لفلترة السوق العنيف
     high_low = df["high"] - df["low"]
     high_close = (df["high"] - df["close"].shift(1)).abs()
     low_close = (df["low"] - df["close"].shift(1)).abs()
@@ -59,228 +62,199 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, np.nan)
     df["adx"] = dx.ewm(alpha=1 / 14, min_periods=14, adjust=False).mean()
 
+    # 4. قياسات الشمعة للذيل (Exhaustion Wick)
+    df["body"] = (df["close"] - df["open"]).abs()
+    df["lower_wick"] = df[["open", "close"]].min(axis=1) - df["low"]
+    df["upper_wick"] = df["high"] - df[["open", "close"]].max(axis=1)
+
     return df
 
 
-def generate_signals_strict_mr(df: pd.DataFrame) -> pd.Series:
-    """
-    Strategy 3 (v2 - M15) - Strict Mean Reversion
-    BB(20, 2.5) + RSI(25/75) + ADX < 25 | 1-Candle Expiry (15m)
-    """
-    calm_market = df["adx"] < 25
+def get_variant_signals(df: pd.DataFrame) -> dict:
+    calm = df["adx"] < 25
 
-    # شراء ارتدادي (CALL): شمعة هابطة تغلق تحت البولنجر 2.5 + RSI تحت 25
-    call_cond = (
-        calm_market
-        & (df["close"] < df["open"])
-        & (df["close"] < df["bb_lower"])
-        & (df["rsi"] < 25)
-    )
+    # الشرط الأساسي (A): BB(20, 2.0) + RSI(7) < 20 / > 80 + ADX < 25
+    base_call = calm & (df["close"] < df["open"]) & (df["close"] < df["bb_lower"]) & (df["rsi7"] < 20)
+    base_put = calm & (df["close"] > df["open"]) & (df["close"] > df["bb_upper"]) & (df["rsi7"] > 80)
 
-    # بيع ارتدادي (PUT): شمعة صاعدة تغلق فوق البولنجر 2.5 + RSI فوق 75
-    put_cond = (
-        calm_market
-        & (df["close"] > df["open"])
-        & (df["close"] > df["bb_upper"])
-        & (df["rsi"] > 75)
-    )
+    sig_a = pd.Series("WAIT", index=df.index)
+    sig_a[base_call] = "CALL"
+    sig_a[base_put] = "PUT"
 
-    signals = pd.Series("WAIT", index=df.index)
-    signals[call_cond] = "CALL"
-    signals[put_cond] = "PUT"
-    return signals
+    # النسخة (B): نفس A + شرط ذيل رفض واضح (الذيل >= 40% من جسم الشمعة)
+    sig_b = pd.Series("WAIT", index=df.index)
+    sig_b[base_call & (df["lower_wick"] >= df["body"] * 0.4)] = "CALL"
+    sig_b[base_put & (df["upper_wick"] >= df["body"] * 0.4)] = "PUT"
+
+    return {
+        "A_Fast_15m": (sig_a, 1, False),          # انتهاء شمعة واحدة (15 دقيقة)
+        "B_Wick_15m": (sig_b, 1, False),          # فلتر ذيل الرفض (15 دقيقة)
+        "C_Fast_30m": (sig_a, 2, False),          # انتهاء شمعتين (30 دقيقة)
+        "D_CalmHours_15m": (sig_a, 1, True),      # ساعات الهدوء بتوقيت غزة فقط
+    }
 
 
-def backtest_pair(symbol: str):
-    df = yf.download(symbol, period=PERIOD, interval=INTERVAL, progress=False, auto_adjust=False)
-    if df.empty:
-        return None, []
+def evaluate_variant(df: pd.DataFrame, symbol: str, signals: pd.Series, expiry_candles: int, filter_hours: bool):
+    entry_open = df["open"].shift(-1)
+    exit_close = df["close"].shift(-expiry_candles)
+    entry_time = df.index.to_series().shift(-1)
 
-    if isinstance(df.columns, pd.MultiIndex):
-        df.columns = df.columns.get_level_values(0)
-    df.columns = [c.lower() for c in df.columns]
-    df = df[["open", "high", "low", "close"]].dropna()
+    mask = signals.isin(["CALL", "PUT"]) & entry_open.notna() & exit_close.notna()
+    idxs = df.index[mask]
 
-    df = add_indicators(df)
-    df["signal"] = generate_signals_strict_mr(df)
-
-    # التنفيذ الصارم للخيارات الثنائية: دخول على افتتاح الشمعة i+1 وانتهاء عند إغلاقها (15 دقيقة)
-    df["next_open"] = df["open"].shift(-1)
-    df["next_close"] = df["close"].shift(-1)
-    df["entry_time"] = df.index.to_series().shift(-1)
-
-    trades_df = df[df["signal"].isin(["CALL", "PUT"])].dropna(subset=["next_open", "next_close"]).copy()
-
-    pip_factor = 100.0 if "JPY" in symbol else 10000.0
     trades = []
-    wins = losses = ties = 0
-    net_pips = 0.0
-
-    for _, row in trades_df.iterrows():
-        sig = row["signal"]
-        op = float(row["next_open"])
-        cl = float(row["next_close"])
-
-        diff = (cl - op) if sig == "CALL" else (op - cl)
-        pips = diff * pip_factor
-        net_pips += pips
-
-        if diff > 0:
-            res = "WIN"
-            wins += 1
-            pnl = STAKE * PAYOUT
-        elif diff < 0:
-            res = "LOSS"
-            losses += 1
-            pnl = -STAKE
-        else:
-            res = "TIE"
-            ties += 1
-            pnl = 0.0
-
-        ts = row["entry_time"]
+    for idx in idxs:
+        ts = entry_time.loc[idx]
         if ts.tzinfo is None:
             ts = ts.tz_localize("UTC")
-        gaza_hour = ts.tz_convert("Asia/Gaza").strftime("%H:00")
+        gaza_dt = ts.tz_convert("Asia/Gaza")
+
+        if filter_hours and gaza_dt.hour not in CALM_HOURS_GAZA:
+            continue
+
+        sig = signals.loc[idx]
+        op = float(entry_open.loc[idx])
+        cl = float(exit_close.loc[idx])
+        diff = (cl - op) if sig == "CALL" else (op - cl)
+
+        if diff > 0:
+            res, pnl = "WIN", STAKE * PAYOUT
+        elif diff < 0:
+            res, pnl = "LOSS", -STAKE
+        else:
+            res, pnl = "TIE", 0.0
 
         trades.append({
             "pair": symbol,
             "entry_time": str(ts),
-            "gaza_hour": gaza_hour,
+            "gaza_hour": gaza_dt.strftime("%H:00"),
             "signal": sig,
             "result": res,
-            "pips": round(pips, 2),
             "pnl": round(pnl, 2),
         })
+    return trades
 
+
+def max_loss_streak(trades) -> int:
+    max_l = cur_l = 0
+    for t in trades:
+        if t["result"] == "LOSS":
+            cur_l += 1
+            max_l = max(max_l, cur_l)
+        elif t["result"] == "WIN":
+            cur_l = 0
+    return max_l
+
+
+def summarize_variant(name: str, trades: list, breakeven: float) -> dict:
+    wins = sum(1 for t in trades if t["result"] == "WIN")
+    losses = sum(1 for t in trades if t["result"] == "LOSS")
+    ties = sum(1 for t in trades if t["result"] == "TIE")
     decided = wins + losses
     wr = (wins / decided * 100) if decided > 0 else 0.0
+    edge = wr - breakeven
+    pnl = sum(t["pnl"] for t in trades)
+    ml = max_loss_streak(trades)
 
-    summary = {
-        "pair": symbol,
-        "candles": len(df),
+    # حساب أفضل الأزواج لهذه النسخة
+    pair_stats = []
+    if trades:
+        tdf = pd.DataFrame(trades)
+        for pair, grp in tdf.groupby("pair"):
+            w = int((grp["result"] == "WIN").sum())
+            l = int((grp["result"] == "LOSS").sum())
+            if (w + l) >= 15:  # فقط الأزواج التي فيها 15 صفقة فأكثر لتجنب الحظ
+                pair_stats.append({
+                    "pair": pair,
+                    "trades": int(len(grp)),
+                    "wr": round(w / (w + l) * 100, 1),
+                    "pnl": round(float(grp["pnl"].sum()), 1),
+                })
+        pair_stats = sorted(pair_stats, key=lambda x: x["wr"], reverse=True)
+
+    return {
+        "variant": name,
         "trades": len(trades),
         "wins": wins,
         "losses": losses,
         "ties": ties,
         "wr": round(wr, 2),
-        "net_pips": round(net_pips, 1),
+        "edge": round(edge, 2),
+        "pnl_usd": round(pnl, 2),
+        "max_loss_streak": ml,
+        "verdict": "رابحة ✅" if edge > 0 else "خاسرة ❌",
+        "top_pairs": pair_stats[:5],
     }
-    return summary, trades
-
-
-def max_streaks(results):
-    max_w = max_l = cur_w = cur_l = 0
-    for r in results:
-        if r == "WIN":
-            cur_w += 1
-            cur_l = 0
-            max_w = max(max_w, cur_w)
-        elif r == "LOSS":
-            cur_l += 1
-            cur_w = 0
-            max_l = max(max_l, cur_l)
-    return max_w, max_l
 
 
 def main():
-    logger.info("=" * 64)
-    logger.info("BACKTEST | Strategy 3 (M15) - Strict Mean Reversion (No JPY)")
-    logger.info(f"Interval={INTERVAL} | Period={PERIOD} | Payout={PAYOUT}")
-    logger.info("=" * 64)
-
-    pair_summaries = []
-    all_trades = []
-
-    for pair in PAIRS:
-        summary, trades = backtest_pair(pair)
-        if summary is None:
-            continue
-        pair_summaries.append(summary)
-        all_trades.extend(trades)
-        logger.info(
-            f"{pair:<10} candles={summary['candles']:>6} "
-            f"trades={summary['trades']:>4} WR={summary['wr']:>5.1f}% "
-            f"net={summary['net_pips']:>+8.1f}"
-        )
-
-    total_trades = len(all_trades)
-    wins = sum(1 for t in all_trades if t["result"] == "WIN")
-    losses = sum(1 for t in all_trades if t["result"] == "LOSS")
-    ties = sum(1 for t in all_trades if t["result"] == "TIE")
-    decided = wins + losses
-    overall_wr = (wins / decided * 100) if decided > 0 else 0.0
     breakeven = (1 / (1 + PAYOUT)) * 100
-    edge = overall_wr - breakeven
-    total_pips = sum(t["pips"] for t in all_trades)
-    total_pnl = sum(t["pnl"] for t in all_trades)
-    max_w, max_l = max_streaks([t["result"] for t in all_trades])
+    logger.info("=" * 72)
+    logger.info(f"MATRIX LAB | 4 Variants | {len(PAIRS)} Non-JPY Pairs | M15 | 60d")
+    logger.info("=" * 72)
 
-    sorted_pairs = sorted(pair_summaries, key=lambda x: x["wr"], reverse=True)
-
-    trades_df = pd.DataFrame(all_trades)
-    hourly_stats = []
-    if not trades_df.empty:
-        for hr, grp in trades_df.groupby("gaza_hour"):
-            w = (grp["result"] == "WIN").sum()
-            l = (grp["result"] == "LOSS").sum()
-            if (w + l) > 0:
-                hourly_stats.append({"hour": hr, "wr": round(w / (w + l) * 100, 1), "n": int(len(grp))})
-    hourly_stats = sorted(hourly_stats, key=lambda x: x["wr"], reverse=True)
-
-    verdict = "رابحة إحصائياً ✅" if edge > 0 else "خاسرة إحصائياً عند هذا العائد ❌"
-
-    print("\n" + "=" * 64)
-    print("النتيجة الإجمالية (Strategy 3 - M15 Strict Mean Reversion)")
-    print("=" * 64)
-    print(f"إجمالي الصفقات   : {total_trades}")
-    print(f"رابحة / خاسرة    : {wins} / {losses}  (تعادل {ties})")
-    print(f"نسبة الفوز       : {overall_wr:.1f}%")
-    print(f"نسبة التعادل     : {breakeven:.2f}%  (عند عائد {int(PAYOUT*100)}%)")
-    print(f"الحافة           : {edge:+.2f} نقطة مئوية")
-    print(f"صافي النقاط      : {total_pips:+.1f} Pips")
-    print(f"محاكاة رأس المال : {total_pnl:+.2f} USD  (مخاطرة {STAKE}$)")
-    print(f"أطول ربح/خسارة   : {max_w} / {max_l}")
-    print("-" * 64)
-    print("أفضل 5 أزواج:")
-    for p in sorted_pairs[:5]:
-        print(f"  {p['pair']:<10} WR={p['wr']:>5.1f}%  n={p['trades']:<4}  net={p['net_pips']:>+8.1f}")
-    print("أسوأ 5 أزواج:")
-    for p in sorted_pairs[-5:]:
-        print(f"  {p['pair']:<10} WR={p['wr']:>5.1f}%  n={p['trades']:<4}  net={p['net_pips']:>+8.1f}")
-    print("-" * 64)
-    print("أفضل 5 ساعات (غزة):")
-    for h in hourly_stats[:5]:
-        print(f"  {h['hour']}  WR={h['wr']:>5.1f}%  n={h['n']}")
-    print("=" * 64)
-    print(f"الحكم: {verdict}\n")
-
-    result_payload = {
-        "strategy": "Strategy 3 (M15) - Strict Mean Reversion (No JPY)",
-        "interval": INTERVAL,
-        "period": PERIOD,
-        "total_trades": total_trades,
-        "wins": wins,
-        "losses": losses,
-        "ties": ties,
-        "win_rate": round(overall_wr, 2),
-        "breakeven": round(breakeven, 2),
-        "edge": round(edge, 2),
-        "net_pips": round(total_pips, 1),
-        "net_pnl_usd": round(total_pnl, 2),
-        "max_win_streak": max_w,
-        "max_loss_streak": max_l,
-        "pairs": pair_summaries,
-        "top_hours_gaza": hourly_stats[:10],
+    all_variant_trades = {
+        "A_Fast_15m": [],
+        "B_Wick_15m": [],
+        "C_Fast_30m": [],
+        "D_CalmHours_15m": [],
     }
 
+    loaded_pairs = 0
+    for pair in PAIRS:
+        df = yf.download(pair, period=PERIOD, interval=INTERVAL, progress=False, auto_adjust=False)
+        if df.empty:
+            logger.warning(f"{pair:<10} لا توجد بيانات")
+            continue
+
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
+        df.columns = [c.lower() for c in df.columns]
+        df = df[["open", "high", "low", "close"]].dropna()
+
+        df = add_indicators(df)
+        variants = get_variant_signals(df)
+
+        for v_name, (sig_series, exp_candles, f_hours) in variants.items():
+            v_trades = evaluate_variant(df, pair, sig_series, exp_candles, f_hours)
+            all_variant_trades[v_name].extend(v_trades)
+
+        loaded_pairs += 1
+        logger.info(f"تم فحص {pair:<10} ({len(df)} شمعة)")
+
+    summaries = [
+        summarize_variant(v_name, trades, breakeven)
+        for v_name, trades in all_variant_trades.items()
+    ]
+    summaries_sorted = sorted(summaries, key=lambda x: x["wr"], reverse=True)
+    best = summaries_sorted[0]
+
+    print("\n" + "=" * 78)
+    print(f"جدول مقارنة المصفوفة ({loaded_pairs} زوج بدون JPY | فريم 15m | نقطة التعادل {breakeven:.2f}%)")
+    print("=" * 78)
+    print(f"{'النسخة':<18} | {'الصفقات':>7} | {'فوز/خسارة':>11} | {'النسبة':>7} | {'الحافة':>7} | {'الربح $':>9} | {'خسارة متتالية':>12} | الحكم")
+    print("-" * 78)
+    for s in summaries_sorted:
+        wl = f"{s['wins']}/{s['losses']}"
+        print(
+            f"{s['variant']:<18} | {s['trades']:>7} | {wl:>11} | "
+            f"{s['wr']:>6.2f}% | {s['edge']:>+6.2f}% | {s['pnl_usd']:>+8.1f}$ | "
+            f"{s['max_loss_streak']:>12} | {s['verdict']}"
+        )
+    print("=" * 78)
+
+    print(f"\nأفضل 5 أزواج في النسخة الأعلى ({best['variant']}) [حد أدنى 15 صفقة]:")
+    for p in best["top_pairs"]:
+        print(f"  {p['pair']:<10} WR={p['wr']:>5.1f}%  n={p['trades']:<4}  PnL={p['pnl']:>+7.1f}$")
+
     with open("backtest_trend_result.json", "w", encoding="utf-8") as f:
-        json.dump(result_payload, f, ensure_ascii=False, indent=2)
+        json.dump({"breakeven": round(breakeven, 2), "variants": summaries_sorted}, f, ensure_ascii=False, indent=2)
 
-    if not trades_df.empty:
-        trades_df.to_csv("backtest_trend_trades.csv", index=False)
+    best_trades = all_variant_trades[best["variant"]]
+    if best_trades:
+        pd.DataFrame(best_trades).to_csv("backtest_trend_trades.csv", index=False)
 
-    print("✅ حُفظ: backtest_trend_result.json و backtest_trend_trades.csv")
+    print("\n✅ حُفظ: backtest_trend_result.json و backtest_trend_trades.csv")
 
 
 if __name__ == "__main__":
