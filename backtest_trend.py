@@ -203,7 +203,6 @@ def main():
     logger.info(f"90-STRATEGY DISCOVERY LAB | Interval={INTERVAL} | Period={PERIOD} | {len(PAIRS)} Non-JPY Pairs")
     logger.info("=" * 84)
 
-    # تخزين البيانات المحملة مرة واحدة لإعادة استخدامها في فحص Cap_2 لأفضل 5
     pair_cache = {}
     all_max_ts = []
 
@@ -226,7 +225,6 @@ def main():
 
     split_ts = max(all_max_ts) - pd.Timedelta(days=20)
 
-    # مصفوفة عدادات سريعة لـ 90 استراتيجية
     stats = {}
     expiries = [(1, "5m"), (2, "10m"), (3, "15m")]
     time_modes = [("All", False), ("Calm", True)]
@@ -237,9 +235,9 @@ def main():
         n = len(df)
 
         entry_ts_idx = df.index[1:]
-        gaza_hours = entry_ts_idx.tz_convert("Asia/Gaza").hour.to_numpy()
+        gaza_hours = np.asarray(entry_ts_idx.tz_convert("Asia/Gaza").hour)
         is_calm_arr = np.isin(gaza_hours, list(CALM_HOURS))
-        is_train_arr = (entry_ts_idx < split_ts).to_numpy()
+        is_train_arr = np.asarray(entry_ts_idx < split_ts)
 
         for core_name, sig_arr in cores.items():
             for exp_c, exp_lbl in expiries:
@@ -248,7 +246,6 @@ def main():
                     continue
 
                 s = sig_arr[:valid_len]
-                # entry at i+1 open, exit at i+exp_c close
                 op = opens[1 : valid_len + 1]
                 cl = closes[exp_c : valid_len + exp_c]
                 diff = np.where(s == 1, cl - op, np.where(s == -1, op - cl, 0.0))
@@ -279,14 +276,13 @@ def main():
                     st["te_l"] += int(np.sum(loss_m & (~train_slice)))
                     st["ties"] += int(np.sum(ties_m))
 
-    # تجميع وترتيب الـ 90 استراتيجية
     ranking = []
     for name, st in stats.items():
         w = st["tr_w"] + st["te_w"]
         l = st["tr_l"] + st["te_l"]
         decided = w + l
         total_n = decided + st["ties"]
-        if decided < 50:  # استبعاد العينات الصغيرة جداً
+        if decided < 50:
             continue
 
         wr = (w / decided) * 100.0
@@ -312,7 +308,6 @@ def main():
             "verdict": "ثابتة ✅" if stable else ("متذبذبة ⚠️" if wr > breakeven else "خاسرة ❌"),
         })
 
-    # الترتيب: الثابتة أولاً ثم الأعلى WR
     ranking.sort(key=lambda x: (x["stable"], x["wr"]), reverse=True)
 
     print("\n" + "=" * 114)
@@ -330,7 +325,6 @@ def main():
         )
     print("=" * 114)
 
-    # اختبار قفل التزامن Cap_2_NoOverlap على أفضل 5 استراتيجيات
     top5 = ranking[:5]
     cap2_results = []
     best_trades_export = []
