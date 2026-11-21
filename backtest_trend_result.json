@@ -1,0 +1,727 @@
+{
+  "strategy": "Strategy 2 - Trend Following (EMA200 + EMA50/20 Pullback)",
+  "generated_utc": "2026-11-21T19:10:50.644410+00:00",
+  "interval": "1h",
+  "period": "730d",
+  "payout": 0.85,
+  "breakeven_win_rate_pct": 54.05,
+  "symbols_ok": [
+    "EURUSD=X",
+    "GBPUSD=X",
+    "USDJPY=X",
+    "AUDUSD=X",
+    "USDCAD=X",
+    "NZDUSD=X",
+    "EURGBP=X",
+    "EURCHF=X",
+    "GBPJPY=X",
+    "AUDJPY=X",
+    "CADJPY=X",
+    "CHFJPY=X",
+    "EURAUD=X",
+    "USDCHF=X",
+    "AUDNZD=X",
+    "GBPCAD=X"
+  ],
+  "symbols_failed": [],
+  "overall": {
+    "total": 46700,
+    "wins": 22658,
+    "losses": 23204,
+    "voids": 838,
+    "win_rate": 49.4,
+    "net_pips": -7599.33,
+    "capital_usd": -39447.0
+  },
+  "max_win_streak": 19,
+  "max_loss_streak": 12,
+  "edge_vs_breakeven_pp": -4.65,
+  "by_pair": {
+    "AUDJPY=X": {
+      "total": 2810,
+      "wins": 1434,
+      "losses": 1334,
+      "voids": 42,
+      "win_rate": 51.81,
+      "net_pips": 1222.9,
+      "capital_usd": -1151.0
+    },
+    "AUDNZD=X": {
+      "total": 3552,
+      "wins": 1746,
+      "losses": 1773,
+      "voids": 33,
+      "win_rate": 49.62,
+      "net_pips": -390.0,
+      "capital_usd": -2889.0
+    },
+    "AUDUSD=X": {
+      "total": 2675,
+      "wins": 1290,
+      "losses": 1296,
+      "voids": 89,
+      "win_rate": 49.88,
+      "net_pips": -263.92,
+      "capital_usd": -1995.0
+    },
+    "CADJPY=X": {
+      "total": 2815,
+      "wins": 1364,
+      "losses": 1401,
+      "voids": 50,
+      "win_rate": 49.33,
+      "net_pips": -578.4,
+      "capital_usd": -2416.0
+    },
+    "CHFJPY=X": {
+      "total": 2933,
+      "wins": 1427,
+      "losses": 1484,
+      "voids": 22,
+      "win_rate": 49.02,
+      "net_pips": -736.0,
+      "capital_usd": -2710.5
+    },
+    "EURAUD=X": {
+      "total": 3106,
+      "wins": 1528,
+      "losses": 1565,
+      "voids": 13,
+      "win_rate": 49.4,
+      "net_pips": -189.5,
+      "capital_usd": -2662.0
+    },
+    "EURCHF=X": {
+      "total": 3793,
+      "wins": 1826,
+      "losses": 1927,
+      "voids": 40,
+      "win_rate": 48.65,
+      "net_pips": -1176.9,
+      "capital_usd": -3749.0
+    },
+    "EURGBP=X": {
+      "total": 3052,
+      "wins": 1448,
+      "losses": 1540,
+      "voids": 64,
+      "win_rate": 48.46,
+      "net_pips": -525.5,
+      "capital_usd": -3092.0
+    },
+    "EURUSD=X": {
+      "total": 2384,
+      "wins": 1052,
+      "losses": 1108,
+      "voids": 224,
+      "win_rate": 48.7,
+      "net_pips": -605.36,
+      "capital_usd": -2138.0
+    },
+    "GBPCAD=X": {
+      "total": 3004,
+      "wins": 1427,
+      "losses": 1552,
+      "voids": 25,
+      "win_rate": 47.9,
+      "net_pips": -1434.5,
+      "capital_usd": -3390.5
+    },
+    "GBPJPY=X": {
+      "total": 2824,
+      "wins": 1379,
+      "losses": 1426,
+      "voids": 19,
+      "win_rate": 49.16,
+      "net_pips": 1058.1,
+      "capital_usd": -2538.5
+    },
+    "GBPUSD=X": {
+      "total": 2551,
+      "wins": 1250,
+      "losses": 1281,
+      "voids": 20,
+      "win_rate": 49.39,
+      "net_pips": -903.1,
+      "capital_usd": -2185.0
+    },
+    "NZDUSD=X": {
+      "total": 2472,
+      "wins": 1208,
+      "losses": 1185,
+      "voids": 79,
+      "win_rate": 50.48,
+      "net_pips": -340.05,
+      "capital_usd": -1582.0
+    },
+    "USDCAD=X": {
+      "total": 3248,
+      "wins": 1578,
+      "losses": 1625,
+      "voids": 45,
+      "win_rate": 49.27,
+      "net_pips": 89.2,
+      "capital_usd": -2837.0
+    },
+    "USDCHF=X": {
+      "total": 2703,
+      "wins": 1327,
+      "losses": 1339,
+      "voids": 37,
+      "win_rate": 49.77,
+      "net_pips": -939.9,
+      "capital_usd": -2110.5
+    },
+    "USDJPY=X": {
+      "total": 2778,
+      "wins": 1374,
+      "losses": 1368,
+      "voids": 36,
+      "win_rate": 50.11,
+      "net_pips": -1886.4,
+      "capital_usd": -2001.0
+    }
+  },
+  "by_hour_gaza": {
+    "0": {
+      "total": 1863,
+      "wins": 904,
+      "losses": 911,
+      "voids": 48,
+      "win_rate": 49.81,
+      "net_pips": -1452.34,
+      "capital_usd": -1426.0
+    },
+    "1": {
+      "total": 1673,
+      "wins": 884,
+      "losses": 743,
+      "voids": 46,
+      "win_rate": 54.33,
+      "net_pips": 978.68,
+      "capital_usd": 84.0
+    },
+    "10": {
+      "total": 2223,
+      "wins": 1061,
+      "losses": 1135,
+      "voids": 27,
+      "win_rate": 48.32,
+      "net_pips": 826.64,
+      "capital_usd": -2331.5
+    },
+    "11": {
+      "total": 2059,
+      "wins": 1012,
+      "losses": 1016,
+      "voids": 31,
+      "win_rate": 49.9,
+      "net_pips": 183.14,
+      "capital_usd": -1558.0
+    },
+    "12": {
+      "total": 2004,
+      "wins": 955,
+      "losses": 1019,
+      "voids": 30,
+      "win_rate": 48.38,
+      "net_pips": -782.93,
+      "capital_usd": -2072.5
+    },
+    "13": {
+      "total": 1934,
+      "wins": 949,
+      "losses": 950,
+      "voids": 35,
+      "win_rate": 49.97,
+      "net_pips": -355.23,
+      "capital_usd": -1433.5
+    },
+    "14": {
+      "total": 2127,
+      "wins": 1001,
+      "losses": 1101,
+      "voids": 25,
+      "win_rate": 47.62,
+      "net_pips": -1581.82,
+      "capital_usd": -2501.5
+    },
+    "15": {
+      "total": 2341,
+      "wins": 1210,
+      "losses": 1107,
+      "voids": 24,
+      "win_rate": 52.22,
+      "net_pips": 1216.57,
+      "capital_usd": -785.0
+    },
+    "16": {
+      "total": 2379,
+      "wins": 1213,
+      "losses": 1145,
+      "voids": 21,
+      "win_rate": 51.44,
+      "net_pips": 192.01,
+      "capital_usd": -1139.5
+    },
+    "17": {
+      "total": 2324,
+      "wins": 1101,
+      "losses": 1199,
+      "voids": 24,
+      "win_rate": 47.87,
+      "net_pips": -1855.66,
+      "capital_usd": -2631.5
+    },
+    "18": {
+      "total": 1890,
+      "wins": 958,
+      "losses": 899,
+      "voids": 33,
+      "win_rate": 51.59,
+      "net_pips": -700.57,
+      "capital_usd": -847.0
+    },
+    "19": {
+      "total": 1730,
+      "wins": 884,
+      "losses": 802,
+      "voids": 44,
+      "win_rate": 52.43,
+      "net_pips": 404.46,
+      "capital_usd": -506.0
+    },
+    "2": {
+      "total": 1836,
+      "wins": 888,
+      "losses": 923,
+      "voids": 25,
+      "win_rate": 49.03,
+      "net_pips": -133.44,
+      "capital_usd": -1682.0
+    },
+    "20": {
+      "total": 1757,
+      "wins": 905,
+      "losses": 819,
+      "voids": 33,
+      "win_rate": 52.49,
+      "net_pips": 765.68,
+      "capital_usd": -497.5
+    },
+    "21": {
+      "total": 1821,
+      "wins": 869,
+      "losses": 913,
+      "voids": 39,
+      "win_rate": 48.77,
+      "net_pips": -411.34,
+      "capital_usd": -1743.5
+    },
+    "22": {
+      "total": 1678,
+      "wins": 706,
+      "losses": 926,
+      "voids": 46,
+      "win_rate": 43.26,
+      "net_pips": -2150.99,
+      "capital_usd": -3259.0
+    },
+    "23": {
+      "total": 1697,
+      "wins": 700,
+      "losses": 933,
+      "voids": 64,
+      "win_rate": 42.87,
+      "net_pips": -1784.07,
+      "capital_usd": -3380.0
+    },
+    "3": {
+      "total": 1813,
+      "wins": 886,
+      "losses": 899,
+      "voids": 28,
+      "win_rate": 49.64,
+      "net_pips": -597.08,
+      "capital_usd": -1459.0
+    },
+    "4": {
+      "total": 1921,
+      "wins": 909,
+      "losses": 972,
+      "voids": 40,
+      "win_rate": 48.33,
+      "net_pips": -130.8,
+      "capital_usd": -1993.5
+    },
+    "5": {
+      "total": 1898,
+      "wins": 903,
+      "losses": 950,
+      "voids": 45,
+      "win_rate": 48.73,
+      "net_pips": 304.58,
+      "capital_usd": -1824.5
+    },
+    "6": {
+      "total": 1813,
+      "wins": 851,
+      "losses": 922,
+      "voids": 40,
+      "win_rate": 48.0,
+      "net_pips": -195.77,
+      "capital_usd": -1986.5
+    },
+    "7": {
+      "total": 1729,
+      "wins": 792,
+      "losses": 890,
+      "voids": 47,
+      "win_rate": 47.09,
+      "net_pips": -962.62,
+      "capital_usd": -2168.0
+    },
+    "8": {
+      "total": 1926,
+      "wins": 997,
+      "losses": 909,
+      "voids": 20,
+      "win_rate": 52.31,
+      "net_pips": 1644.68,
+      "capital_usd": -615.5
+    },
+    "9": {
+      "total": 2264,
+      "wins": 1120,
+      "losses": 1121,
+      "voids": 23,
+      "win_rate": 49.98,
+      "net_pips": -1021.11,
+      "capital_usd": -1690.0
+    }
+  },
+  "by_weekday": {
+    "0": {
+      "total": 8407,
+      "wins": 4010,
+      "losses": 4233,
+      "voids": 164,
+      "win_rate": 48.65,
+      "net_pips": -2978.8,
+      "capital_usd": -8245.0
+    },
+    "1": {
+      "total": 9788,
+      "wins": 4711,
+      "losses": 4883,
+      "voids": 194,
+      "win_rate": 49.1,
+      "net_pips": -1321.12,
+      "capital_usd": -8786.5
+    },
+    "2": {
+      "total": 9197,
+      "wins": 4551,
+      "losses": 4497,
+      "voids": 149,
+      "win_rate": 50.3,
+      "net_pips": -2455.21,
+      "capital_usd": -6286.5
+    },
+    "3": {
+      "total": 9426,
+      "wins": 4486,
+      "losses": 4786,
+      "voids": 154,
+      "win_rate": 48.38,
+      "net_pips": -3052.52,
+      "capital_usd": -9729.0
+    },
+    "4": {
+      "total": 9808,
+      "wins": 4861,
+      "losses": 4772,
+      "voids": 175,
+      "win_rate": 50.46,
+      "net_pips": 2154.53,
+      "capital_usd": -6401.5
+    },
+    "5": {
+      "total": 74,
+      "wins": 39,
+      "losses": 33,
+      "voids": 2,
+      "win_rate": 54.17,
+      "net_pips": 53.79,
+      "capital_usd": 1.5
+    }
+  },
+  "by_direction": {
+    "CALL": {
+      "total": 26128,
+      "wins": 12928,
+      "losses": 12741,
+      "voids": 459,
+      "win_rate": 50.36,
+      "net_pips": -1345.73,
+      "capital_usd": -17522.0
+    },
+    "PUT": {
+      "total": 20572,
+      "wins": 9730,
+      "losses": 10463,
+      "voids": 379,
+      "win_rate": 48.19,
+      "net_pips": -6253.6,
+      "capital_usd": -21925.0
+    }
+  },
+  "best_pairs": [
+    [
+      "AUDJPY=X",
+      {
+        "total": 2810,
+        "wins": 1434,
+        "losses": 1334,
+        "voids": 42,
+        "win_rate": 51.81,
+        "net_pips": 1222.9,
+        "capital_usd": -1151.0
+      }
+    ],
+    [
+      "NZDUSD=X",
+      {
+        "total": 2472,
+        "wins": 1208,
+        "losses": 1185,
+        "voids": 79,
+        "win_rate": 50.48,
+        "net_pips": -340.05,
+        "capital_usd": -1582.0
+      }
+    ],
+    [
+      "USDJPY=X",
+      {
+        "total": 2778,
+        "wins": 1374,
+        "losses": 1368,
+        "voids": 36,
+        "win_rate": 50.11,
+        "net_pips": -1886.4,
+        "capital_usd": -2001.0
+      }
+    ],
+    [
+      "AUDUSD=X",
+      {
+        "total": 2675,
+        "wins": 1290,
+        "losses": 1296,
+        "voids": 89,
+        "win_rate": 49.88,
+        "net_pips": -263.92,
+        "capital_usd": -1995.0
+      }
+    ],
+    [
+      "USDCHF=X",
+      {
+        "total": 2703,
+        "wins": 1327,
+        "losses": 1339,
+        "voids": 37,
+        "win_rate": 49.77,
+        "net_pips": -939.9,
+        "capital_usd": -2110.5
+      }
+    ]
+  ],
+  "worst_pairs": [
+    [
+      "CHFJPY=X",
+      {
+        "total": 2933,
+        "wins": 1427,
+        "losses": 1484,
+        "voids": 22,
+        "win_rate": 49.02,
+        "net_pips": -736.0,
+        "capital_usd": -2710.5
+      }
+    ],
+    [
+      "EURUSD=X",
+      {
+        "total": 2384,
+        "wins": 1052,
+        "losses": 1108,
+        "voids": 224,
+        "win_rate": 48.7,
+        "net_pips": -605.36,
+        "capital_usd": -2138.0
+      }
+    ],
+    [
+      "EURCHF=X",
+      {
+        "total": 3793,
+        "wins": 1826,
+        "losses": 1927,
+        "voids": 40,
+        "win_rate": 48.65,
+        "net_pips": -1176.9,
+        "capital_usd": -3749.0
+      }
+    ],
+    [
+      "EURGBP=X",
+      {
+        "total": 3052,
+        "wins": 1448,
+        "losses": 1540,
+        "voids": 64,
+        "win_rate": 48.46,
+        "net_pips": -525.5,
+        "capital_usd": -3092.0
+      }
+    ],
+    [
+      "GBPCAD=X",
+      {
+        "total": 3004,
+        "wins": 1427,
+        "losses": 1552,
+        "voids": 25,
+        "win_rate": 47.9,
+        "net_pips": -1434.5,
+        "capital_usd": -3390.5
+      }
+    ]
+  ],
+  "best_hours": [
+    [
+      "1",
+      {
+        "total": 1673,
+        "wins": 884,
+        "losses": 743,
+        "voids": 46,
+        "win_rate": 54.33,
+        "net_pips": 978.68,
+        "capital_usd": 84.0
+      }
+    ],
+    [
+      "20",
+      {
+        "total": 1757,
+        "wins": 905,
+        "losses": 819,
+        "voids": 33,
+        "win_rate": 52.49,
+        "net_pips": 765.68,
+        "capital_usd": -497.5
+      }
+    ],
+    [
+      "19",
+      {
+        "total": 1730,
+        "wins": 884,
+        "losses": 802,
+        "voids": 44,
+        "win_rate": 52.43,
+        "net_pips": 404.46,
+        "capital_usd": -506.0
+      }
+    ],
+    [
+      "8",
+      {
+        "total": 1926,
+        "wins": 997,
+        "losses": 909,
+        "voids": 20,
+        "win_rate": 52.31,
+        "net_pips": 1644.68,
+        "capital_usd": -615.5
+      }
+    ],
+    [
+      "15",
+      {
+        "total": 2341,
+        "wins": 1210,
+        "losses": 1107,
+        "voids": 24,
+        "win_rate": 52.22,
+        "net_pips": 1216.57,
+        "capital_usd": -785.0
+      }
+    ]
+  ],
+  "worst_hours": [
+    [
+      "17",
+      {
+        "total": 2324,
+        "wins": 1101,
+        "losses": 1199,
+        "voids": 24,
+        "win_rate": 47.87,
+        "net_pips": -1855.66,
+        "capital_usd": -2631.5
+      }
+    ],
+    [
+      "14",
+      {
+        "total": 2127,
+        "wins": 1001,
+        "losses": 1101,
+        "voids": 25,
+        "win_rate": 47.62,
+        "net_pips": -1581.82,
+        "capital_usd": -2501.5
+      }
+    ],
+    [
+      "7",
+      {
+        "total": 1729,
+        "wins": 792,
+        "losses": 890,
+        "voids": 47,
+        "win_rate": 47.09,
+        "net_pips": -962.62,
+        "capital_usd": -2168.0
+      }
+    ],
+    [
+      "22",
+      {
+        "total": 1678,
+        "wins": 706,
+        "losses": 926,
+        "voids": 46,
+        "win_rate": 43.26,
+        "net_pips": -2150.99,
+        "capital_usd": -3259.0
+      }
+    ],
+    [
+      "23",
+      {
+        "total": 1697,
+        "wins": 700,
+        "losses": 933,
+        "voids": 64,
+        "win_rate": 42.87,
+        "net_pips": -1784.07,
+        "capital_usd": -3380.0
+      }
+    ]
+  ]
+}
