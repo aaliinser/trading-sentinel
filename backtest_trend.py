@@ -20,7 +20,7 @@ PAIRS = [
     "CADCHF=X", "NZDCAD=X", "NZDCHF=X",
 ]
 
-INTERVAL = "15m"
+INTERVAL = "5m"
 PERIOD = "60d"
 PAYOUT = 0.85
 STAKE = 10.0
@@ -32,218 +32,149 @@ def get_currencies(symbol: str) -> set:
     return {clean[:3], clean[3:6]}
 
 
-def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
+def compute_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
-    close = df["close"]
-    high = df["high"]
-    low = df["low"]
+    c = df["close"]
+    h = df["high"]
+    l = df["low"]
+    o = df["open"]
 
-    # 1. Wilder ATR (14)
-    prev_close = close.shift(1)
-    tr = pd.concat([
-        high - low,
-        (high - prev_close).abs(),
-        (low - prev_close).abs(),
-    ], axis=1).max(axis=1)
-    atr = tr.ewm(alpha=1.0 / 14.0, min_periods=14, adjust=False).mean()
+    # 1. Bollinger Bands (20) & Z-Score (20)
+    sma20 = c.rolling(20, min_periods=20).mean()
+    std20 = c.rolling(20, min_periods=20).std()
+    df["bb20_u"] = sma20 + 2.0 * std20
+    df["bb20_l"] = sma20 - 2.0 * std20
+    df["bb22_u"] = sma20 + 2.2 * std20
+    df["bb22_l"] = sma20 - 2.2 * std20
+    df["zscore"] = (c - sma20) / std20.replace(0.0, np.nan)
+
+    # 2. RSI (7) & RSI (14)
+    delta = c.diff()
+    gain = delta.clip(lower=0.0)
+    loss = -delta.clip(upper=0.0)
+
+    ag7 = gain.ewm(alpha=1 / 7, min_periods=7, adjust=False).mean()
+    al7 = loss.ewm(alpha=1 / 7, min_periods=7, adjust=False).mean()
+    df["rsi7"] = 100.0 - (100.0 / (1.0 + ag7 / al7.replace(0.0, np.nan)))
+
+    ag14 = gain.ewm(alpha=1 / 14, min_periods=14, adjust=False).mean()
+    al14 = loss.ewm(alpha=1 / 14, min_periods=14, adjust=False).mean()
+    df["rsi14"] = 100.0 - (100.0 / (1.0 + ag14 / al14.replace(0.0, np.nan)))
+
+    # 3. ADX (14) & ATR (14)
+    tr = pd.concat([h - l, (h - c.shift(1)).abs(), (l - c.shift(1)).abs()], axis=1).max(axis=1)
+    atr = tr.ewm(alpha=1 / 14, min_periods=14, adjust=False).mean()
     df["atr"] = atr
 
-    # 2. Wilder ADX (14)
-    up_move = high - high.shift(1)
-    down_move = low.shift(1) - low
-    plus_dm = np.where((up_move > down_move) & (up_move > 0), up_move, 0.0)
-    minus_dm = np.where((down_move > up_move) & (down_move > 0), down_move, 0.0)
+    up_m = h - h.shift(1)
+    dn_m = l.shift(1) - l
+    pdm = np.where((up_m > dn_m) & (up_m > 0), up_m, 0.0)
+    mdm = np.where((dn_m > up_m) & (dn_m > 0), dn_m, 0.0)
+    pdi = 100.0 * pd.Series(pdm, index=df.index).ewm(alpha=1 / 14, min_periods=14, adjust=False).mean() / atr
+    mdi = 100.0 * pd.Series(mdm, index=df.index).ewm(alpha=1 / 14, min_periods=14, adjust=False).mean() / atr
+    dx = 100.0 * (pdi - mdi).abs() / (pdi + mdi).replace(0.0, np.nan)
+    df["adx"] = dx.ewm(alpha=1 / 14, min_periods=14, adjust=False).mean()
 
-    plus_di = 100.0 * pd.Series(plus_dm, index=df.index).ewm(alpha=1.0 / 14.0, min_periods=14, adjust=False).mean() / atr
-    minus_di = 100.0 * pd.Series(minus_dm, index=df.index).ewm(alpha=1.0 / 14.0, min_periods=14, adjust=False).mean() / atr
-    dx = 100.0 * (plus_di - minus_di).abs() / (plus_di + minus_di).replace(0.0, np.nan)
-    df["adx"] = dx.ewm(alpha=1.0 / 14.0, min_periods=14, adjust=False).mean()
+    # 4. CCI (14)
+    tp = (h + l + c) / 3.0
+    tp_sma = tp.rolling(14, min_periods=14).mean()
+    mad = tp.rolling(14, min_periods=14).apply(lambda x: np.mean(np.abs(x - np.mean(x))), raw=True)
+    df["cci14"] = (tp - tp_sma) / (0.015 * mad.replace(0.0, np.nan))
+
+    # 5. Stochastic (14, 3) & EMA (20)
+    low14 = l.rolling(14, min_periods=14).min()
+    high14 = h.rolling(14, min_periods=14).max()
+    stoch_k = 100.0 * (c - low14) / (high14 - low14).replace(0.0, np.nan)
+    df["stoch_k"] = stoch_k.rolling(3, min_periods=3).mean()
+    df["ema20"] = c.ewm(span=20, adjust=False).mean()
+
+    # 6. Consecutive Candles Streak (red / green)
+    is_red = (c < o).astype(int)
+    is_green = (c > o).astype(int)
+    df["red_3"] = is_red.rolling(3).sum() == 3
+    df["red_4"] = is_red.rolling(4).sum() == 4
+    df["red_5"] = is_red.rolling(5).sum() == 5
+    df["grn_3"] = is_green.rolling(3).sum() == 3
+    df["grn_4"] = is_green.rolling(4).sum() == 4
+    df["grn_5"] = is_green.rolling(5).sum() == 5
 
     return df
 
 
-def generate_strategy_4_fixed_signals(df: pd.DataFrame, symbol: str) -> tuple[pd.Series, pd.Series]:
+def build_15_core_signals(df: pd.DataFrame) -> dict[str, np.ndarray]:
     """
-    Strategy 4 (FIXED) - Real Swing S/R + Real Pin Bar + ADX < 25
-    تُرجع: (الإشارة, قوة الذيل لترتيب الأولوية في قفل التزامن)
+    15 نواة إشارة (1 = CALL, -1 = PUT, 0 = WAIT)
+    15 نواة × 3 انتهاءات × 2 توقيت = 90 استراتيجية بالضبط
     """
-    n = len(df)
-    sig_vals = np.full(n, "WAIT", dtype=object)
-    strength_vals = np.zeros(n, dtype=float)
+    c = df["close"].to_numpy()
+    o = df["open"].to_numpy()
+    adx = df["adx"].to_numpy()
+    rsi7 = df["rsi7"].to_numpy()
+    rsi14 = df["rsi14"].to_numpy()
+    z = df["zscore"].to_numpy()
+    cci = df["cci14"].to_numpy()
+    sk = df["stoch_k"].to_numpy()
+    ema = df["ema20"].to_numpy()
+    atr = df["atr"].to_numpy()
+    bb20_u, bb20_l = df["bb20_u"].to_numpy(), df["bb20_l"].to_numpy()
+    bb22_u, bb22_l = df["bb22_u"].to_numpy(), df["bb22_l"].to_numpy()
 
-    if n < 130:
-        return pd.Series(sig_vals, index=df.index), pd.Series(strength_vals, index=df.index)
+    calm = adx < 25.0
+    red = c < o
+    grn = c > o
 
-    opens = df["open"].to_numpy(dtype=float)
-    highs = df["high"].to_numpy(dtype=float)
-    lows = df["low"].to_numpy(dtype=float)
-    closes = df["close"].to_numpy(dtype=float)
-    atrs = df["atr"].to_numpy(dtype=float)
-    adxs = df["adx"].to_numpy(dtype=float)
+    def sig(call_m, put_m):
+        out = np.zeros(len(df), dtype=np.int8)
+        out[call_m] = 1
+        out[put_m] = -1
+        return out
 
-    # استخراج القمم والقيعان الحقيقية (Swing High/Low بنافذة 3 يمين و 3 يسار)
-    is_swing_high = np.zeros(n, dtype=bool)
-    is_swing_low = np.zeros(n, dtype=bool)
-    for k in range(3, n - 3):
-        if highs[k] == np.max(highs[k - 3 : k + 4]):
-            is_swing_high[k] = True
-        if lows[k] == np.min(lows[k - 3 : k + 4]):
-            is_swing_low[k] = True
+    cores = {
+        # عائلة 1: BB + RSI
+        "F1_BB20_RSI7_15": sig(calm & red & (c < bb20_l) & (rsi7 < 15), calm & grn & (c > bb20_u) & (rsi7 > 85)),
+        "F1_BB22_RSI7_20": sig(calm & red & (c < bb22_l) & (rsi7 < 20), calm & grn & (c > bb22_u) & (rsi7 > 80)),
+        "F1_BB20_RSI14_25": sig(calm & red & (c < bb20_l) & (rsi14 < 25), calm & grn & (c > bb20_u) & (rsi14 > 75)),
 
-    body = np.abs(closes - opens)
-    lower_wick = np.minimum(opens, closes) - lows
-    upper_wick = highs - np.maximum(opens, closes)
+        # عائلة 2: Z-Score Snapback
+        "F2_ZScore_2.2": sig(calm & (z < -2.2) & red, calm & (z > 2.2) & grn),
+        "F2_ZScore_2.5": sig(calm & (z < -2.5) & red, calm & (z > 2.5) & grn),
+        "F2_ZScore_2.8": sig(calm & (z < -2.8) & red, calm & (z > 2.8) & grn),
 
-    min_tol = 0.015 if "JPY" in symbol else 0.00015
+        # عائلة 3: CCI + Bollinger
+        "F3_CCI150_BB": sig(calm & (cci < -150) & (c < bb20_l), calm & (cci > 150) & (c > bb20_u)),
+        "F3_CCI180_BB": sig(calm & (cci < -180) & (c < bb20_l), calm & (cci > 180) & (c > bb20_u)),
+        "F3_CCI200_BB": sig(calm & (cci < -200) & (c < bb20_l), calm & (cci > 200) & (c > bb20_u)),
 
-    for i in range(123, n):
-        atr = atrs[i]
-        adx = adxs[i]
-        if np.isnan(atr) or np.isnan(adx) or atr <= 0 or adx >= 25.0:
-            continue
+        # عائلة 4: Stochastic + EMA Stretch
+        "F4_Stoch10_EMA": sig(calm & (sk < 10) & ((ema - c) > atr * 1.2), calm & (sk > 90) & ((c - ema) > atr * 1.2)),
+        "F4_Stoch15_EMA": sig(calm & (sk < 15) & ((ema - c) > atr * 1.5), calm & (sk > 85) & ((c - ema) > atr * 1.5)),
+        "F4_Stoch10_BB": sig(calm & (sk < 10) & (c < bb20_l), calm & (sk > 90) & (c > bb20_u)),
 
-        # شرط Pin Bar الحقيقي (استبعاد الدوجي الميتة)
-        w_down = (lower_wick[i] >= atr * 0.6) and (lower_wick[i] >= body[i] * 1.8)
-        w_up = (upper_wick[i] >= atr * 0.6) and (upper_wick[i] >= body[i] * 1.8)
-        if not (w_down or w_up):
-            continue
-
-        # نأخذ فقط القمم والقيعان المؤكدة قبل الشمعة الحالية بـ 3 شموع على الأقل (منع Look-ahead)
-        start_idx = i - 120
-        end_idx = i - 3
-        swing_prices = []
-        for k in range(start_idx, end_idx):
-            if is_swing_high[k]:
-                swing_prices.append(highs[k])
-            if is_swing_low[k]:
-                swing_prices.append(lows[k])
-
-        if len(swing_prices) < 2:
-            continue
-
-        tol = max(atr * 0.35, min_tol)
-        lvl_prices = []
-        lvl_touches = []
-
-        for price in swing_prices:
-            matched = False
-            for j in range(len(lvl_prices)):
-                if abs(lvl_prices[j] - price) <= tol:
-                    lvl_touches[j] += 1
-                    matched = True
-                    break
-            if not matched:
-                lvl_prices.append(price)
-                lvl_touches.append(1)
-
-        # نشترط ارتدادين حقيقيين على الأقل (2 Swings)
-        valid_lvls = [lvl_prices[j] for j in range(len(lvl_prices)) if lvl_touches[j] >= 2]
-        if not valid_lvls:
-            continue
-
-        close_p = closes[i]
-        high_p = highs[i]
-        low_p = lows[i]
-        near_dist = atr * 0.35
-
-        if w_down:
-            supports = sorted([p for p in valid_lvls if p <= close_p], reverse=True)[:2]
-            if any(abs(low_p - s) <= near_dist for s in supports):
-                sig_vals[i] = "CALL"
-                strength_vals[i] = round(lower_wick[i] / atr, 2)
-                continue
-
-        if w_up:
-            resistances = sorted([p for p in valid_lvls if p > close_p])[:2]
-            if any(abs(high_p - r) <= near_dist for r in resistances):
-                sig_vals[i] = "PUT"
-                strength_vals[i] = round(upper_wick[i] / atr, 2)
-
-    return pd.Series(sig_vals, index=df.index), pd.Series(strength_vals, index=df.index)
-
-
-def extract_trades(
-    df: pd.DataFrame,
-    symbol: str,
-    sig: pd.Series,
-    strength: pd.Series,
-    expiry_candles: int,
-    allowed_hours: set | None,
-) -> list:
-    entry_open = df["open"].shift(-1)
-    exit_close = df["close"].shift(-expiry_candles)
-    entry_time = df.index.to_series().shift(-1)
-    expiry_minutes = expiry_candles * 15
-
-    mask = sig.isin(["CALL", "PUT"]) & entry_open.notna() & exit_close.notna()
-    trades = []
-
-    for idx in df.index[mask]:
-        ts = entry_time.loc[idx]
-        if ts.tzinfo is None:
-            ts = ts.tz_localize("UTC")
-        gaza_dt = ts.tz_convert("Asia/Gaza")
-
-        if allowed_hours is not None and gaza_dt.hour not in allowed_hours:
-            continue
-
-        s = sig.loc[idx]
-        op = float(entry_open.loc[idx])
-        cl = float(exit_close.loc[idx])
-        diff = (cl - op) if s == "CALL" else (op - cl)
-
-        if diff > 0:
-            res, pnl = "WIN", STAKE * PAYOUT
-        elif diff < 0:
-            res, pnl = "LOSS", -STAKE
-        else:
-            res, pnl = "TIE", 0.0
-
-        trades.append({
-            "pair": symbol,
-            "currencies": get_currencies(symbol),
-            "entry_ts": ts,
-            "exit_ts": ts + pd.Timedelta(minutes=expiry_minutes),
-            "entry_time": str(ts),
-            "gaza_hour": gaza_dt.strftime("%H:00"),
-            "signal": s,
-            "strength": float(strength.loc[idx]),
-            "result": res,
-            "pnl": round(pnl, 2),
-        })
-    return trades
+        # عائلة 5: Consecutive Candles Exhaustion
+        "F5_Streak3_RSI20": sig(calm & df["red_3"].to_numpy() & (rsi7 < 20), calm & df["grn_3"].to_numpy() & (rsi7 > 80)),
+        "F5_Streak4_RSI25": sig(calm & df["red_4"].to_numpy() & (rsi7 < 25), calm & df["grn_4"].to_numpy() & (rsi7 > 75)),
+        "F5_Streak5_Pure": sig(calm & df["red_5"].to_numpy(), calm & df["grn_5"].to_numpy()),
+    }
+    return cores
 
 
 def apply_cap_2_no_overlap(candidates: list) -> list:
     ordered = sorted(candidates, key=lambda x: (x["entry_ts"], -x["strength"]))
     active = []
     accepted = []
-
     for trade in ordered:
         now = trade["entry_ts"]
         active = [a for a in active if a["exit_ts"] > now]
-
         if len(active) >= 2:
             continue
-
         if any(bool(trade["currencies"] & a["currencies"]) for a in active):
             continue
-
         active.append(trade)
         accepted.append(trade)
-
     return accepted
 
 
-def calc_wr(trades_list) -> tuple:
-    w = sum(1 for t in trades_list if t["result"] == "WIN")
-    l = sum(1 for t in trades_list if t["result"] == "LOSS")
-    decided = w + l
-    wr = (w / decided * 100.0) if decided > 0 else 0.0
-    return round(wr, 2), len(trades_list)
-
-
-def max_loss_streak(trades) -> int:
+def max_loss_streak(trades: list) -> int:
     sorted_t = sorted(trades, key=lambda x: x["entry_ts"])
     max_l = cur_l = 0
     for t in sorted_t:
@@ -255,122 +186,265 @@ def max_loss_streak(trades) -> int:
     return max_l
 
 
-def max_drawdown_usd(trades) -> float:
+def max_drawdown_usd(trades: list) -> float:
     sorted_t = sorted(trades, key=lambda x: x["entry_ts"])
-    equity = peak = max_dd = 0.0
+    eq = peak = mdd = 0.0
     for t in sorted_t:
-        equity += t["pnl"]
-        if equity > peak:
-            peak = equity
-        dd = peak - equity
-        if dd > max_dd:
-            max_dd = dd
-    return round(max_dd, 2)
-
-
-def summarize(name: str, trades: list, split_ts: pd.Timestamp, breakeven: float) -> dict:
-    wr, n = calc_wr(trades)
-    pnl = round(sum(t["pnl"] for t in trades), 2)
-    ml = max_loss_streak(trades)
-    mdd = max_drawdown_usd(trades)
-    daily = round(n / 43.0, 1)
-    ret_dd = round(pnl / mdd, 2) if mdd > 0 else 0.0
-
-    train_wr, _ = calc_wr([t for t in trades if t["entry_ts"] < split_ts])
-    test_wr, _ = calc_wr([t for t in trades if t["entry_ts"] >= split_ts])
-
-    is_stable = (train_wr > breakeven) and (test_wr > breakeven)
-    stability = "ثابتة ✅" if is_stable else ("متذبذبة ⚠️" if wr > breakeven else "خاسرة ❌")
-
-    return {
-        "mode": name,
-        "trades": n,
-        "daily": daily,
-        "wr": wr,
-        "train_40d_wr": train_wr,
-        "test_20d_wr": test_wr,
-        "pnl_usd": pnl,
-        "max_loss_streak": ml,
-        "max_dd_usd": mdd,
-        "ret_dd": ret_dd,
-        "stability": stability,
-    }
+        eq += t["pnl"]
+        if eq > peak:
+            peak = eq
+        mdd = max(mdd, peak - eq)
+    return round(mdd, 2)
 
 
 def main():
-    breakeven = (1 / (1 + PAYOUT)) * 100
+    breakeven = (1 / (1 + PAYOUT)) * 100.0
     logger.info("=" * 84)
-    logger.info("BACKTEST | Strategy 4 (FIXED) - Real Swing S/R + Pin Bar | M15 | Cap_2")
+    logger.info(f"90-STRATEGY DISCOVERY LAB | Interval={INTERVAL} | Period={PERIOD} | {len(PAIRS)} Non-JPY Pairs")
     logger.info("=" * 84)
 
-    buckets = {
-        "S4_AllHours_15m": [],
-        "S4_AllHours_30m": [],
-        "S4_CalmHours_15m": [],
-        "S4_CalmHours_30m": [],
-    }
-    all_timestamps = []
+    # تخزين البيانات المحملة مرة واحدة لإعادة استخدامها في فحص Cap_2 لأفضل 5
+    pair_cache = {}
+    all_max_ts = []
 
     for pair in PAIRS:
         df = yf.download(pair, period=PERIOD, interval=INTERVAL, progress=False, auto_adjust=False)
-        if df.empty:
+        if df.empty or len(df) < 50:
             continue
-
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
         df.columns = [c.lower() for c in df.columns]
         df = df[["open", "high", "low", "close"]].dropna()
-
         if df.index.tz is None:
             df.index = df.index.tz_localize("UTC")
-        all_timestamps.append(df.index.max())
+        all_max_ts.append(df.index.max())
 
-        df = add_indicators(df)
-        sig, strength = generate_strategy_4_fixed_signals(df, pair)
+        df = compute_all_indicators(df)
+        cores = build_15_core_signals(df)
+        pair_cache[pair] = (df, cores)
+        logger.info(f"تم تجهيز {pair:<10} ({len(df)} شمعة)")
 
-        buckets["S4_AllHours_15m"].extend(extract_trades(df, pair, sig, strength, 1, None))
-        buckets["S4_AllHours_30m"].extend(extract_trades(df, pair, sig, strength, 2, None))
-        buckets["S4_CalmHours_15m"].extend(extract_trades(df, pair, sig, strength, 1, CALM_HOURS))
-        buckets["S4_CalmHours_30m"].extend(extract_trades(df, pair, sig, strength, 2, CALM_HOURS))
+    split_ts = max(all_max_ts) - pd.Timedelta(days=20)
 
-        logger.info(f"تم فحص {pair:<10} ({len(df)} شمعة)")
+    # مصفوفة عدادات سريعة لـ 90 استراتيجية
+    stats = {}
+    expiries = [(1, "5m"), (2, "10m"), (3, "15m")]
+    time_modes = [("All", False), ("Calm", True)]
 
-    split_ts = max(all_timestamps) - pd.Timedelta(days=20)
-    capped = {k: apply_cap_2_no_overlap(v) for k, v in buckets.items()}
-    summaries = [summarize(k, v, split_ts, breakeven) for k, v in capped.items()]
-    summaries_sorted = sorted(summaries, key=lambda x: x["wr"], reverse=True)
+    for pair, (df, cores) in pair_cache.items():
+        opens = df["open"].to_numpy()
+        closes = df["close"].to_numpy()
+        n = len(df)
+
+        entry_ts_idx = df.index[1:]
+        gaza_hours = entry_ts_idx.tz_convert("Asia/Gaza").hour.to_numpy()
+        is_calm_arr = np.isin(gaza_hours, list(CALM_HOURS))
+        is_train_arr = (entry_ts_idx < split_ts).to_numpy()
+
+        for core_name, sig_arr in cores.items():
+            for exp_c, exp_lbl in expiries:
+                valid_len = n - exp_c
+                if valid_len <= 1:
+                    continue
+
+                s = sig_arr[:valid_len]
+                # entry at i+1 open, exit at i+exp_c close
+                op = opens[1 : valid_len + 1]
+                cl = closes[exp_c : valid_len + exp_c]
+                diff = np.where(s == 1, cl - op, np.where(s == -1, op - cl, 0.0))
+
+                calm_slice = is_calm_arr[:valid_len]
+                train_slice = is_train_arr[:valid_len]
+
+                for t_lbl, only_calm in time_modes:
+                    strat_name = f"{core_name}|{t_lbl}|{exp_lbl}"
+                    if strat_name not in stats:
+                        stats[strat_name] = {
+                            "core": core_name, "only_calm": only_calm, "exp_c": exp_c,
+                            "tr_w": 0, "tr_l": 0, "te_w": 0, "te_l": 0, "ties": 0
+                        }
+
+                    active_m = (s != 0) & (calm_slice if only_calm else True)
+                    if not np.any(active_m):
+                        continue
+
+                    wins_m = active_m & (diff > 0)
+                    loss_m = active_m & (diff < 0)
+                    ties_m = active_m & (diff == 0)
+
+                    st = stats[strat_name]
+                    st["tr_w"] += int(np.sum(wins_m & train_slice))
+                    st["tr_l"] += int(np.sum(loss_m & train_slice))
+                    st["te_w"] += int(np.sum(wins_m & (~train_slice)))
+                    st["te_l"] += int(np.sum(loss_m & (~train_slice)))
+                    st["ties"] += int(np.sum(ties_m))
+
+    # تجميع وترتيب الـ 90 استراتيجية
+    ranking = []
+    for name, st in stats.items():
+        w = st["tr_w"] + st["te_w"]
+        l = st["tr_l"] + st["te_l"]
+        decided = w + l
+        total_n = decided + st["ties"]
+        if decided < 50:  # استبعاد العينات الصغيرة جداً
+            continue
+
+        wr = (w / decided) * 100.0
+        tr_dec = st["tr_w"] + st["tr_l"]
+        te_dec = st["te_w"] + st["te_l"]
+        tr_wr = (st["tr_w"] / tr_dec * 100.0) if tr_dec > 0 else 0.0
+        te_wr = (st["te_w"] / te_dec * 100.0) if te_dec > 0 else 0.0
+        pnl = w * (STAKE * PAYOUT) - l * STAKE
+        stable = (tr_wr > breakeven) and (te_wr > breakeven)
+
+        ranking.append({
+            "name": name,
+            "core": st["core"],
+            "only_calm": st["only_calm"],
+            "exp_c": st["exp_c"],
+            "trades": total_n,
+            "daily": round(total_n / 43.0, 1),
+            "wr": round(wr, 2),
+            "train_wr": round(tr_wr, 2),
+            "test_wr": round(te_wr, 2),
+            "pnl": round(pnl, 1),
+            "stable": stable,
+            "verdict": "ثابتة ✅" if stable else ("متذبذبة ⚠️" if wr > breakeven else "خاسرة ❌"),
+        })
+
+    # الترتيب: الثابتة أولاً ثم الأعلى WR
+    ranking.sort(key=lambda x: (x["stable"], x["wr"]), reverse=True)
+
+    print("\n" + "=" * 114)
+    print(f"أفضل 15 استراتيجية من أصل {len(stats)} استراتيجية على فريم 5m (خام) | نقطة التعادل: {breakeven:.2f}%")
+    print("=" * 114)
+    print(
+        f"{'الاستراتيجية':<28} | {'صفقات':>6} | {'يومياً':>6} | {'إجمالي WR':>9} | "
+        f"{'أول 40 يوم':>10} | {'آخر 20 يوم':>10} | {'الربح $':>9} | الثبات"
+    )
+    print("-" * 114)
+    for r in ranking[:15]:
+        print(
+            f"{r['name']:<28} | {r['trades']:>6} | {r['daily']:>6.1f} | {r['wr']:>8.2f}% | "
+            f"{r['train_wr']:>9.2f}% | {r['test_wr']:>9.2f}% | {r['pnl']:>+8.1f}$ | {r['verdict']}"
+        )
+    print("=" * 114)
+
+    # اختبار قفل التزامن Cap_2_NoOverlap على أفضل 5 استراتيجيات
+    top5 = ranking[:5]
+    cap2_results = []
+    best_trades_export = []
+
+    for idx_rank, r in enumerate(top5):
+        cands = []
+        exp_c = r["exp_c"]
+        exp_min = exp_c * 5
+        only_calm = r["only_calm"]
+        core_name = r["core"]
+
+        for pair, (df, cores) in pair_cache.items():
+            sig_arr = cores[core_name]
+            opens = df["open"].to_numpy()
+            closes = df["close"].to_numpy()
+            rsi7_arr = df["rsi7"].to_numpy()
+            idx_list = df.index
+            valid_len = len(df) - exp_c
+
+            idxs = np.where(sig_arr[:valid_len] != 0)[0]
+            for i in idxs:
+                ts = idx_list[i + 1]
+                gaza_dt = ts.tz_convert("Asia/Gaza")
+                if only_calm and gaza_dt.hour not in CALM_HOURS:
+                    continue
+
+                s = int(sig_arr[i])
+                op = float(opens[i + 1])
+                cl = float(closes[i + exp_c])
+                diff = (cl - op) if s == 1 else (op - cl)
+                if diff > 0:
+                    res, pnl = "WIN", STAKE * PAYOUT
+                elif diff < 0:
+                    res, pnl = "LOSS", -STAKE
+                else:
+                    res, pnl = "TIE", 0.0
+
+                strength = abs(50.0 - float(rsi7_arr[i])) if not np.isnan(rsi7_arr[i]) else 0.0
+                cands.append({
+                    "pair": pair,
+                    "currencies": get_currencies(pair),
+                    "entry_ts": ts,
+                    "exit_ts": ts + pd.Timedelta(minutes=exp_min),
+                    "entry_time": str(ts),
+                    "gaza_hour": gaza_dt.strftime("%H:00"),
+                    "signal": "CALL" if s == 1 else "PUT",
+                    "strength": round(strength, 2),
+                    "result": res,
+                    "pnl": round(pnl, 2),
+                })
+
+        accepted = apply_cap_2_no_overlap(cands)
+        if idx_rank == 0:
+            best_trades_export = accepted
+
+        w = sum(1 for t in accepted if t["result"] == "WIN")
+        l = sum(1 for t in accepted if t["result"] == "LOSS")
+        wr = round((w / (w + l) * 100.0), 2) if (w + l) > 0 else 0.0
+
+        tr_t = [t for t in accepted if t["entry_ts"] < split_ts]
+        te_t = [t for t in accepted if t["entry_ts"] >= split_ts]
+        tr_w = sum(1 for t in tr_t if t["result"] == "WIN")
+        tr_l = sum(1 for t in tr_t if t["result"] == "LOSS")
+        te_w = sum(1 for t in te_t if t["result"] == "WIN")
+        te_l = sum(1 for t in te_t if t["result"] == "LOSS")
+        tr_wr = round((tr_w / (tr_w + tr_l) * 100.0), 2) if (tr_w + tr_l) > 0 else 0.0
+        te_wr = round((te_w / (te_w + te_l) * 100.0), 2) if (te_w + te_l) > 0 else 0.0
+
+        pnl_sum = round(sum(t["pnl"] for t in accepted), 2)
+        mdd = max_drawdown_usd(accepted)
+        ml = max_loss_streak(accepted)
+        stable = (tr_wr > breakeven) and (te_wr > breakeven)
+
+        cap2_results.append({
+            "name": r["name"],
+            "trades": len(accepted),
+            "daily": round(len(accepted) / 43.0, 1),
+            "wr": wr,
+            "train_wr": tr_wr,
+            "test_wr": te_wr,
+            "pnl_usd": pnl_sum,
+            "max_loss_streak": ml,
+            "max_dd_usd": mdd,
+            "verdict": "ثابتة ✅" if stable else ("متذبذبة ⚠️" if wr > breakeven else "خاسرة ❌"),
+        })
 
     print("\n" + "=" * 124)
-    print(f"نتائج Strategy 4 (FIXED - Real Swing S/R + Pin Bar) | نقطة التعادل: {breakeven:.2f}% | مخاطرة 10$ ثابتة")
+    print(f"اختبار الحماية الصارم (Cap_2_NoOverlap) لأفضل 5 استراتيجيات على فريم 5m")
     print("=" * 124)
     print(
-        f"{'الوضع':<18} | {'صفقات':>5} | {'يومياً':>6} | {'إجمالي WR':>9} | {'أول 40 يوم':>10} | "
-        f"{'آخر 20 يوم':>10} | {'الربح $':>8} | {'خسارة متتالية':>12} | {'تراجع $':>8} | {'عائد/تراجع':>9} | الثبات"
+        f"{'الاستراتيجية':<28} | {'صفقات':>5} | {'يومياً':>6} | {'إجمالي WR':>9} | {'أول 40 يوم':>10} | "
+        f"{'آخر 20 يوم':>10} | {'الربح $':>8} | {'خسارة متتالية':>12} | {'تراجع $':>8} | الثبات"
     )
     print("-" * 124)
-    for s in summaries_sorted:
+    for c2 in cap2_results:
         print(
-            f"{s['mode']:<18} | {s['trades']:>5} | {s['daily']:>6.1f} | {s['wr']:>8.2f}% | "
-            f"{s['train_40d_wr']:>9.2f}% | {s['test_20d_wr']:>9.2f}% | "
-            f"{s['pnl_usd']:>+7.1f}$ | {s['max_loss_streak']:>12} | "
-            f"{s['max_dd_usd']:>7.1f}$ | {s['ret_dd']:>9.2f} | {s['stability']}"
+            f"{c2['name']:<28} | {c2['trades']:>5} | {c2['daily']:>6.1f} | {c2['wr']:>8.2f}% | "
+            f"{c2['train_wr']:>9.2f}% | {c2['test_wr']:>9.2f}% | "
+            f"{c2['pnl_usd']:>+7.1f}$ | {c2['max_loss_streak']:>12} | {c2['max_dd_usd']:>7.1f}$ | {c2['verdict']}"
         )
     print("=" * 124)
 
-    winner = summaries_sorted[0]["mode"]
     with open("backtest_trend_result.json", "w", encoding="utf-8") as f:
         json.dump(
-            {"strategy": "Strategy 4 (FIXED) - Real Swing S/R + Pin Bar", "breakeven": round(breakeven, 2), "results": summaries_sorted},
+            {"total_tested": len(stats), "interval": INTERVAL, "top15_raw": ranking[:15], "top5_cap2": cap2_results},
             f,
             ensure_ascii=False,
             indent=2,
         )
 
-    if capped[winner]:
-        pd.DataFrame(capped[winner]).drop(columns=["entry_ts", "exit_ts", "currencies"]).to_csv("backtest_trend_trades.csv", index=False)
+    if best_trades_export:
+        pd.DataFrame(best_trades_export).drop(columns=["entry_ts", "exit_ts", "currencies"]).to_csv("backtest_trend_trades.csv", index=False)
 
-    print(f"\n🏆 الأعلى في هذا الاختبار: {winner}")
-    print("✅ حُفظ: backtest_trend_result.json و backtest_trend_trades.csv")
+    print("\n✅ حُفظ: backtest_trend_result.json و backtest_trend_trades.csv")
 
 
 if __name__ == "__main__":
