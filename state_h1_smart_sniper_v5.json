@@ -1,17 +1,6 @@
 {
-  "frozen_pairs": {
-    "EURGBP=X": "2026-11-23T21:00:00+00:00"
-  },
-  "open_trades": [
-    {
-      "id": "8dfa8901",
-      "symbol": "EURGBP=X",
-      "type": "CALL",
-      "entry_price": 0.8364499807357788,
-      "entry_time": "2026-11-23T19:00:00+00:00",
-      "signal_sent": true
-    }
-  ],
+  "frozen_pairs": {},
+  "open_trades": [],
   "trade_history": [
     {
       "id": "52b0c74f",
@@ -1409,6 +1398,17 @@
       "exit_time": "2026-11-23T13:00:00+00:00",
       "win": false,
       "pips": 5.6
+    },
+    {
+      "id": "8dfa8901",
+      "symbol": "EURGBP=X",
+      "type": "CALL",
+      "entry_price": 0.8364499807357788,
+      "exit_price": 0.8363500237464905,
+      "entry_time": "2026-11-23T19:00:00+00:00",
+      "exit_time": "2026-11-23T21:00:00+00:00",
+      "win": false,
+      "pips": 1.0
     }
   ],
   "daily_counter_date": "2026-11-23",
