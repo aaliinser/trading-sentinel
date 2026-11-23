@@ -1,26 +1,6 @@
 {
-  "frozen_pairs": {
-    "EURGBP=X": "2026-11-23T13:00:00+00:00",
-    "AUDNZD=X": "2026-11-23T13:00:00+00:00"
-  },
-  "open_trades": [
-    {
-      "id": "559afc9e",
-      "symbol": "EURGBP=X",
-      "type": "CALL",
-      "entry_price": 0.8367800116539001,
-      "entry_time": "2026-11-23T11:00:00+00:00",
-      "signal_sent": true
-    },
-    {
-      "id": "eaf77a90",
-      "symbol": "AUDNZD=X",
-      "type": "PUT",
-      "entry_price": 1.2134300470352173,
-      "entry_time": "2026-11-23T11:00:00+00:00",
-      "signal_sent": true
-    }
-  ],
+  "frozen_pairs": {},
+  "open_trades": [],
   "trade_history": [
     {
       "id": "52b0c74f",
@@ -1396,6 +1376,28 @@
       "exit_time": "2026-11-23T11:00:00+00:00",
       "win": true,
       "pips": 6.4
+    },
+    {
+      "id": "559afc9e",
+      "symbol": "EURGBP=X",
+      "type": "CALL",
+      "entry_price": 0.8367800116539001,
+      "exit_price": 0.8365899920463562,
+      "entry_time": "2026-11-23T11:00:00+00:00",
+      "exit_time": "2026-11-23T13:00:00+00:00",
+      "win": false,
+      "pips": 1.9
+    },
+    {
+      "id": "eaf77a90",
+      "symbol": "AUDNZD=X",
+      "type": "PUT",
+      "entry_price": 1.2134300470352173,
+      "exit_price": 1.2139899730682373,
+      "entry_time": "2026-11-23T11:00:00+00:00",
+      "exit_time": "2026-11-23T13:00:00+00:00",
+      "win": false,
+      "pips": 5.6
     }
   ],
   "daily_counter_date": "2026-11-23",
