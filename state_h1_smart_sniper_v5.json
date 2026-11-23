@@ -1,14 +1,14 @@
 {
   "frozen_pairs": {
-    "USDCHF=X": "2026-11-23T08:00:00+00:00"
+    "AUDJPY=X": "2026-11-23T09:00:00+00:00"
   },
   "open_trades": [
     {
-      "id": "8029e568",
-      "symbol": "USDCHF=X",
-      "type": "CALL",
-      "entry_price": 0.838919997215271,
-      "entry_time": "2026-11-23T06:00:00+00:00",
+      "id": "0863d83d",
+      "symbol": "AUDJPY=X",
+      "type": "PUT",
+      "entry_price": 105.697998046875,
+      "entry_time": "2026-11-23T07:00:00+00:00",
       "signal_sent": true
     }
   ],
@@ -1332,10 +1332,21 @@
       "exit_time": "2026-11-20T17:00:00+00:00",
       "win": true,
       "pips": 3.4
+    },
+    {
+      "id": "8029e568",
+      "symbol": "USDCHF=X",
+      "type": "CALL",
+      "entry_price": 0.838919997215271,
+      "exit_price": 0.8378599882125854,
+      "entry_time": "2026-11-23T06:00:00+00:00",
+      "exit_time": "2026-11-23T08:00:00+00:00",
+      "win": false,
+      "pips": 10.6
     }
   ],
   "daily_counter_date": "2026-11-23",
-  "daily_signal_count": 1,
+  "daily_signal_count": 2,
   "last_daily_report": "2026-11-22",
   "last_weekly_report": "2026-W47",
   "last_monthly_report": "2026-10"
