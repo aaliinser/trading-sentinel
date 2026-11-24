@@ -1,41 +1,32 @@
 {
   "frozen_pairs": {
-    "GBPJPY=X": "2026-11-24T12:00:00+00:00",
-    "AUDJPY=X": "2026-11-24T12:00:00+00:00",
-    "CADJPY=X": "2026-11-24T12:00:00+00:00",
-    "CHFJPY=X": "2026-11-24T12:00:00+00:00"
+    "EURUSD=X": "2026-11-24T13:00:00+00:00",
+    "USDCAD=X": "2026-11-24T13:00:00+00:00",
+    "USDCHF=X": "2026-11-24T13:00:00+00:00"
   },
   "open_trades": [
     {
-      "id": "5a5feef5",
-      "symbol": "GBPJPY=X",
+      "id": "c1c79414",
+      "symbol": "EURUSD=X",
       "type": "PUT",
-      "entry_price": 208.14700317382812,
-      "entry_time": "2026-11-24T10:00:00+00:00",
+      "entry_price": 1.0958904027938843,
+      "entry_time": "2026-11-24T11:00:00+00:00",
       "signal_sent": true
     },
     {
-      "id": "7f79f4f8",
-      "symbol": "AUDJPY=X",
-      "type": "PUT",
-      "entry_price": 105.49299621582031,
-      "entry_time": "2026-11-24T10:00:00+00:00",
+      "id": "86e4e9f0",
+      "symbol": "USDCAD=X",
+      "type": "CALL",
+      "entry_price": 1.4322999715805054,
+      "entry_time": "2026-11-24T11:00:00+00:00",
       "signal_sent": true
     },
     {
-      "id": "f834667b",
-      "symbol": "CADJPY=X",
-      "type": "PUT",
-      "entry_price": 111.05899810791016,
-      "entry_time": "2026-11-24T10:00:00+00:00",
-      "signal_sent": true
-    },
-    {
-      "id": "eb2e52c8",
-      "symbol": "CHFJPY=X",
-      "type": "PUT",
-      "entry_price": 189.5590057373047,
-      "entry_time": "2026-11-24T10:00:00+00:00",
+      "id": "a65913c8",
+      "symbol": "USDCHF=X",
+      "type": "CALL",
+      "entry_price": 0.8388500213623047,
+      "entry_time": "2026-11-24T11:00:00+00:00",
       "signal_sent": true
     }
   ],
@@ -1480,10 +1471,54 @@
       "exit_time": "2026-11-24T09:00:00+00:00",
       "win": true,
       "pips": 6.8
+    },
+    {
+      "id": "5a5feef5",
+      "symbol": "GBPJPY=X",
+      "type": "PUT",
+      "entry_price": 208.14700317382812,
+      "exit_price": 208.38299560546875,
+      "entry_time": "2026-11-24T10:00:00+00:00",
+      "exit_time": "2026-11-24T12:00:00+00:00",
+      "win": false,
+      "pips": 23.6
+    },
+    {
+      "id": "7f79f4f8",
+      "symbol": "AUDJPY=X",
+      "type": "PUT",
+      "entry_price": 105.49299621582031,
+      "exit_price": 105.71800231933594,
+      "entry_time": "2026-11-24T10:00:00+00:00",
+      "exit_time": "2026-11-24T12:00:00+00:00",
+      "win": false,
+      "pips": 22.5
+    },
+    {
+      "id": "f834667b",
+      "symbol": "CADJPY=X",
+      "type": "PUT",
+      "entry_price": 111.05899810791016,
+      "exit_price": 111.13899993896484,
+      "entry_time": "2026-11-24T10:00:00+00:00",
+      "exit_time": "2026-11-24T12:00:00+00:00",
+      "win": false,
+      "pips": 8.0
+    },
+    {
+      "id": "eb2e52c8",
+      "symbol": "CHFJPY=X",
+      "type": "PUT",
+      "entry_price": 189.5590057373047,
+      "exit_price": 189.76699829101562,
+      "entry_time": "2026-11-24T10:00:00+00:00",
+      "exit_time": "2026-11-24T12:00:00+00:00",
+      "win": false,
+      "pips": 20.8
     }
   ],
   "daily_counter_date": "2026-11-24",
-  "daily_signal_count": 7,
+  "daily_signal_count": 10,
   "last_daily_report": "2026-11-23",
   "last_weekly_report": "2026-W47",
   "last_monthly_report": "2026-10"
