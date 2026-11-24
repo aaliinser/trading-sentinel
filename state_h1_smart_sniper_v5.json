@@ -1,14 +1,23 @@
 {
   "frozen_pairs": {
-    "NZDUSD=X": "2026-11-24T14:00:00+00:00"
+    "AUDUSD=X": "2026-11-24T15:00:00+00:00",
+    "AUDJPY=X": "2026-11-24T15:00:00+00:00"
   },
   "open_trades": [
     {
-      "id": "5212813e",
-      "symbol": "NZDUSD=X",
+      "id": "7ea7fe1b",
+      "symbol": "AUDUSD=X",
       "type": "PUT",
-      "entry_price": 0.5472255945205688,
-      "entry_time": "2026-11-24T12:00:00+00:00",
+      "entry_price": 0.6640987992286682,
+      "entry_time": "2026-11-24T13:00:00+00:00",
+      "signal_sent": true
+    },
+    {
+      "id": "5332e0cc",
+      "symbol": "AUDJPY=X",
+      "type": "PUT",
+      "entry_price": 105.62100219726562,
+      "entry_time": "2026-11-24T13:00:00+00:00",
       "signal_sent": true
     }
   ],
@@ -1530,10 +1539,21 @@
       "exit_time": "2026-11-24T13:00:00+00:00",
       "win": false,
       "pips": 4.9
+    },
+    {
+      "id": "5212813e",
+      "symbol": "NZDUSD=X",
+      "type": "PUT",
+      "entry_price": 0.5472255945205688,
+      "exit_price": 0.5471656918525696,
+      "entry_time": "2026-11-24T12:00:00+00:00",
+      "exit_time": "2026-11-24T14:00:00+00:00",
+      "win": true,
+      "pips": 0.6
     }
   ],
   "daily_counter_date": "2026-11-24",
-  "daily_signal_count": 11,
+  "daily_signal_count": 13,
   "last_daily_report": "2026-11-23",
   "last_weekly_report": "2026-W47",
   "last_monthly_report": "2026-10"
