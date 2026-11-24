@@ -1,6 +1,71 @@
 {
-  "frozen_pairs": {},
-  "open_trades": [],
+  "frozen_pairs": {
+    "AUDUSD=X": "2026-11-24T17:00:00+00:00",
+    "USDCAD=X": "2026-11-24T17:00:00+00:00",
+    "NZDUSD=X": "2026-11-24T17:00:00+00:00",
+    "GBPJPY=X": "2026-11-24T17:00:00+00:00",
+    "AUDJPY=X": "2026-11-24T17:00:00+00:00",
+    "CADJPY=X": "2026-11-24T17:00:00+00:00",
+    "EURAUD=X": "2026-11-24T17:00:00+00:00"
+  },
+  "open_trades": [
+    {
+      "id": "9d9791e5",
+      "symbol": "AUDUSD=X",
+      "type": "PUT",
+      "entry_price": 0.6639224886894226,
+      "entry_time": "2026-11-24T15:00:00+00:00",
+      "signal_sent": true
+    },
+    {
+      "id": "471e429b",
+      "symbol": "USDCAD=X",
+      "type": "CALL",
+      "entry_price": 1.4311200380325317,
+      "entry_time": "2026-11-24T15:00:00+00:00",
+      "signal_sent": true
+    },
+    {
+      "id": "968f0677",
+      "symbol": "NZDUSD=X",
+      "type": "PUT",
+      "entry_price": 0.5482155680656433,
+      "entry_time": "2026-11-24T15:00:00+00:00",
+      "signal_sent": true
+    },
+    {
+      "id": "7e7419ce",
+      "symbol": "GBPJPY=X",
+      "type": "PUT",
+      "entry_price": 208.64999389648438,
+      "entry_time": "2026-11-24T15:00:00+00:00",
+      "signal_sent": true
+    },
+    {
+      "id": "a8284a42",
+      "symbol": "AUDJPY=X",
+      "type": "PUT",
+      "entry_price": 105.58399963378906,
+      "entry_time": "2026-11-24T15:00:00+00:00",
+      "signal_sent": true
+    },
+    {
+      "id": "f1fd7078",
+      "symbol": "CADJPY=X",
+      "type": "PUT",
+      "entry_price": 111.15699768066406,
+      "entry_time": "2026-11-24T15:00:00+00:00",
+      "signal_sent": true
+    },
+    {
+      "id": "91a1d7c0",
+      "symbol": "EURAUD=X",
+      "type": "CALL",
+      "entry_price": 1.6528799533843994,
+      "entry_time": "2026-11-24T15:00:00+00:00",
+      "signal_sent": true
+    }
+  ],
   "trade_history": [
     {
       "id": "52b0c74f",
@@ -1555,7 +1620,7 @@
     }
   ],
   "daily_counter_date": "2026-11-24",
-  "daily_signal_count": 13,
+  "daily_signal_count": 20,
   "last_daily_report": "2026-11-23",
   "last_weekly_report": "2026-W47",
   "last_monthly_report": "2026-10"
