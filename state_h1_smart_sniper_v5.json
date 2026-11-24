@@ -1,32 +1,14 @@
 {
   "frozen_pairs": {
-    "EURUSD=X": "2026-11-24T13:00:00+00:00",
-    "USDCAD=X": "2026-11-24T13:00:00+00:00",
-    "USDCHF=X": "2026-11-24T13:00:00+00:00"
+    "NZDUSD=X": "2026-11-24T14:00:00+00:00"
   },
   "open_trades": [
     {
-      "id": "c1c79414",
-      "symbol": "EURUSD=X",
+      "id": "5212813e",
+      "symbol": "NZDUSD=X",
       "type": "PUT",
-      "entry_price": 1.0958904027938843,
-      "entry_time": "2026-11-24T11:00:00+00:00",
-      "signal_sent": true
-    },
-    {
-      "id": "86e4e9f0",
-      "symbol": "USDCAD=X",
-      "type": "CALL",
-      "entry_price": 1.4322999715805054,
-      "entry_time": "2026-11-24T11:00:00+00:00",
-      "signal_sent": true
-    },
-    {
-      "id": "a65913c8",
-      "symbol": "USDCHF=X",
-      "type": "CALL",
-      "entry_price": 0.8388500213623047,
-      "entry_time": "2026-11-24T11:00:00+00:00",
+      "entry_price": 0.5472255945205688,
+      "entry_time": "2026-11-24T12:00:00+00:00",
       "signal_sent": true
     }
   ],
@@ -1515,10 +1497,43 @@
       "exit_time": "2026-11-24T12:00:00+00:00",
       "win": false,
       "pips": 20.8
+    },
+    {
+      "id": "c1c79414",
+      "symbol": "EURUSD=X",
+      "type": "PUT",
+      "entry_price": 1.0958904027938843,
+      "exit_price": 1.0963709354400635,
+      "entry_time": "2026-11-24T11:00:00+00:00",
+      "exit_time": "2026-11-24T13:00:00+00:00",
+      "win": false,
+      "pips": 4.81
+    },
+    {
+      "id": "86e4e9f0",
+      "symbol": "USDCAD=X",
+      "type": "CALL",
+      "entry_price": 1.4322999715805054,
+      "exit_price": 1.4330899715423584,
+      "entry_time": "2026-11-24T11:00:00+00:00",
+      "exit_time": "2026-11-24T13:00:00+00:00",
+      "win": true,
+      "pips": 7.9
+    },
+    {
+      "id": "a65913c8",
+      "symbol": "USDCHF=X",
+      "type": "CALL",
+      "entry_price": 0.8388500213623047,
+      "exit_price": 0.8383600115776062,
+      "entry_time": "2026-11-24T11:00:00+00:00",
+      "exit_time": "2026-11-24T13:00:00+00:00",
+      "win": false,
+      "pips": 4.9
     }
   ],
   "daily_counter_date": "2026-11-24",
-  "daily_signal_count": 10,
+  "daily_signal_count": 11,
   "last_daily_report": "2026-11-23",
   "last_weekly_report": "2026-W47",
   "last_monthly_report": "2026-10"
