@@ -1,44 +1,6 @@
 {
-  "frozen_pairs": {
-    "GBPUSD=X": "2026-11-25T20:00:00+00:00",
-    "AUDUSD=X": "2026-11-25T20:00:00+00:00",
-    "NZDUSD=X": "2026-11-25T20:00:00+00:00",
-    "EURCHF=X": "2026-11-25T20:00:00+00:00"
-  },
-  "open_trades": [
-    {
-      "id": "e139a493",
-      "symbol": "GBPUSD=X",
-      "type": "PUT",
-      "entry_price": 1.3124909400939941,
-      "entry_time": "2026-11-25T18:00:00+00:00",
-      "signal_sent": true
-    },
-    {
-      "id": "51bc39f2",
-      "symbol": "AUDUSD=X",
-      "type": "PUT",
-      "entry_price": 0.6631739735603333,
-      "entry_time": "2026-11-25T18:00:00+00:00",
-      "signal_sent": true
-    },
-    {
-      "id": "abcf0ea9",
-      "symbol": "NZDUSD=X",
-      "type": "PUT",
-      "entry_price": 0.5492996573448181,
-      "entry_time": "2026-11-25T18:00:00+00:00",
-      "signal_sent": true
-    },
-    {
-      "id": "ebd9bc1f",
-      "symbol": "EURCHF=X",
-      "type": "PUT",
-      "entry_price": 0.9120000004768372,
-      "entry_time": "2026-11-25T18:00:00+00:00",
-      "signal_sent": true
-    }
-  ],
+  "frozen_pairs": {},
+  "open_trades": [],
   "trade_history": [
     {
       "id": "52b0c74f",
@@ -1733,6 +1695,50 @@
       "exit_time": "2026-11-25T17:00:00+00:00",
       "win": true,
       "pips": 2.0
+    },
+    {
+      "id": "e139a493",
+      "symbol": "GBPUSD=X",
+      "type": "PUT",
+      "entry_price": 1.3124909400939941,
+      "exit_price": 1.312301516532898,
+      "entry_time": "2026-11-25T18:00:00+00:00",
+      "exit_time": "2026-11-25T20:00:00+00:00",
+      "win": true,
+      "pips": 1.89
+    },
+    {
+      "id": "51bc39f2",
+      "symbol": "AUDUSD=X",
+      "type": "PUT",
+      "entry_price": 0.6631739735603333,
+      "exit_price": 0.6629980802536011,
+      "entry_time": "2026-11-25T18:00:00+00:00",
+      "exit_time": "2026-11-25T20:00:00+00:00",
+      "win": true,
+      "pips": 1.76
+    },
+    {
+      "id": "abcf0ea9",
+      "symbol": "NZDUSD=X",
+      "type": "PUT",
+      "entry_price": 0.5492996573448181,
+      "exit_price": 0.5490583777427673,
+      "entry_time": "2026-11-25T18:00:00+00:00",
+      "exit_time": "2026-11-25T20:00:00+00:00",
+      "win": true,
+      "pips": 2.41
+    },
+    {
+      "id": "ebd9bc1f",
+      "symbol": "EURCHF=X",
+      "type": "PUT",
+      "entry_price": 0.9120000004768372,
+      "exit_price": 0.9121800065040588,
+      "entry_time": "2026-11-25T18:00:00+00:00",
+      "exit_time": "2026-11-25T20:00:00+00:00",
+      "win": false,
+      "pips": 1.8
     }
   ],
   "daily_counter_date": "2026-11-25",
