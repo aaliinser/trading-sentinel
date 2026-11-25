@@ -1,6 +1,44 @@
 {
-  "frozen_pairs": {},
-  "open_trades": [],
+  "frozen_pairs": {
+    "GBPUSD=X": "2026-11-25T20:00:00+00:00",
+    "AUDUSD=X": "2026-11-25T20:00:00+00:00",
+    "NZDUSD=X": "2026-11-25T20:00:00+00:00",
+    "EURCHF=X": "2026-11-25T20:00:00+00:00"
+  },
+  "open_trades": [
+    {
+      "id": "e139a493",
+      "symbol": "GBPUSD=X",
+      "type": "PUT",
+      "entry_price": 1.3124909400939941,
+      "entry_time": "2026-11-25T18:00:00+00:00",
+      "signal_sent": true
+    },
+    {
+      "id": "51bc39f2",
+      "symbol": "AUDUSD=X",
+      "type": "PUT",
+      "entry_price": 0.6631739735603333,
+      "entry_time": "2026-11-25T18:00:00+00:00",
+      "signal_sent": true
+    },
+    {
+      "id": "abcf0ea9",
+      "symbol": "NZDUSD=X",
+      "type": "PUT",
+      "entry_price": 0.5492996573448181,
+      "entry_time": "2026-11-25T18:00:00+00:00",
+      "signal_sent": true
+    },
+    {
+      "id": "ebd9bc1f",
+      "symbol": "EURCHF=X",
+      "type": "PUT",
+      "entry_price": 0.9120000004768372,
+      "entry_time": "2026-11-25T18:00:00+00:00",
+      "signal_sent": true
+    }
+  ],
   "trade_history": [
     {
       "id": "52b0c74f",
@@ -1698,7 +1736,7 @@
     }
   ],
   "daily_counter_date": "2026-11-25",
-  "daily_signal_count": 4,
+  "daily_signal_count": 8,
   "last_daily_report": "2026-11-24",
   "last_weekly_report": "2026-W47",
   "last_monthly_report": "2026-10"
