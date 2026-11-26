@@ -1,17 +1,6 @@
 {
-  "frozen_pairs": {
-    "USDCAD=X": "2026-11-26T12:00:00+00:00"
-  },
-  "open_trades": [
-    {
-      "id": "333e2660",
-      "symbol": "USDCAD=X",
-      "type": "PUT",
-      "entry_price": 1.4222999811172485,
-      "entry_time": "2026-11-26T10:00:00+00:00",
-      "signal_sent": true
-    }
-  ],
+  "frozen_pairs": {},
+  "open_trades": [],
   "trade_history": [
     {
       "id": "52b0c74f",
@@ -1761,6 +1750,17 @@
       "exit_time": "2026-11-26T10:00:00+00:00",
       "win": false,
       "pips": 1.21
+    },
+    {
+      "id": "333e2660",
+      "symbol": "USDCAD=X",
+      "type": "PUT",
+      "entry_price": 1.4222999811172485,
+      "exit_price": 1.4231499433517456,
+      "entry_time": "2026-11-26T10:00:00+00:00",
+      "exit_time": "2026-11-26T12:00:00+00:00",
+      "win": false,
+      "pips": 8.5
     }
   ],
   "daily_counter_date": "2026-11-26",
