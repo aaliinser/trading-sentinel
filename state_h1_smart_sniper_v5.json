@@ -1,17 +1,6 @@
 {
-  "frozen_pairs": {
-    "EURUSD=X": "2026-11-26T10:00:00+00:00"
-  },
-  "open_trades": [
-    {
-      "id": "3c6aed40",
-      "symbol": "EURUSD=X",
-      "type": "PUT",
-      "entry_price": 1.0973334312438965,
-      "entry_time": "2026-11-26T08:00:00+00:00",
-      "signal_sent": true
-    }
-  ],
+  "frozen_pairs": {},
+  "open_trades": [],
   "trade_history": [
     {
       "id": "52b0c74f",
@@ -1750,6 +1739,17 @@
       "exit_time": "2026-11-25T20:00:00+00:00",
       "win": false,
       "pips": 1.8
+    },
+    {
+      "id": "3c6aed40",
+      "symbol": "EURUSD=X",
+      "type": "PUT",
+      "entry_price": 1.0973334312438965,
+      "exit_price": 1.0974539518356323,
+      "entry_time": "2026-11-26T08:00:00+00:00",
+      "exit_time": "2026-11-26T10:00:00+00:00",
+      "win": false,
+      "pips": 1.21
     }
   ],
   "daily_counter_date": "2026-11-26",
