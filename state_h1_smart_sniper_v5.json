@@ -1,6 +1,35 @@
 {
-  "frozen_pairs": {},
-  "open_trades": [],
+  "frozen_pairs": {
+    "EURCHF=X": "2026-11-27T11:00:00+00:00",
+    "CHFJPY=X": "2026-11-27T11:00:00+00:00",
+    "USDCHF=X": "2026-11-27T11:00:00+00:00"
+  },
+  "open_trades": [
+    {
+      "id": "a58d2180",
+      "symbol": "EURCHF=X",
+      "type": "PUT",
+      "entry_price": 0.9157999753952026,
+      "entry_time": "2026-11-27T09:00:00+00:00",
+      "signal_sent": true
+    },
+    {
+      "id": "2d0ea7c2",
+      "symbol": "CHFJPY=X",
+      "type": "CALL",
+      "entry_price": 190.88800048828125,
+      "entry_time": "2026-11-27T09:00:00+00:00",
+      "signal_sent": true
+    },
+    {
+      "id": "60383bad",
+      "symbol": "USDCHF=X",
+      "type": "PUT",
+      "entry_price": 0.8355200290679932,
+      "entry_time": "2026-11-27T09:00:00+00:00",
+      "signal_sent": true
+    }
+  ],
   "trade_history": [
     {
       "id": "52b0c74f",
@@ -1874,7 +1903,7 @@
     }
   ],
   "daily_counter_date": "2026-11-27",
-  "daily_signal_count": 1,
+  "daily_signal_count": 4,
   "last_daily_report": "2026-11-26",
   "last_weekly_report": "2026-W47",
   "last_monthly_report": "2026-10"
