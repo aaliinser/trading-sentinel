@@ -1,35 +1,6 @@
 {
-  "frozen_pairs": {
-    "EURCHF=X": "2026-11-27T11:00:00+00:00",
-    "CHFJPY=X": "2026-11-27T11:00:00+00:00",
-    "USDCHF=X": "2026-11-27T11:00:00+00:00"
-  },
-  "open_trades": [
-    {
-      "id": "a58d2180",
-      "symbol": "EURCHF=X",
-      "type": "PUT",
-      "entry_price": 0.9157999753952026,
-      "entry_time": "2026-11-27T09:00:00+00:00",
-      "signal_sent": true
-    },
-    {
-      "id": "2d0ea7c2",
-      "symbol": "CHFJPY=X",
-      "type": "CALL",
-      "entry_price": 190.88800048828125,
-      "entry_time": "2026-11-27T09:00:00+00:00",
-      "signal_sent": true
-    },
-    {
-      "id": "60383bad",
-      "symbol": "USDCHF=X",
-      "type": "PUT",
-      "entry_price": 0.8355200290679932,
-      "entry_time": "2026-11-27T09:00:00+00:00",
-      "signal_sent": true
-    }
-  ],
+  "frozen_pairs": {},
+  "open_trades": [],
   "trade_history": [
     {
       "id": "52b0c74f",
@@ -1900,6 +1871,39 @@
       "exit_time": "2026-11-27T08:00:00+00:00",
       "win": true,
       "pips": 1.33
+    },
+    {
+      "id": "a58d2180",
+      "symbol": "EURCHF=X",
+      "type": "PUT",
+      "entry_price": 0.9157999753952026,
+      "exit_price": 0.9160599708557129,
+      "entry_time": "2026-11-27T09:00:00+00:00",
+      "exit_time": "2026-11-27T11:00:00+00:00",
+      "win": false,
+      "pips": 2.6
+    },
+    {
+      "id": "2d0ea7c2",
+      "symbol": "CHFJPY=X",
+      "type": "CALL",
+      "entry_price": 190.88800048828125,
+      "exit_price": 190.89300537109375,
+      "entry_time": "2026-11-27T09:00:00+00:00",
+      "exit_time": "2026-11-27T11:00:00+00:00",
+      "win": true,
+      "pips": 0.5
+    },
+    {
+      "id": "60383bad",
+      "symbol": "USDCHF=X",
+      "type": "PUT",
+      "entry_price": 0.8355200290679932,
+      "exit_price": 0.8355000019073486,
+      "entry_time": "2026-11-27T09:00:00+00:00",
+      "exit_time": "2026-11-27T11:00:00+00:00",
+      "win": true,
+      "pips": 0.2
     }
   ],
   "daily_counter_date": "2026-11-27",
