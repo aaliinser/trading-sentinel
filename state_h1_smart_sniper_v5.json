@@ -1,17 +1,6 @@
 {
-  "frozen_pairs": {
-    "AUDUSD=X": "2026-11-27T08:00:00+00:00"
-  },
-  "open_trades": [
-    {
-      "id": "77115380",
-      "symbol": "AUDUSD=X",
-      "type": "PUT",
-      "entry_price": 0.6672003865242004,
-      "entry_time": "2026-11-27T06:00:00+00:00",
-      "signal_sent": true
-    }
-  ],
+  "frozen_pairs": {},
+  "open_trades": [],
   "trade_history": [
     {
       "id": "52b0c74f",
@@ -1871,6 +1860,17 @@
       "exit_time": "2026-11-26T18:00:00+00:00",
       "win": false,
       "pips": 3.4
+    },
+    {
+      "id": "77115380",
+      "symbol": "AUDUSD=X",
+      "type": "PUT",
+      "entry_price": 0.6672003865242004,
+      "exit_price": 0.6670669317245483,
+      "entry_time": "2026-11-27T06:00:00+00:00",
+      "exit_time": "2026-11-27T08:00:00+00:00",
+      "win": true,
+      "pips": 1.33
     }
   ],
   "daily_counter_date": "2026-11-27",
