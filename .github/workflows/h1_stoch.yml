@@ -1,4 +1,4 @@
-name: H1 Stochastic Bot (State Persistent v6.3 - Smart Sniper)
+name: M5 RSI14 Sniper Bot (State Persistent v1.0)
 
 on:
   repository_dispatch:
@@ -9,13 +9,13 @@ permissions:
   contents: write
 
 concurrency:
-  group: h1-smart-sniper-state-group
+  group: m5-rsi14-sniper-state-group
   cancel-in-progress: false
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 5
 
     steps:
       - name: Checkout repository
@@ -35,7 +35,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install pandas numpy yfinance requests tzdata
 
-      - name: Clean Hidden Chars & Run H1 Bot Script
+      - name: Clean Hidden Chars & Run M5 Bot Script
         env:
           PYTHONUNBUFFERED: "1"
           TZ: "Asia/Hebron"
@@ -51,14 +51,14 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          if [ -f "state_h1_smart_sniper_v5.json" ]; then
-            git add state_h1_smart_sniper_v5.json
+          if [ -f "state_m5_rsi14_v1.json" ]; then
+            git add state_m5_rsi14_v1.json
           fi
 
           if git diff --cached --quiet; then
             echo ">>> State unchanged. No commit needed."
           else
-            git commit -m "chore: auto-persist H1 bot state [skip ci]"
+            git commit -m "chore: auto-persist M5 bot state [skip ci]"
             for i in 1 2 3; do
               git pull --rebase --autostash origin ${{ github.ref_name }} && git push origin HEAD:${{ github.ref_name }} && break
               echo ">>> Push retry $i..."
