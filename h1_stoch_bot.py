@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-H1 Stochastic Ultimate Bot - v6.3 (Smart Sniper · Report Catch-Up Edition)
-الإصلاح الوحيد في v6.3: محرك استدراك التقارير (يومي / أسبوعي / شهري).
-لم يُمسّ: الاستراتيجية، المؤشرات، شروط الدخول، منطق الحسم، بناء الرسائل.
+M5 RSI14 Sniper Bot - v1.0 (RSI14_25 | All | 10m | Report Catch-Up Edition)
+يعمل داخل نفس الملف h1_stoch_bot.py باستراتيجية الـ 5 دقائق المعتمدة:
+BB(20, 2.0) + Wilder RSI(14) <25/>75 + Wilder ADX(14) <25 | 28 زوجاً | 24 ساعة | انتهاء 10 دقائق.
 """
 import os
 import sys
@@ -107,37 +107,39 @@ def build_drift_text(live_px, signal_px: float, symbol: str, signal_type: str):
 
 
 # ═══════════════════════════════════════════════
-# 1. الإعدادات العامة
+# 1. الإعدادات العامة (استراتيجية الـ 5 دقائق)
 # ═══════════════════════════════════════════════
-BOT_NAME = "H1_Smart_Sniper_V6_3"
-STATE_FILE = "state_h1_smart_sniper_v5.json"
+BOT_NAME = "M5_RSI14_Sniper_V1"
+STATE_FILE = "state_m5_rsi14_v1.json"
 LOG_LEVEL = logging.INFO
 
+# جميع أزواج الفوركس الـ 28 (شامل أزواج الين JPY)
 TRADING_SYMBOLS = [
-    "EURUSD=X", "GBPUSD=X", "USDJPY=X", "AUDUSD=X",
-    "USDCAD=X", "NZDUSD=X", "EURGBP=X", "EURCHF=X",
-    "GBPJPY=X", "AUDJPY=X", "CADJPY=X", "CHFJPY=X",
-    "EURAUD=X", "USDCHF=X", "AUDNZD=X", "GBPCAD=X"
+    "EURUSD=X", "GBPUSD=X", "AUDUSD=X", "USDCAD=X", "NZDUSD=X", "USDCHF=X",
+    "EURGBP=X", "EURCHF=X", "EURAUD=X", "EURCAD=X", "EURNZD=X",
+    "GBPAUD=X", "GBPCHF=X", "GBPCAD=X", "GBPNZD=X",
+    "AUDCAD=X", "AUDCHF=X", "AUDNZD=X",
+    "CADCHF=X", "NZDCAD=X", "NZDCHF=X",
+    "USDJPY=X", "EURJPY=X", "GBPJPY=X", "AUDJPY=X", "CADJPY=X", "CHFJPY=X", "NZDJPY=X",
 ]
 
-K_PERIOD = 5
-D_PERIOD = 3
-OVERBOUGHT_ZONE = 85
-OVERSOLD_ZONE = 15
-EMA_PERIOD = 200
+CANDLE_INTERVAL = "5m"
+CANDLE_PERIOD = "5d"
+CANDLE_DURATION_MINUTES = 5
+TRADE_DURATION_MINUTES = 10      # مدة الصفقة: 10 دقائق (شمعتين)
+FREEZE_DURATION_MINUTES = 0      # بدون تجميد إضافي بعد انتهاء الصفقة (تجميد فقط طوال الـ 10 دقائق)
 
-MIN_DISTANCE_PCT = 0.05
-MIN_BODY_RATIO = 0.30
-
-NIGHT_START_HOUR_GAZA = 0
-NIGHT_END_HOUR_GAZA = 9
-
-FREEZE_DURATION_MINUTES = 60
-TRADE_DURATION_MINUTES = 60
+BB_PERIOD = 20
+BB_STD = 2.0
+RSI_PERIOD = 14
+RSI_OVERSOLD = 25.0
+RSI_OVERBOUGHT = 75.0
+ADX_PERIOD = 14
+ADX_MAX = 25.0
 
 RISK_PER_TRADE_USD = 10.0
 PAYOUT_RATE = 0.85
-DRIFT_WARN_PIPS = 8.0
+DRIFT_WARN_PIPS = 3.0            # تنبيه الانجراف المناسب لفريم 5 دقائق
 
 TG_MAX_LEN = 3800
 HISTORY_CAP = 20000
@@ -333,10 +335,13 @@ class StateManager:
             return False
 
     def freeze_pair(self, symbol: str, base_time: datetime, duration_minutes: int = FREEZE_DURATION_MINUTES):
-        release_time = base_time + timedelta(minutes=TRADE_DURATION_MINUTES + duration_minutes)
+        # تجميد الزوج حتى انتهاء الصفقة (إغلاق شمعة الإشارة + 10 دقائق)
+        release_time = base_time + timedelta(
+            minutes=CANDLE_DURATION_MINUTES + TRADE_DURATION_MINUTES + duration_minutes
+        )
         now_utc = datetime.now(timezone.utc)
         if release_time <= now_utc:
-            release_time = now_utc + timedelta(minutes=duration_minutes)
+            release_time = now_utc + timedelta(minutes=TRADE_DURATION_MINUTES)
         self.data["frozen_pairs"][symbol] = release_time.isoformat()
         self.save()
 
@@ -356,10 +361,10 @@ class StateManager:
 
 
 # ═══════════════════════════════════════════════
-# 3. محرك البيانات والاستراتيجية (لم يُمس)
+# 3. محرك البيانات والاستراتيجية (M5 RSI14_25 | 10m)
 # ═══════════════════════════════════════════════
 
-def get_data(symbol: str, interval: str = "1h", period: str = "60d"):
+def get_data(symbol: str, interval: str = CANDLE_INTERVAL, period: str = CANDLE_PERIOD):
     df = None
     for attempt in range(3):
         try:
@@ -367,9 +372,9 @@ def get_data(symbol: str, interval: str = "1h", period: str = "60d"):
             df = ticker.history(period=period, interval=interval, auto_adjust=False, actions=False)
             if df is not None and not df.empty:
                 break
-            time.sleep(3)
+            time.sleep(2)
         except Exception:
-            time.sleep(3)
+            time.sleep(2)
 
     if df is None or df.empty:
         return None
@@ -380,24 +385,51 @@ def get_data(symbol: str, interval: str = "1h", period: str = "60d"):
         df.index = pd.to_datetime(df.index, utc=True)
         df = df[~df.index.duplicated()].sort_index().dropna()
 
+        # استبعاد الشمعة الحالية غير المغلقة على فريم 5 دقائق
         now_utc = pd.Timestamp.now(tz="UTC")
-        while not df.empty and (df.index[-1] + pd.Timedelta(minutes=TRADE_DURATION_MINUTES)) > now_utc:
+        while not df.empty and (df.index[-1] + pd.Timedelta(minutes=CANDLE_DURATION_MINUTES)) > now_utc:
             df = df.iloc[:-1]
 
-        if len(df) < EMA_PERIOD + 10:
+        if len(df) < 35:
             return None
 
         c = df['Close']
+        h = df['High']
+        l = df['Low']
 
-        lowest_low = df['Low'].rolling(window=K_PERIOD).min()
-        highest_high = df['High'].rolling(window=K_PERIOD).max()
-        denom = (highest_high - lowest_low).replace(0, np.nan)
-        raw_k = 100 * ((c - lowest_low) / denom)
-        raw_k = raw_k.ffill().fillna(50)
+        # 1. Bollinger Bands (20, 2.0)
+        sma20 = c.rolling(window=BB_PERIOD, min_periods=BB_PERIOD).mean()
+        std20 = c.rolling(window=BB_PERIOD, min_periods=BB_PERIOD).std()
+        df['BB_UPPER'] = sma20 + (BB_STD * std20)
+        df['BB_LOWER'] = sma20 - (BB_STD * std20)
 
-        df['STOCH_K'] = raw_k
-        df['STOCH_D'] = raw_k.rolling(window=D_PERIOD).mean().ffill()
-        df['EMA_200'] = c.ewm(span=EMA_PERIOD, adjust=False).mean()
+        # 2. Wilder RSI (14)
+        delta = c.diff()
+        gain = delta.clip(lower=0.0)
+        loss = -delta.clip(upper=0.0)
+        avg_gain = gain.ewm(alpha=1.0 / RSI_PERIOD, min_periods=RSI_PERIOD, adjust=False).mean()
+        avg_loss = loss.ewm(alpha=1.0 / RSI_PERIOD, min_periods=RSI_PERIOD, adjust=False).mean()
+        rs = avg_gain / avg_loss.replace(0.0, np.nan)
+        df['RSI14'] = 100.0 - (100.0 / (1.0 + rs))
+
+        # 3. Wilder ADX (14)
+        tr = pd.concat([
+            h - l,
+            (h - c.shift(1)).abs(),
+            (l - c.shift(1)).abs(),
+        ], axis=1).max(axis=1)
+        atr = tr.ewm(alpha=1.0 / ADX_PERIOD, min_periods=ADX_PERIOD, adjust=False).mean()
+
+        up_move = h - h.shift(1)
+        down_move = l.shift(1) - l
+        plus_dm = np.where((up_move > down_move) & (up_move > 0), up_move, 0.0)
+        minus_dm = np.where((down_move > up_move) & (down_move > 0), down_move, 0.0)
+
+        atr_safe = atr.replace(0.0, np.nan)
+        plus_di = 100.0 * pd.Series(plus_dm, index=df.index).ewm(alpha=1.0 / ADX_PERIOD, min_periods=ADX_PERIOD, adjust=False).mean() / atr_safe
+        minus_di = 100.0 * pd.Series(minus_dm, index=df.index).ewm(alpha=1.0 / ADX_PERIOD, min_periods=ADX_PERIOD, adjust=False).mean() / atr_safe
+        dx = 100.0 * (plus_di - minus_di).abs() / (plus_di + minus_di).replace(0.0, np.nan)
+        df['ADX14'] = dx.ewm(alpha=1.0 / ADX_PERIOD, min_periods=ADX_PERIOD, adjust=False).mean()
 
         df.dropna(inplace=True)
         return df
@@ -412,55 +444,46 @@ def analyze_market_smart(symbol: str):
         return None
 
     curr = df.iloc[-1]
-    prev = df.iloc[-2]
     candle_time = df.index[-1]
 
-    price = float(curr['Close'])
-    ema_200 = float(curr['EMA_200'])
-    k_curr = float(curr['STOCH_K'])
-    d_curr = float(curr['STOCH_D'])
-    k_prev = float(prev['STOCH_K'])
-    d_prev = float(prev['STOCH_D'])
-
-    high_curr = float(curr['High'])
-    low_curr = float(curr['Low'])
-    open_curr = float(curr['Open'])
-
-    distance_pct = abs(price - ema_200) / price * 100 if price else 0.0
-    if distance_pct < MIN_DISTANCE_PCT:
+    # تجنب إرسال إشارات قديمة جداً (إذا أغلقت الشمعة منذ أكثر من 8 دقائق)
+    candle_close_time = candle_time + timedelta(minutes=CANDLE_DURATION_MINUTES)
+    if (datetime.now(timezone.utc) - candle_close_time) > timedelta(minutes=8):
         return None
 
-    candle_range = high_curr - low_curr
-    body_size = abs(price - open_curr)
+    open_p = float(curr['Open'])
+    close_p = float(curr['Close'])
+    bb_u = float(curr['BB_UPPER'])
+    bb_l = float(curr['BB_LOWER'])
+    rsi14 = float(curr['RSI14'])
+    adx14 = float(curr['ADX14'])
 
-    if candle_range == 0 or (body_size / candle_range) < MIN_BODY_RATIO:
+    if adx14 >= ADX_MAX:
         return None
 
     signal_type = None
-
-    if (price > ema_200 and
-        k_prev <= d_prev and k_curr > d_curr and
-        min(k_prev, k_curr) < OVERSOLD_ZONE):
+    if close_p < open_p and close_p < bb_l and rsi14 < RSI_OVERSOLD:
         signal_type = "CALL"
-
-    elif (price < ema_200 and
-          k_prev >= d_prev and k_curr < d_curr and
-          max(k_prev, k_curr) > OVERBOUGHT_ZONE):
+    elif close_p > open_p and close_p > bb_u and rsi14 > RSI_OVERBOUGHT:
         signal_type = "PUT"
 
     if signal_type is None:
         return None
 
     return {
-        "symbol": symbol, "type": signal_type, "price": price,
-        "time": candle_time, "ema_200": ema_200,
-        "k_val": k_curr, "d_val": d_curr,
-        "distance_pct": distance_pct
+        "symbol": symbol,
+        "type": signal_type,
+        "price": close_p,
+        "time": candle_time,
+        "rsi14": rsi14,
+        "adx14": adx14,
+        "bb_upper": bb_u,
+        "bb_lower": bb_l,
     }
 
 
 # ═══════════════════════════════════════════════
-# 4. نظام الحسم التلقائي (لم يُمس)
+# 4. نظام الحسم التلقائي (انتهاء 10 دقائق = شمعتين 5m)
 # ═══════════════════════════════════════════════
 
 def resolve_pending_trades(sm: StateManager):
@@ -482,12 +505,14 @@ def resolve_pending_trades(sm: StateManager):
             if entry_dt_raw.tzinfo is None:
                 entry_dt_raw = entry_dt_raw.replace(tzinfo=timezone.utc)
 
-            actual_entry_close_time = entry_dt_raw + timedelta(minutes=TRADE_DURATION_MINUTES)
+            # إغلاق شمعة الإشارة = وقت الدخول الفعلي
+            actual_entry_close_time = entry_dt_raw + timedelta(minutes=CANDLE_DURATION_MINUTES)
+            # وقت انتهاء الصفقة = وقت الدخول + 10 دقائق
             expected_exit_close_time = actual_entry_close_time + timedelta(minutes=TRADE_DURATION_MINUTES)
-            check_ready_time = expected_exit_close_time + timedelta(minutes=1)
+            check_ready_time = expected_exit_close_time + timedelta(seconds=30)
 
             if now_utc < check_ready_time:
-                mins_left = int((check_ready_time - now_utc).total_seconds() // 60)
+                mins_left = max(1, int((check_ready_time - now_utc).total_seconds() // 60))
                 log.info(f"Trade {trade.get('symbol')} ({trade_id}) still active. ~{mins_left}m remaining.")
                 remaining_trades.append(trade)
                 continue
@@ -507,11 +532,12 @@ def resolve_pending_trades(sm: StateManager):
                 remaining_trades.append(trade)
                 continue
 
-            target_candle_start = actual_entry_close_time
+            # الشمعة التي تغلق عند expected_exit_close_time تبدأ قبلها بـ 5 دقائق
+            target_candle_start = expected_exit_close_time - timedelta(minutes=CANDLE_DURATION_MINUTES)
 
             mask = (
-                (df_exit_full.index >= target_candle_start - timedelta(minutes=5)) &
-                (df_exit_full.index <= target_candle_start + timedelta(minutes=5))
+                (df_exit_full.index >= target_candle_start - timedelta(minutes=1)) &
+                (df_exit_full.index <= target_candle_start + timedelta(minutes=1))
             )
             matching_candles = df_exit_full[mask]
 
@@ -523,7 +549,7 @@ def resolve_pending_trades(sm: StateManager):
                     exit_px = float(future_candles.iloc[0]['Close'])
                     log.info(f"Used first available candle >= {target_candle_start} for {sym}.")
                 else:
-                    if now_utc < expected_exit_close_time + timedelta(hours=4):
+                    if now_utc < expected_exit_close_time + timedelta(minutes=30):
                         log.warning(
                             f"Exit candle ({target_candle_start.strftime('%H:%M')} UTC) not published yet for {sym}. "
                             f"Waiting for next pulse..."
@@ -549,10 +575,10 @@ def resolve_pending_trades(sm: StateManager):
             exit_gaza_str = to_gaza(expected_exit_close_time).strftime('%H:%M')
 
             result_msg = (
-                f"{emoji} *| نتيجة H1 SMART:* `{format_pair(sym)}`\n\n"
+                f"{emoji} *| نتيجة استراتيجية الـ 5 دقائق:* `{format_pair(sym)}`\n\n"
                 f"📈 *الاتجاه:* `{dr}`\n"
                 f"⏰ *وقت الدخول:* `{actual_entry_close_time.strftime('%H:%M')} UTC` (`{entry_gaza_str}` غزة)\n"
-                f"🏁 *وقت الإغلاق:* `{expected_exit_close_time.strftime('%H:%M')} UTC` (`{exit_gaza_str}` غزة)\n"
+                f"🏁 *وقت الإغلاق (10م):* `{expected_exit_close_time.strftime('%H:%M')} UTC` (`{exit_gaza_str}` غزة)\n"
                 f"💰 *سعر الدخول:* `{entry_px:.5f}`\n"
                 f"💸 *سعر الإغلاق:* `{exit_px:.5f}`\n"
                 f"📊 *الفارق:* `{pips_diff:+.1f} نقطة (Pips)` {status_text}"
@@ -642,7 +668,7 @@ def _stats(trades: list) -> dict:
 
 
 def _wr_emoji(wr: float) -> str:
-    return "🟢 ممتاز" if wr >= 60 else ("🟡 جيد" if wr >= 45 else "🔴 يحتاج مراجعة")
+    return "🟢 ممتاز" if wr >= 60 else ("🟡 جيد" if wr >= 54 else "🔴 يحتاج مراجعة")
 
 
 def _pair_analysis(trades: list) -> dict:
@@ -725,7 +751,7 @@ def build_first_trade_section(trades: list, show_details: bool = False) -> str:
 
     lines = [
         "*🎯 استراتيجية الصفقة الأولى يومياً:*",
-        "ℹ️ _محاكاة: صفقة واحدة كل يوم — أول إشارة نهاراً ثم إغلاق المنصة._",
+        "ℹ️ _محاكاة: صفقة واحدة كل يوم — أول إشارة ثم إغلاق المنصة._",
         f"• *عدد الأيام المتداولة:* `{s['total']}` يوم",
         f"• *النتيجة:* ✅ `{s['wins']}` رابحة | ❌ `{s['losses']}` خاسرة | ⚪ `{s['voids']}` تعادل",
         f"• *نسبة النجاح:* {_wr_emoji(s['wr'])} `{s['wr']:.1f}%`",
@@ -753,7 +779,7 @@ def build_first_trade_section(trades: list, show_details: bool = False) -> str:
 
 def build_report_message(trades_list: list, report_type: str, period_name: str,
                          include_first: bool = True, show_details: bool = False) -> str:
-    header = (f"*📊 التقرير {report_type} — بوت H1 Smart Sniper*\n"
+    header = (f"*📊 التقرير {report_type} — بوت استراتيجية الـ 5 دقائق (RSI14_25)*\n"
               f"🗓 *الفترة:* `{period_name}`\n\n")
 
     if not trades_list:
@@ -814,7 +840,6 @@ def build_report_message(trades_list: list, report_type: str, period_name: str,
 
 
 def _pending_days(last_daily: str, today_local: datetime, max_back: int = MAX_DAILY_CATCHUP) -> list:
-    """كل يوم من (آخر تقرير مُرسل + 1) حتى الأمس — بترتيب زمني تصاعدي."""
     today_local = _strip_tz(today_local)
     yesterday = (today_local - timedelta(days=1)).replace(
         hour=0, minute=0, second=0, microsecond=0
@@ -840,7 +865,6 @@ def _pending_days(last_daily: str, today_local: datetime, max_back: int = MAX_DA
 
 
 def _pending_weeks(last_weekly: str, today_local: datetime, max_back: int = MAX_WEEKLY_CATCHUP) -> list:
-    """كل أسبوع مكتمل (الاثنين→الأحد) لم يُرسل تقريره — يعمل في أي يوم."""
     today_local = _strip_tz(today_local)
     this_monday = (today_local - timedelta(days=today_local.weekday())).replace(
         hour=0, minute=0, second=0, microsecond=0
@@ -867,7 +891,6 @@ def _pending_weeks(last_weekly: str, today_local: datetime, max_back: int = MAX_
 
 
 def _pending_months(last_monthly: str, today_local: datetime, max_back: int = MAX_MONTHLY_CATCHUP) -> list:
-    """كل شهر منصرم لم يُرسل تقريره — يعمل في أي يوم من الشهر."""
     today_local = _strip_tz(today_local)
     first_this = today_local.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     cur = first_this - timedelta(days=1)
@@ -891,13 +914,6 @@ def _pending_months(last_monthly: str, today_local: datetime, max_back: int = MA
 
 
 def generate_advanced_reports(sm: StateManager):
-    """
-    محرك تقارير باستدراك ذاتي:
-    • اليومي: كل يوم فائت حتى الأمس.
-    • الأسبوعي: أي يوم من الأسبوع.
-    • الشهري: أي يوم من الشهر.
-    • القفل يتقدّم فقط بعد نجاح الإرسال، والمتبقي يُستدرَك في النبضة التالية.
-    """
     local_now = get_palestine_now_safe()
     history_raw = sm.data.get("trade_history", [])
 
@@ -916,10 +932,8 @@ def generate_advanced_reports(sm: StateManager):
 
     sent_count = 0
 
-    # ─── 1. التقارير اليومية الفائتة ───
     for day_str in _pending_days(sm.data.get("last_daily_report", ""), local_now):
         if sent_count >= MAX_REPORTS_PER_RUN:
-            log.info("Report budget reached; remaining daily reports next pulse.")
             break
         try:
             d = datetime.strptime(day_str, "%Y-%m-%d")
@@ -931,18 +945,14 @@ def generate_advanced_reports(sm: StateManager):
                 sm.data["last_daily_report"] = day_str
                 sm.save()
                 sent_count += 1
-                log.info(f"Daily report CONFIRMED & locked for {day_str} ({len(recs)} trades)")
             else:
-                log.error(f"Daily report send FAILED for {day_str}; will retry next pulse.")
                 break
         except Exception as e:
             log.error(f"Daily report error for {day_str}: {e}", exc_info=True)
             break
 
-    # ─── 2. التقارير الأسبوعية الفائتة ───
     for wid, a, b in _pending_weeks(sm.data.get("last_weekly_report", ""), local_now):
         if sent_count >= MAX_REPORTS_PER_RUN:
-            log.info("Report budget reached; remaining weekly reports next pulse.")
             break
         try:
             ds = datetime.strptime(a, "%Y-%m-%d")
@@ -957,18 +967,14 @@ def generate_advanced_reports(sm: StateManager):
                 sm.data["last_weekly_report"] = wid
                 sm.save()
                 sent_count += 1
-                log.info(f"Weekly report CONFIRMED & locked for {wid} ({len(recs)} trades)")
             else:
-                log.error(f"Weekly report send FAILED for {wid}; will retry next pulse.")
                 break
         except Exception as e:
             log.error(f"Weekly report error for {wid}: {e}", exc_info=True)
             break
 
-    # ─── 3. التقارير الشهرية الفائتة ───
     for mid, a, b in _pending_months(sm.data.get("last_monthly_report", ""), local_now):
         if sent_count >= MAX_REPORTS_PER_RUN:
-            log.info("Report budget reached; remaining monthly reports next pulse.")
             break
         try:
             de = datetime.strptime(b, "%Y-%m-%d")
@@ -980,9 +986,7 @@ def generate_advanced_reports(sm: StateManager):
                 sm.data["last_monthly_report"] = mid
                 sm.save()
                 sent_count += 1
-                log.info(f"Monthly report CONFIRMED & locked for {mid} ({len(recs)} trades)")
             else:
-                log.error(f"Monthly report send FAILED for {mid}; will retry next pulse.")
                 break
         except Exception as e:
             log.error(f"Monthly report error for {mid}: {e}", exc_info=True)
@@ -999,7 +1003,7 @@ def generate_advanced_reports(sm: StateManager):
 def main():
     local_now = get_palestine_now_safe()
     log.info("=" * 60)
-    log.info(f"STARTING {BOT_NAME} | PRODUCTION MODE (Asia/Hebron)")
+    log.info(f"STARTING {BOT_NAME} | M5 -> 10m (28 Pairs | 24/5)")
     log.info(
         f"UTC Time: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} | "
         f"Gaza/Hebron Time: {local_now.strftime('%Y-%m-%d %H:%M:%S')}"
@@ -1020,11 +1024,6 @@ def main():
         log.info("Weekend. Skipping new signals.")
         return
 
-    current_gaza_hour = local_now.hour
-    if NIGHT_START_HOUR_GAZA <= current_gaza_hour < NIGHT_END_HOUR_GAZA:
-        log.info(f"Inside Night Ban Window ({current_gaza_hour:02d}:xx Gaza Time). Skipping new signals.")
-        return
-
     signals_found = 0
 
     for sym in TRADING_SYMBOLS:
@@ -1040,7 +1039,9 @@ def main():
         arrival_time_gaza = get_palestine_now_safe().strftime("%H:%M")
 
         arrow = "🟢 CALL (صعود)" if result['type'] == "CALL" else "🔴 PUT (هبوط)"
-        expiry_time = (result['time'] + timedelta(minutes=TRADE_DURATION_MINUTES * 2)).strftime("%H:%M")
+        entry_close_utc = result['time'] + timedelta(minutes=CANDLE_DURATION_MINUTES)
+        expiry_utc = entry_close_utc + timedelta(minutes=TRADE_DURATION_MINUTES)
+        expiry_gaza = to_gaza(expiry_utc).strftime("%H:%M")
 
         live_px = get_live_price(sym)
         drift_txt, drift_val = build_drift_text(live_px, result['price'], sym, result['type'])
@@ -1050,21 +1051,20 @@ def main():
             log.info(f"{sym} {result['type']} | live price unavailable (display only)")
 
         msg = (
-            f"*⚡ إشارة H1 SMART SNIPER #{signal_num}*\n\n"
+            f"*⚡ إشارة استراتيجية الـ 5 دقائق #{signal_num}*\n\n"
             f"📊 *الزوج:* `{format_pair(result['symbol'])}`\n"
             f"📈 *الاتجاه:* {arrow}\n"
-            f"💰 *سعر الإشارة (إغلاق الشمعة):* `{result['price']:.5f}`\n"
+            f"💰 *سعر الإشارة (إغلاق 5m):* `{result['price']:.5f}`\n"
             f"⚡ *السعر الآن:* {drift_txt}\n\n"
-            f"*تحليل القوة:*\n"
-            f"✅ تقاطع سريع (K={result['k_val']:.1f})\n"
-            f"✅ اتجاه مؤكد بعيداً عن EMA200 ({result['distance_pct']:.2f}%)\n"
-            f"✅ زخم شمعة واضح\n\n"
-            f"⏱️ *التعليمات:*\n"
-            f"✅ ادخل فوراً (فرصة إحصائية عالية)\n\n"
-            f"⌛ *انتهاء الصفقة:* {expiry_time} UTC\n"
+            f"*تحليل الشروط (RSI14_25):*\n"
+            f"✅ تشبّع حاد: `RSI(14) = {result['rsi14']:.1f}`\n"
+            f"✅ سوق عرضي مناسب: `ADX(14) = {result['adx14']:.1f} < 25`\n"
+            f"✅ إغلاق خارج `BB(20, 2.0)` مع تأكيد لون الشمعة\n\n"
+            f"⏱️ *مدة الصفقة:* `10 دقائق` (شمعتين)\n"
+            f"⌛ *انتهاء الصفقة:* `{expiry_utc.strftime('%H:%M')} UTC` (`{expiry_gaza}` غزة)\n"
             f"💰 *شرط الـ payout:* 85% فأعلى فقط\n\n"
             f"🕒 *وقت وصول الإشارة:* {arrival_time_gaza} (غزة)\n"
-            f"📝 *ملاحظة:* استراتيجية H1 Fast Stoch + Momentum Filter"
+            f"📝 *الاستراتيجية:* M5 RSI14_25 | All | 10m"
         )
 
         if send_telegram(msg):
@@ -1080,7 +1080,7 @@ def main():
             log.info(f"Signal Sent & Saved to open_trades: {sym} {result['type']} (#{signal_num})")
         else:
             log.error(f"Failed to send signal for {sym}")
-        time.sleep(1.5)
+        time.sleep(1.0)
 
     if signals_found == 0:
         log.info("No valid setups. Market quiet or filters active.")
